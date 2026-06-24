@@ -1,0 +1,47 @@
+<!--pages/queue/queue.wxml-->
+<view class="brand-page queue-page">
+  <view class="queue-hero fire-gradient">
+    <view class="hero-label">TABLE QUEUE</view>
+    <view class="hero-title">排队取号</view>
+    <view class="hero-subtitle">旺季先取号，到号再入座</view>
+  </view>
+
+  <view class="form-card">
+    <view class="section-title">选择人数</view>
+    <view class="people-grid">
+      <view
+        class="people-card {{selectedIndex === index ? 'active' : ''}}"
+        wx:for="{{peopleOptions}}"
+        wx:key="table_type"
+        bindtap="selectPeople"
+        data-index="{{index}}">
+        {{item.label}}
+      </view>
+    </view>
+
+    <view class="field-group">
+      <view class="field-label">昵称</view>
+      <input class="field-input" placeholder="用于店员叫号" value="{{nickname}}" bindinput="onNicknameInput" />
+    </view>
+    <view class="field-group">
+      <view class="field-label">手机号</view>
+      <input class="field-input" type="number" maxlength="11" placeholder="可选，方便过号联系" value="{{phone}}" bindinput="onPhoneInput" />
+    </view>
+
+    <view class="primary-action" bindtap="takeNumber">{{submitting ? '取号中...' : '立即取号'}}</view>
+  </view>
+
+  <view class="result-card" wx:if="{{queueResult}}">
+    <view class="result-label">当前号码</view>
+    <view class="queue-no">{{queueResult.queue_no}}</view>
+    <view class="result-row">
+      <text>当前状态</text>
+      <text>{{queueResult.statusText || '等待中'}}</text>
+    </view>
+    <view class="result-row">
+      <text>前方等待桌数</text>
+      <text>{{queueResult.waitingBefore}}</text>
+    </view>
+    <view class="result-tip">请留意叫号，过号后需联系店员恢复</view>
+  </view>
+</view>

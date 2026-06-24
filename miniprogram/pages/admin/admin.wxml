@@ -1,0 +1,88 @@
+<!--pages/admin/admin.wxml-->
+<view class="admin-page">
+  <view class="admin-hero fire-gradient">
+    <view class="hero-kicker">ADMIN</view>
+    <view class="hero-title">张南火盆烧烤后台</view>
+    <view class="hero-subtitle">堂食、户外、排队、预约统一管理</view>
+  </view>
+
+  <view class="menu-section">
+    <view class="section-title">核心业务</view>
+    <view class="admin-grid">
+      <view class="admin-menu-card hot" bindtap="goToOrder">
+        <view class="card-title">订单管理</view>
+        <view class="card-desc">堂食、户外、付款状态</view>
+      </view>
+      <view class="admin-menu-card" bindtap="goToQueue">
+        <view class="card-title">排队管理</view>
+        <view class="card-desc">叫号、过号、入座</view>
+      </view>
+      <view class="admin-menu-card" bindtap="goToReservation">
+        <view class="card-title">预约管理</view>
+        <view class="card-desc">确认预约、到店记录</view>
+      </view>
+      <view class="admin-menu-card" bindtap="goToOutdoor">
+        <view class="card-title">户外订单</view>
+        <view class="card-desc">备货、自取、付款确认</view>
+      </view>
+      <view class="admin-menu-card" bindtap="goToGrill">
+        <view class="card-title">烤架管理</view>
+        <view class="card-desc">新增、启用、停用</view>
+      </view>
+      <view class="admin-menu-card" bindtap="goToDish">
+        <view class="card-title">菜品管理</view>
+        <view class="card-desc">分类、菜品、上下架</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="menu-section">
+    <view class="section-title">店铺设置</view>
+    <view class="admin-grid">
+      <view class="admin-menu-card" bindtap="goToUser">
+        <view class="card-title">会员管理</view>
+        <view class="card-desc">余额与用户信息</view>
+      </view>
+      <view class="admin-menu-card" bindtap="goToRechargeOptions">
+        <view class="card-title">充值选项</view>
+        <view class="card-desc">余额充值套餐</view>
+      </view>
+      <view class="admin-menu-card" bindtap="goToNotice">
+        <view class="card-title">公告管理</view>
+        <view class="card-desc">首页通知内容</view>
+      </view>
+      <view class="admin-menu-card" bindtap="goToTableCode">
+        <view class="card-title">桌码管理</view>
+        <view class="card-desc">堂食桌码生成</view>
+      </view>
+      <view class="admin-menu-card" bindtap="goToShopInfo">
+        <view class="card-title">店铺设置</view>
+        <view class="card-desc">基础资料维护</view>
+      </view>
+      <view class="admin-menu-card" bindtap="goToPrinter">
+        <view class="card-title">打印机管理</view>
+        <view class="card-desc">小票打印配置</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="bottom-actions">
+    <view class="ghost-action" bindtap="showChangePassword">修改密码</view>
+    <view class="ghost-action" bindtap="goBack">返回</view>
+  </view>
+
+  <view class="modal-mask" wx:if="{{showPasswordModal}}" catchtap="closePasswordModal">
+    <view class="modal-dialog" catchtap="stopPropagation">
+      <view class="modal-title">修改密码</view>
+      <view class="modal-content">
+        <input class="password-input" type="password" placeholder="请输入原密码" value="{{oldPassword}}" bindinput="onOldPasswordInput" />
+        <input class="password-input" type="password" placeholder="请输入新密码（至少6位）" value="{{newPassword}}" bindinput="onNewPasswordInput" />
+        <input class="password-input" type="password" placeholder="请再次输入新密码" value="{{confirmPassword}}" bindinput="onConfirmPasswordInput" />
+      </view>
+      <view class="modal-footer">
+        <view class="modal-btn cancel" bindtap="closePasswordModal">取消</view>
+        <view class="modal-btn confirm" bindtap="confirmChangePassword">确认</view>
+      </view>
+    </view>
+  </view>
+</view>

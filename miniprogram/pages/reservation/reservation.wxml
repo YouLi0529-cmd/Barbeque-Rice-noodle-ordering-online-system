@@ -1,0 +1,46 @@
+<!--pages/reservation/reservation.wxml-->
+<view class="brand-page reservation-page">
+  <view class="reservation-hero fire-gradient">
+    <view class="hero-label">BOOKING</view>
+    <view class="hero-title">预约订座</view>
+    <view class="hero-subtitle">提前预约，朋友聚餐更稳</view>
+  </view>
+
+  <view class="form-card">
+    <view class="field-group">
+      <view class="field-label">日期</view>
+      <picker mode="date" value="{{reserveDate}}" bindchange="onDateChange">
+        <view class="picker-field">{{reserveDate || '请选择日期'}}</view>
+      </picker>
+    </view>
+
+    <view class="field-group">
+      <view class="field-label">时间</view>
+      <picker mode="selector" range="{{timeOptions}}" bindchange="onTimeChange">
+        <view class="picker-field">{{reserveTime || '请选择时间'}}</view>
+      </picker>
+    </view>
+
+    <view class="field-group">
+      <view class="field-label">人数</view>
+      <input class="field-input" type="number" placeholder="请输入用餐人数" value="{{peopleCount}}" bindinput="onPeopleInput" />
+    </view>
+
+    <view class="field-group">
+      <view class="field-label">姓名</view>
+      <input class="field-input" placeholder="请填写联系人姓名" value="{{name}}" bindinput="onNameInput" />
+    </view>
+
+    <view class="field-group">
+      <view class="field-label">手机号</view>
+      <input class="field-input" type="number" maxlength="11" placeholder="请填写手机号" value="{{phone}}" bindinput="onPhoneInput" />
+    </view>
+
+    <view class="field-group">
+      <view class="field-label">备注</view>
+      <textarea class="remark-input" maxlength="120" placeholder="可填写口味、儿童座椅等需求" value="{{remark}}" bindinput="onRemarkInput"></textarea>
+    </view>
+
+    <view class="primary-action" bindtap="submitReservation">{{submitting ? '提交中...' : '提交预约'}}</view>
+  </view>
+</view>

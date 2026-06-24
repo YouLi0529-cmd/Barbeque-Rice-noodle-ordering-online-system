@@ -1,0 +1,30 @@
+<!--pages/admin/reservation/reservation.wxml-->
+<view class="admin-list-page">
+  <view class="top-bar fire-gradient">
+    <view class="top-title">预约管理</view>
+    <view class="top-desc">确认预约、标记到店、取消预约</view>
+  </view>
+
+  <view class="toolbar">
+    <view class="refresh-btn" bindtap="loadList">刷新</view>
+  </view>
+
+  <view class="reservation-card" wx:for="{{list}}" wx:key="_id">
+    <view class="card-head">
+      <view>
+        <view class="guest-name">{{item.name}} · {{item.people_count}}人</view>
+        <view class="reserve-time">{{item.reserve_date}} {{item.reserve_time}}</view>
+      </view>
+      <view class="status-tag">{{item.statusText}}</view>
+    </view>
+    <view class="contact-line">{{item.phone}}</view>
+    <view class="remark" wx:if="{{item.remark}}">{{item.remark}}</view>
+    <view class="actions">
+      <view class="action-btn primary" bindtap="operate" data-action="confirm" data-id="{{item._id}}">确认</view>
+      <view class="action-btn" bindtap="operate" data-action="arrive" data-id="{{item._id}}">到店</view>
+      <view class="action-btn danger" bindtap="operate" data-action="cancel" data-id="{{item._id}}">取消</view>
+    </view>
+  </view>
+
+  <van-empty wx:if="{{list.length === 0}}" description="暂无预约记录" />
+</view>

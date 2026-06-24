@@ -1,0 +1,82 @@
+<!--pages/outdoor/outdoor.wxml-->
+<view class="brand-page outdoor-page">
+  <view class="outdoor-hero fire-gradient">
+    <view class="hero-label">OUTDOOR BBQ</view>
+    <view class="hero-title">户外烧烤</view>
+    <view class="hero-subtitle">免费烤架 · 点菜后自取</view>
+    <view class="point-tag">当前点位：{{outdoorPointId}}</view>
+  </view>
+
+  <view class="section">
+    <view class="section-head">
+      <view>
+        <view class="section-title">选择烤架</view>
+        <view class="section-note">选择一个可用烤架后再提交订单</view>
+      </view>
+    </view>
+    <view class="grill-grid">
+      <view
+        class="grill-card {{selectedGrill && selectedGrill._id === item._id ? 'active' : ''}}"
+        wx:for="{{grills}}"
+        wx:key="_id"
+        bindtap="selectGrill"
+        data-grill="{{item}}">
+        <view class="grill-name">{{item.name}}</view>
+        <view class="grill-status">可用</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section menu-section">
+    <view class="section-head">
+      <view>
+        <view class="section-title">火盆菜单</view>
+        <view class="section-note">商家备货完成后到取餐处自取</view>
+      </view>
+    </view>
+
+    <view class="menu-layout">
+      <scroll-view class="category-side" scroll-y enhanced show-scrollbar="{{false}}">
+        <view
+          class="category-item {{currentMenuId === item._id ? 'active' : ''}}"
+          wx:for="{{menuList}}"
+          wx:key="_id"
+          bindtap="switchMenu"
+          data-id="{{item._id}}">
+          {{item.name}}
+        </view>
+      </scroll-view>
+
+      <scroll-view class="dish-list" scroll-y enhanced show-scrollbar="{{false}}">
+        <view class="dish-card" wx:for="{{goodsList}}" wx:key="_id">
+          <image class="dish-image" wx:if="{{item.image}}" src="{{item.image}}" mode="aspectFill"></image>
+          <view class="dish-image empty" wx:else>{{item.name}}</view>
+          <view class="dish-info">
+            <view class="dish-name">{{item.name}}</view>
+            <view class="dish-desc">{{item.description || item.desc || '适合炭火慢烤'}}</view>
+            <view class="dish-bottom">
+              <view class="dish-price">¥{{item.price}}</view>
+              <view class="dish-actions">
+                <view class="count-btn minus" wx:if="{{item.cartCount > 0}}" bindtap="reduceDish" data-goods="{{item}}">-</view>
+                <view class="dish-count" wx:if="{{item.cartCount > 0}}">{{item.cartCount}}</view>
+                <view class="count-btn plus" bindtap="addDish" data-goods="{{item}}">+</view>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <van-empty wx:if="{{goodsList.length === 0}}" description="暂无菜品" />
+      </scroll-view>
+    </view>
+  </view>
+
+  <view class="cart-bar">
+    <view class="cart-summary">
+      <view class="cart-count">已选 {{cartCount}} 份</view>
+      <view class="cart-price">¥{{cartTotalPriceText}}</view>
+    </view>
+    <view class="submit-btn {{cartCount > 0 ? 'active' : ''}}" bindtap="submitOutdoorOrder">
+      {{submitting ? '提交中...' : '提交户外订单'}}
+    </view>
+  </view>
+</view>

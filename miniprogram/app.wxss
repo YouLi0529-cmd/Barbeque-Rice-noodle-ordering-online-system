@@ -1,0 +1,163 @@
+/**app.wxss**/
+@import './components/colorui/animation.wxss';
+@import './components/colorui/icon.wxss';
+@import './components/colorui/main.wxss';
+
+/* 张南火盆烧烤品牌基础样式 */
+page {
+  --theme-color: #F26A2E;
+  --theme-gradient: linear-gradient(135deg, #F26A2E 0%, #C9341C 100%);
+  --brand-charcoal: #1E1714;
+  --brand-orange: #F26A2E;
+  --brand-red: #C9341C;
+  --brand-cream: #FFF7EC;
+  --brand-brown: #3A2418;
+  --brand-card: #FFF2DD;
+  background-color: #FFF7EC;
+  color: #3A2418;
+}
+
+.container {
+  padding: 20rpx;
+}
+
+/* 主题按钮 */
+.btn-theme {
+  background: linear-gradient(135deg, #e54d42 0%, #f37370 100%);
+  color: white;
+  border: none;
+  border-radius: 50rpx;
+  padding: 20rpx 40rpx;
+}
+
+.btn-theme-plain {
+  background: white;
+  color: #e54d42;
+  border: 2rpx solid #e54d42;
+  border-radius: 50rpx;
+  padding: 20rpx 40rpx;
+}
+
+/* 卡片样式 */
+.card {
+  background: #FFF2DD;
+  border-radius: 24rpx;
+  padding: 30rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 12rpx 30rpx rgba(58, 36, 24, 0.08);
+}
+
+.brand-page {
+  min-height: 100vh;
+  background: #FFF7EC;
+  color: #3A2418;
+}
+
+.fire-gradient {
+  background:
+    radial-gradient(circle at 20% 20%, rgba(242, 106, 46, 0.42), transparent 32%),
+    radial-gradient(circle at 88% 12%, rgba(201, 52, 28, 0.34), transparent 30%),
+    linear-gradient(135deg, #1E1714 0%, #3A2418 58%, #C9341C 100%);
+}
+
+.primary-btn {
+  min-height: 78rpx;
+  padding: 0 34rpx;
+  border-radius: 999rpx;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #F26A2E 0%, #C9341C 100%);
+  color: #fff;
+  font-size: 28rpx;
+  font-weight: 700;
+  box-shadow: 0 12rpx 24rpx rgba(201, 52, 28, 0.22);
+}
+
+.ghost-btn {
+  min-height: 76rpx;
+  padding: 0 34rpx;
+  border-radius: 999rpx;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #F26A2E;
+  font-size: 28rpx;
+  font-weight: 700;
+  border: 2rpx solid rgba(242, 106, 46, 0.55);
+  background: rgba(255, 247, 236, 0.72);
+}
+
+.section-title {
+  color: #1E1714;
+  font-size: 34rpx;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.admin-card {
+  background: #241A16;
+  color: #FFF7EC;
+  border-radius: 20rpx;
+  padding: 28rpx;
+  box-shadow: 0 12rpx 26rpx rgba(30, 23, 20, 0.16);
+}
+
+.status-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  background: rgba(242, 106, 46, 0.14);
+  color: #C9341C;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+/* 标签 */
+.tag-red {
+  background: #e54d42;
+  color: white;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+  font-size: 22rpx;
+}
+
+/* 价格样式 */
+.price {
+  color: #e54d42;
+  font-weight: bold;
+}
+
+.price-symbol {
+  font-size: 24rpx;
+}
+
+.price-num {
+  font-size: 36rpx;
+}
+
+/* 徽章 */
+.badge {
+  position: absolute;
+  top: -10rpx;
+  right: -10rpx;
+  background: #e54d42;
+  color: white;
+  border-radius: 50%;
+  min-width: 36rpx;
+  height: 36rpx;
+  line-height: 36rpx;
+  text-align: center;
+  font-size: 20rpx;
+  padding: 0 8rpx;
+}
+
+/* 分割线 */
+.divider {
+  height: 1rpx;
+  background: #f0f0f0;
+  margin: 20rpx 0;
+}

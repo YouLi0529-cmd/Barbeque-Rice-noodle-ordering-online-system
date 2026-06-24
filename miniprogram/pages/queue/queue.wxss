@@ -1,0 +1,131 @@
+/* pages/queue/queue.wxss */
+.queue-page {
+  padding-bottom: 50rpx;
+}
+
+.queue-hero {
+  padding: 54rpx 30rpx 44rpx;
+  color: #FFF7EC;
+  border-radius: 0 0 40rpx 40rpx;
+}
+
+.hero-label {
+  color: rgba(255, 247, 236, 0.58);
+  font-size: 21rpx;
+  font-weight: 900;
+}
+
+.hero-title {
+  margin-top: 20rpx;
+  font-size: 56rpx;
+  font-weight: 900;
+}
+
+.hero-subtitle {
+  margin-top: 12rpx;
+  color: rgba(255, 247, 236, 0.82);
+  font-size: 28rpx;
+}
+
+.form-card,
+.result-card {
+  margin: 28rpx 24rpx 0;
+  padding: 28rpx;
+  border-radius: 28rpx;
+  background: #FFF2DD;
+  box-shadow: 0 12rpx 30rpx rgba(58, 36, 24, 0.08);
+}
+
+.people-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+
+.people-card {
+  height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 22rpx;
+  color: #3A2418;
+  background: #FFF7EC;
+  font-size: 30rpx;
+  font-weight: 900;
+  border: 2rpx solid transparent;
+}
+
+.people-card.active {
+  color: #FFF7EC;
+  background: #1E1714;
+  border-color: #F26A2E;
+}
+
+.field-group {
+  margin-top: 26rpx;
+}
+
+.field-label {
+  margin-bottom: 12rpx;
+  color: #1E1714;
+  font-size: 27rpx;
+  font-weight: 900;
+}
+
+.field-input {
+  height: 88rpx;
+  padding: 0 22rpx;
+  border-radius: 20rpx;
+  color: #3A2418;
+  background: #FFF7EC;
+  font-size: 27rpx;
+  box-sizing: border-box;
+}
+
+.primary-action {
+  margin-top: 32rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  text-align: center;
+  border-radius: 999rpx;
+  color: #fff;
+  background: linear-gradient(135deg, #F26A2E 0%, #C9341C 100%);
+  font-size: 30rpx;
+  font-weight: 900;
+  box-shadow: 0 12rpx 24rpx rgba(201, 52, 28, 0.18);
+}
+
+.result-card {
+  background: #1E1714;
+  color: #FFF7EC;
+}
+
+.result-label {
+  color: rgba(255, 247, 236, 0.58);
+  font-size: 24rpx;
+}
+
+.queue-no {
+  margin-top: 8rpx;
+  color: #F26A2E;
+  font-size: 76rpx;
+  line-height: 1.1;
+  font-weight: 900;
+}
+
+.result-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid rgba(255, 247, 236, 0.12);
+  color: rgba(255, 247, 236, 0.84);
+  font-size: 27rpx;
+}
+
+.result-tip {
+  margin-top: 22rpx;
+  color: #FFD8BC;
+  font-size: 25rpx;
+  line-height: 1.5;
+}

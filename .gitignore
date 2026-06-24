@@ -1,0 +1,9 @@
+node_modules/
+**/node_modules/
+
+project.private.config.json
+
+*.log
+*.zip
+.DS_Store
+Thumbs.db

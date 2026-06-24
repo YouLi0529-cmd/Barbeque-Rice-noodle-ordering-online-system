@@ -1,0 +1,104 @@
+/* pages/admin/grill/grill.wxss */
+.admin-list-page {
+  min-height: 100vh;
+  padding-bottom: 40rpx;
+  background: #FFF7EC;
+}
+
+.top-bar {
+  padding: 52rpx 30rpx 38rpx;
+  color: #FFF7EC;
+  border-radius: 0 0 36rpx 36rpx;
+}
+
+.top-title {
+  font-size: 44rpx;
+  font-weight: 900;
+}
+
+.top-desc {
+  margin-top: 10rpx;
+  color: rgba(255, 247, 236, 0.78);
+  font-size: 25rpx;
+}
+
+.create-card,
+.grill-card {
+  margin: 24rpx 24rpx 0;
+  padding: 26rpx;
+  border-radius: 26rpx;
+  background: #FFF2DD;
+  box-shadow: 0 12rpx 28rpx rgba(58, 36, 24, 0.08);
+}
+
+.field-label {
+  color: #1E1714;
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+.create-row {
+  margin-top: 16rpx;
+  display: flex;
+  gap: 14rpx;
+}
+
+.name-input {
+  flex: 1;
+  height: 82rpx;
+  padding: 0 20rpx;
+  border-radius: 18rpx;
+  color: #3A2418;
+  background: #FFF7EC;
+  font-size: 26rpx;
+  box-sizing: border-box;
+}
+
+.create-btn,
+.default-btn,
+.toggle-btn {
+  height: 82rpx;
+  line-height: 82rpx;
+  text-align: center;
+  border-radius: 999rpx;
+  font-size: 25rpx;
+  font-weight: 900;
+}
+
+.create-btn {
+  width: 128rpx;
+  color: #fff;
+  background: linear-gradient(135deg, #F26A2E 0%, #C9341C 100%);
+}
+
+.default-btn {
+  margin-top: 18rpx;
+  color: #F26A2E;
+  border: 2rpx solid rgba(242, 106, 46, 0.42);
+}
+
+.grill-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.grill-name {
+  color: #1E1714;
+  font-size: 31rpx;
+  font-weight: 900;
+}
+
+.grill-meta {
+  margin-top: 8rpx;
+  color: rgba(58, 36, 24, 0.62);
+  font-size: 24rpx;
+}
+
+.toggle-btn {
+  flex-shrink: 0;
+  width: 128rpx;
+  color: #3A2418;
+  background: #FFF7EC;
+}

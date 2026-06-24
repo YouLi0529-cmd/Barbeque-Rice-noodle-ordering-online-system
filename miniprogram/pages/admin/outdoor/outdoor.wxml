@@ -1,0 +1,57 @@
+<!--pages/admin/outdoor/outdoor.wxml-->
+<view class="admin-list-page">
+  <view class="top-bar fire-gradient">
+    <view class="top-title">户外订单</view>
+    <view class="top-desc">户外烧烤订单 · 烤架 · 顾客自取</view>
+  </view>
+
+  <view class="toolbar">
+    <view class="refresh-btn" bindtap="loadList">刷新</view>
+  </view>
+
+  <view class="order-card" wx:for="{{list}}" wx:key="_id">
+    <view class="card-head">
+      <view>
+        <view class="order-title">户外烧烤订单</view>
+        <view class="order-meta">烤架 {{item.grillName || '未选择'}} · 顾客自取</view>
+      </view>
+      <view class="status-tag">{{item.statusText}}</view>
+    </view>
+
+    <view class="goods-list">
+      <view class="goods-row" wx:for="{{item.goods}}" wx:for-item="goods" wx:key="dishId">
+        <text class="goods-name">{{goods.dishName || goods.goodsName}}</text>
+        <text class="goods-count">x{{goods.count}}</text>
+      </view>
+    </view>
+
+    <view class="info-row">
+      <text>总价</text>
+      <text>¥{{item.finalPriceText}}</text>
+    </view>
+    <view class="info-row">
+      <text>付款</text>
+      <text>{{item.payText}}</text>
+    </view>
+    <view class="info-row">
+      <text>时间</text>
+      <text>{{item.createTimeText}}</text>
+    </view>
+
+    <view class="actions">
+      <view
+        class="action-btn"
+        wx:for="{{statusActions}}"
+        wx:for-item="action"
+        wx:key="status"
+        bindtap="updateStatus"
+        data-id="{{item._id}}"
+        data-status="{{action.status}}">
+        {{action.label}}
+      </view>
+      <view class="action-btn primary" bindtap="confirmPaid" data-id="{{item._id}}">确认已付款</view>
+    </view>
+  </view>
+
+  <van-empty wx:if="{{list.length === 0}}" description="暂无户外订单" />
+</view>
