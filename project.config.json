@@ -76,8 +76,8 @@
     "ignore": [],
     "include": []
   },
-  "appid": "touristappid",
+  "appid": "wx62f32034d874ae93",
   "cloud": true,
-  "libVersion": "3.8.0",
+  "libVersion": "3.12.1",
   "simulatorPluginLibVersion": {}
 }

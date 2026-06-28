@@ -1,8 +1,27 @@
-<!--pages/admin/order/order.wxml-->
+<!-- pages/admin/order/order.wxml -->
 <view class="order-admin-page">
   <view class="top-bar fire-gradient">
     <view class="top-title">订单管理</view>
-    <view class="top-desc">堂食、户外、付款状态统一查看</view>
+    <view class="top-desc">前台确认点单、发送厨房、线下收款分开处理</view>
+  </view>
+
+  <view class="summary-row">
+    <view class="summary-item urgent">
+      <text class="summary-num">{{summary.frontdesk}}</text>
+      <text class="summary-label">待确认</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-num">{{summary.unpaid}}</text>
+      <text class="summary-label">未付款</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-num">{{summary.kitchen}}</text>
+      <text class="summary-label">厨房中</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-num">{{summary.ready}}</text>
+      <text class="summary-label">待交付</text>
+    </view>
   </view>
 
   <view class="filter-panel">
@@ -20,60 +39,82 @@
     </scroll-view>
     <view class="refresh-line">
       <view class="refresh-btn" bindtap="refreshOrders">刷新</view>
-      <text>每 10 秒自动刷新</text>
+      <text>每 8 秒自动刷新 {{lastRefreshText}}</text>
     </view>
   </view>
 
-  <view class="order-card" wx:for="{{orders}}" wx:key="_id">
+  <view
+    class="order-card {{item.isUrgent ? 'urgent-card' : ''}}"
+    wx:for="{{orders}}"
+    wx:key="_id"
+    bindtap="openOrderDetail"
+    data-index="{{index}}">
     <view class="card-head">
-      <view>
+      <view class="head-main">
         <view class="order-kind">{{item.orderKindText}}</view>
         <view class="order-time">{{item.createTimeText}}</view>
       </view>
-      <view class="status-tag">{{item.statusText}}</view>
+      <view class="status-tag {{item.statusClass}}">{{item.statusText}}</view>
     </view>
 
-    <view class="recharge-info" wx:if="{{item.type === 'recharge'}}">
-      <view class="info-row">
-        <text>充值金额</text>
-        <text>¥{{item.amount}}</text>
-      </view>
-      <view class="info-row">
-        <text>赠送金额</text>
-        <text>¥{{item.giveAmount}}</text>
-      </view>
-      <view class="info-row">
-        <text>到账金额</text>
-        <text>¥{{item.totalGet}}</text>
-      </view>
-    </view>
-
-    <view class="goods-list" wx:if="{{item.type === 'order'}}">
+    <view class="goods-list">
       <view class="goods-row" wx:for="{{item.goods}}" wx:for-item="goods" wx:key="dishId">
         <text class="goods-name">{{goods.dishName || goods.goodsName}}</text>
         <text class="goods-count">x{{goods.count}}</text>
       </view>
     </view>
 
+    <view class="remark-box" wx:if="{{item.frontDeskRemarkText}}">
+      <text class="remark-label">前台备注</text>
+      <text class="remark-text">{{item.frontDeskRemarkText}}</text>
+    </view>
+
     <view class="meta-grid">
       <view class="meta-item">
-        <text class="meta-label">实付</text>
-        <text class="meta-value">¥{{item.finalPriceText}}</text>
+        <text class="meta-label">金额</text>
+        <text class="meta-value">￥{{item.finalPriceText}}</text>
       </view>
-      <view class="meta-item">
+      <view class="meta-item {{item.payText === '未付款' ? 'meta-warning' : ''}}">
         <text class="meta-label">付款</text>
         <text class="meta-value">{{item.payText}}</text>
       </view>
-      <view class="meta-item" wx:if="{{item.printStatus}}">
-        <text class="meta-label">小票</text>
-        <text class="meta-value">{{item.printStatus === 2 ? '已打印' : item.printStatus === 3 ? '打印失败' : '未打印'}}</text>
+      <view class="meta-item {{item.printText === '打印失败' ? 'meta-warning' : ''}}">
+        <text class="meta-label">厨房</text>
+        <text class="meta-value">{{item.printText}}</text>
       </view>
     </view>
 
-    <view class="actions" wx:if="{{item.type === 'order' && !(item.pay_status || item.payStatus)}}">
-      <view class="action-btn primary" bindtap="confirmOfflinePaid" data-id="{{item._id}}">确认线下已付款</view>
+    <view class="actions">
+      <view
+        class="action-btn {{action.type}}"
+        wx:for="{{item.actions}}"
+        wx:for-item="action"
+        wx:key="label"
+        catchtap="onActionTap"
+        data-index="{{index}}"
+        data-action="{{action.action}}"
+        data-status="{{action.status}}"
+        data-label="{{action.label}}">
+        {{action.label}}
+      </view>
     </view>
   </view>
 
   <van-empty wx:if="{{orders.length === 0}}" description="暂无订单数据" />
+
+  <view class="modal-mask" wx:if="{{showRemarkModal}}" catchtap="closeRemarkModal">
+    <view class="remark-dialog" catchtap="stopPropagation">
+      <view class="modal-title">前台备注</view>
+      <textarea
+        class="remark-input"
+        maxlength="120"
+        placeholder="例如：少辣、先上肉、等人齐再烤"
+        value="{{frontDeskRemark}}"
+        bindinput="onRemarkInput"></textarea>
+      <view class="modal-footer">
+        <view class="modal-btn cancel" bindtap="closeRemarkModal">取消</view>
+        <view class="modal-btn confirm" bindtap="saveRemark">保存</view>
+      </view>
+    </view>
+  </view>
 </view>
