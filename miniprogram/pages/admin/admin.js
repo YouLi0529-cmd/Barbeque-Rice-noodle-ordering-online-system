@@ -39,13 +39,6 @@ Page({
     })
   },
 
-  // 充值选项管理
-  goToRechargeOptions() {
-    wx.navigateTo({
-      url: '/pages/admin/rechargeOptions/rechargeOptions'
-    })
-  },
-
   // 公告管理
   goToNotice() {
     wx.navigateTo({

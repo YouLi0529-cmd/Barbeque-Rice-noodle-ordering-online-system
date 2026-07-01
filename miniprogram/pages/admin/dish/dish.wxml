@@ -52,7 +52,6 @@
           <view class="dish-info">
             <view class="dish-name">{{item.name}}</view>
             <view class="dish-desc">{{item.description || '暂无描述'}}</view>
-            <text class="miandan-tip" wx:if="{{item.canUseMiandan === true}}">可参与免单活动</text>
             <view class="dish-price">
               <text class="price-current">¥{{item.price}}</text>
               <text class="price-original" wx:if="{{item.originalPrice > 0}}">¥{{item.originalPrice}}</text>
@@ -172,14 +171,6 @@
             bindinput="onDishSortInput"
           />
         </view>
-        <view class="form-item">
-          <view class="form-label">
-            可参与免单
-            <text class="label-tip">（用户可以用免单次数点这一份菜品）</text>
-          </view>
-          <switch checked="{{currentDish.canUseMiandan}}" bindchange="onCanUseMiandanChange" color="#e54d42"/>
-        </view>
-
         <!-- 标签管理 -->
         <view class="form-item">
           <view class="form-label">

@@ -15,7 +15,7 @@ App({
       }
 
       wx.cloud.init({
-        env: '填写你的环境ID',
+        env: 'cloud1-d9gapt5hcfe195b65',
         traceUser: true,
       })
       
@@ -42,14 +42,9 @@ App({
       
       // 重写onLoad方法
       pageConfig.onLoad = async function(options) {
-        wx.showLoading({
-          title: '加载中...',
-        });
-        
         try {
           // 等待openid获取完成
           await that.checkOpenid();
-          wx.hideLoading();
           
           // 调用原来的onLoad
           if (originalOnLoad) {
@@ -57,7 +52,6 @@ App({
           }
         } catch (error) {
           console.error('获取用户信息失败', error);
-          wx.hideLoading();
           wx.showToast({
             title: '加载失败，请重试',
             icon: 'none'
@@ -102,21 +96,10 @@ App({
         const queryRes = await db.collection('user').where({
           _openid: openid
         }).get();
-        if (queryRes.data && queryRes.data.length === 0) {
-          // 创建新用户记录
-          const addRes = await db.collection('user').add({
-            data: {
-              balance: 0,
-              createTime: new Date().getTime(),
-            }
-          });
-          // 获取创建的用户信息
-          const newUserRes = await db.collection('user').doc(addRes._id).get()
-          if (newUserRes.data) {
-            that.globalData.userInfo = newUserRes.data
-          }
-        }else{
+        if (queryRes.data && queryRes.data.length > 0) {
           that.globalData.userInfo = queryRes.data[0]
+        } else {
+          that.globalData.userInfo = null
         }
         
         // 标记openid已准备好

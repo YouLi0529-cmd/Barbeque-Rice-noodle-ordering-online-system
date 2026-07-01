@@ -1,53 +1,34 @@
 <!--pages/myhome/myhome.wxml-->
 <view class="page">
+  <view class="my-page-header" style="padding-top: {{statusBarHeight}}px;">
+    <view class="my-page-nav" style="height: {{navBarHeight}}px;">
+      <view class="my-page-nav-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">
+        <view class="my-page-title" style="font-size: {{navTitleFontSize}}px; line-height: {{navTitleFontSize}}px;">我的</view>
+      </view>
+    </view>
+  </view>
+
   <!-- 用户头部（统一布局） -->
   <view class="user-header">
-    <view class="user-main">
-      <view class="user-avatar">
-        <image src="{{userInfo && userInfo.avatarUrl ? userInfo.avatarUrl : '/images/tabBar/me.png'}}" mode="aspectFill"></image>
-      </view>
-      <view class="user-detail">
-        <view class="user-name" wx:if="{{userInfo.nickName}}">
-          {{userInfo && userInfo.nickName ? userInfo.nickName : '餐饮会员'}}
+    <view class="member-card">
+      <view class="card-shine"></view>
+      <view class="card-top">
+        <view class="user-detail">
+          <view class="user-name">
+              {{userInfo && userInfo.nickName ? userInfo.nickName : '会员'}}
+          </view>
+          <view class="user-phone" wx:if="{{userInfo && userInfo.phoneNumber}}">
+            {{userInfo.phoneNumber}}
+          </view>
+          <view class="user-phone login-prompt-text" wx:else bindtap="showAuthModal">
+            请先完善个人信息
+          </view>
         </view>
-        <view class="user-phone" wx:if="{{userInfo && userInfo.phoneNumber}}">
-          {{userInfo.phoneNumber}}
-        </view>
-        <view class="user-phone login-prompt-text" wx:else>
-          请先完善个人信息
-        </view>
-        <button 
-          class="login-btn-inline" 
-          wx:if="{{!userInfo || !userInfo.phoneNumber}}"
-          bindtap="showAuthModal">
-          点击完善个人信息
-        </button>
       </view>
-    </view>
-  </view>
-
-  <!-- 会员余额卡片 -->
-  <view class="balance-card">
-    <view class="balance-item">
-      <view class="balance-icon">💰</view>
-      <view class="balance-content">
-        <view class="balance-label">账户余额</view>
-        <view class="balance-amount">¥{{userInfo.balance || 0}}</view>
+      <view class="card-mark">ZN</view>
+      <view class="member-code-block" wx:if="{{userInfo && userInfo.userCode}}">
+        <view class="member-code">{{userInfo.userCode}}</view>
       </view>
-    </view>
-    <view class="balance-item" >
-      <view class="balance-icon">🎁</view>
-      <view class="balance-content">
-        <view class="balance-label">免单次数</view>
-        <view class="balance-amount">{{miandanCount}}次</view>
-      </view>
-    </view>
-  </view>
-
-  <!-- 充值按钮 -->
-  <view class="action-card">
-    <view class="action-btn-large" bindtap="goToRecharge">
-      <text>💳 立即充值</text>
     </view>
   </view>
 
@@ -70,6 +51,14 @@
   </view> -->
 
   <!-- 管理员入口触发区域（隐藏在右下角） -->
+  <view class="profile-menu">
+    <view class="profile-menu-item" hover-class="menu-hover" bindtap="goAbout">
+      <view class="menu-icon">›</view>
+      <view class="menu-title">关于</view>
+      <view class="menu-arrow">›</view>
+    </view>
+  </view>
+
   <view class="admin-trigger" bindtap="onAdminTrigger"></view>
 
   <!-- 密码输入弹窗 -->
@@ -98,11 +87,31 @@
   <!-- 用户信息授权组件 -->
   <avatar-nickname-modal 
     showAvaModal="{{showAuthModal}}" 
-    bind:saved="onUserInfoSaved">
+    loadingGif="{{actionLoadingGif}}"
+    bind:saved="onUserInfoSaved"
+    bind:closed="onAuthModalClosed">
   </avatar-nickname-modal>
+
+  <view class="action-loading-layer" wx:if="{{actionLoading}}" catchtouchmove="catchActionLoadingMove">
+    <view class="action-loading-card">
+      <image class="action-loading-img" src="{{actionLoadingGif}}" mode="aspectFit"></image>
+      <view class="action-loading-text">{{actionLoadingText}}</view>
+    </view>
+  </view>
 
   <!-- 版本号显示 -->
   <view class="version-info">
     <text class="version-text">版本号：{{version}}</text>
+  </view>
+  <view class="cover-tabbar">
+    <view class="cover-tab" hover-class="btn-hover" bindtap="goCover">
+      <text>首页</text>
+    </view>
+    <view class="cover-tab" hover-class="btn-hover" bindtap="goMyOrder">
+      <text>订单</text>
+    </view>
+    <view class="cover-tab active" hover-class="btn-hover" bindtap="goMyHome">
+      <text>我的</text>
+    </view>
   </view>
 </view>

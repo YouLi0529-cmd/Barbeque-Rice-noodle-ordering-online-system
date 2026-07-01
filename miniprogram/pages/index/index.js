@@ -1,12 +1,51 @@
-// pages/index/index.js
+﻿// pages/index/index.js
 const app = getApp()
 const db = wx.cloud.database()
+const _ = db.command
+const { getCustomNavOptions } = require('../../utils/customNav')
+
+const orderLoadingFrames = [
+  '/images/orderloadinggif_frames/frame_00.png',
+  '/images/orderloadinggif_frames/frame_01.png',
+  '/images/orderloadinggif_frames/frame_02.png',
+  '/images/orderloadinggif_frames/frame_03.png',
+  '/images/orderloadinggif_frames/frame_04.png',
+  '/images/orderloadinggif_frames/frame_05.png',
+  '/images/orderloadinggif_frames/frame_06.png',
+  '/images/orderloadinggif_frames/frame_07.png',
+  '/images/orderloadinggif_frames/frame_08.png',
+  '/images/orderloadinggif_frames/frame_09.png',
+  '/images/orderloadinggif_frames/frame_10.png',
+  '/images/orderloadinggif_frames/frame_11.png',
+  '/images/orderloadinggif_frames/frame_12.png',
+  '/images/orderloadinggif_frames/frame_13.png',
+  '/images/orderloadinggif_frames/frame_14.png',
+  '/images/orderloadinggif_frames/frame_15.png'
+]
 
 Page({
   data: {
     menuList: [], // 菜品分类列表
     currentMenuId: '', // 当前选中的分类ID
     goodsList: [], // 当前分类的菜品列表
+    cartMeatAnimations: [],
+    cartHeatAnimations: [],
+    cartBounce: false,
+    cartBadgeBounce: false,
+    searchKeyword: '',
+    isSearching: false,
+    searchLoading: false,
+    actionLoading: false,
+    actionLoadingText: '',
+    actionLoadingGif: '/images/orderloadinggif-transparent.gif',
+    searchGoodsList: [],
+    categorySections: [],
+    loadedCategoryCount: 0,
+    categoryBatchSize: 3,
+    scrollIntoSection: '',
+    categorySectionPositions: [],
+    goodsScrollTop: 0,
+    goodsViewportHeight: 0,
     cart: {}, // 购物车 {goodsId: {info: goodsInfo, count: num, tags: {}}}
     cartCount: 0, // 购物车总数量
     cartTotalPrice: 0, // 购物车总价
@@ -21,22 +60,62 @@ Page({
     selectedTags: {}, // 当前选择的标签 {tagId: [选项]}
     modalDishCount: 1, // 弹窗中选择的商品数量
     modalTotalPrice: 0, // 弹窗中商品小计
+    specAddOriginPoint: null, // 打开规格弹窗时的菜单加号位置
     showAuthModal: false, // 显示授权弹窗
-    statusBarHeight: 0, // 状态栏高度
+    statusBarHeight: 0,
+    navBarHeight: 44,
+    navContentTop: 0,
+    navContentHeight: 44,
+    navTitleFontSize: 18,
+    navIconSize: 14,
+    navIconStroke: 2,
+    navRightGap: 92,
+    searchRowHeight: 38,
+    searchRowTop: 50,
+    shopNavTotalHeight: 84,
     tableNumber: '', // 桌码号
     // 菜品分页
     goodsPage: 0,
     goodsPageSize: 20,
     goodsHasMore: true,
-    goodsLoading: false
+    goodsLoading: false,
+    menuLoading: false,
+    loadingFrameIndex: 0,
+    orderLoadingFrames,
+    modalFlavorTitle: '\u53e3\u5473',
+    modalFlavorOptions: ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'],
+    modalOptionGroups: []
   },
 
-  onLoad(options) {
-    // 获取状态栏高度
-    const systemInfo = wx.getSystemInfoSync()
+  refreshCustomNav() {
+    const navOptions = getCustomNavOptions()
+    const searchRowHeight = 38
     this.setData({
-      statusBarHeight: systemInfo.statusBarHeight || 0
+      ...navOptions,
+      searchRowHeight,
+      searchRowTop: navOptions.navBarHeight + 8,
+      shopNavTotalHeight: navOptions.navBarHeight + searchRowHeight + 16
     })
+  },
+
+  showActionLoading(text = '加载中') {
+    this.setData({
+      actionLoading: true,
+      actionLoadingText: text
+    })
+  },
+
+  hideActionLoading() {
+    this.setData({
+      actionLoading: false,
+      actionLoadingText: ''
+    })
+  },
+
+  catchActionLoadingMove() {},
+
+  onLoad(options) {
+    this.refreshCustomNav()
     
     // 检查是否从扫码进入，获取桌码号
     // 小程序码扫码进入时，scene参数会在options.scene中
@@ -47,11 +126,6 @@ Page({
         if (scene) {
           this.setData({
             tableNumber: scene
-          })
-          wx.showToast({
-            title: `桌码：${scene}`,
-            icon: 'success',
-            duration: 2000
           })
         }
       } catch (e) {
@@ -65,11 +139,43 @@ Page({
     this.loadNotices()
   },
 
+  onReady() {
+    this.refreshCustomNav()
+    setTimeout(() => this.refreshCustomNav(), 120)
+  },
+
   onShow() {
+    this.refreshCustomNav()
     this.loadUserInfo()
   },
 
+  onUnload() {
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer)
+      this.searchTimer = null
+    }
+    this.clearCartFxTimers()
+    this.stopOrderLoadingAnimation()
+  },
+
+  startOrderLoadingAnimation() {
+    // Loading uses a native GIF image now, so no frame timer is needed.
+  },
+
+  stopOrderLoadingAnimation() {
+    if (this.orderLoadingTimer) {
+      clearInterval(this.orderLoadingTimer)
+      this.orderLoadingTimer = null
+    }
+  },
+
   // 加载店铺信息
+  goCover() {
+    wx.reLaunch({
+      url: '/pages/covertest/covertest'
+    })
+  },
+
   async loadShopInfo() {
     try {
       const res = await db.collection('shopInfo').limit(1).get()
@@ -138,11 +244,18 @@ Page({
   // 加载菜品分类
   async loadMenu(showLoading = true) {
     if (showLoading) {
-      wx.showLoading({ title: '加载中...' })
+      this.setData({
+        menuLoading: true,
+        loadingFrameIndex: 0
+      })
+      this.startOrderLoadingAnimation()
     }
     try {
       const res = await wx.cloud.callFunction({
-        name: 'getCategory'
+        name: 'getCategory',
+        data: {
+          menuType: 'dineIn'
+        }
       })
       const result = res.result || {}
       const list = result.success ? (result.data || []) : []
@@ -153,9 +266,17 @@ Page({
           menuList: list,
           currentMenuId: firstId,
           goodsPage: 0,
-          goodsHasMore: true
+          goodsHasMore: true,
+          categorySections: [],
+          loadedCategoryCount: 0,
+          goodsList: [],
+          searchKeyword: '',
+          isSearching: false,
+          searchLoading: false,
+          searchGoodsList: [],
+          scrollIntoSection: ''
         })
-        this.loadGoods(firstId, false, false) // 不追加，不显示loading
+        await this.loadNextCategoryBatch(false)
       } else {
         if (showLoading) {
           wx.showToast({ title: '暂无菜品分类', icon: 'none' })
@@ -168,7 +289,8 @@ Page({
       }
     } finally {
       if (showLoading) {
-        wx.hideLoading()
+        this.stopOrderLoadingAnimation()
+        this.setData({ menuLoading: false })
       }
     }
   },
@@ -179,7 +301,8 @@ Page({
     if (this.data.goodsLoading) return
 
     if (!append && showLoading) {
-      wx.showLoading({ title: '加载中...' })
+      this.setData({ loadingFrameIndex: 0 })
+      this.startOrderLoadingAnimation()
     }
 
     this.setData({ goodsLoading: true })
@@ -192,6 +315,7 @@ Page({
       const goodsRes = await db.collection('dish')
         .where({
           categoryId: menuId,
+          menuType: _.neq('camping'),
           status: 1 // 1表示上架
         })
         .orderBy('sort', 'asc')
@@ -218,27 +342,449 @@ Page({
       }
     } finally {
       if (!append && showLoading) {
-        wx.hideLoading()
+        this.stopOrderLoadingAnimation()
+      }
+      this.setData({ goodsLoading: false })
+    }
+  },
+
+  async loadCategoryGoods(category) {
+    const goodsRes = await db.collection('dish')
+      .where({
+        categoryId: category._id,
+        menuType: _.neq('camping'),
+        status: 1
+      })
+      .orderBy('sort', 'asc')
+      .limit(100)
+      .get()
+
+    const goods = (goodsRes.data || []).map(item => ({
+      ...item,
+      cartCount: this.getDishCartCount(item._id)
+    }))
+
+    return {
+      id: category._id,
+      name: category.name,
+      goods
+    }
+  },
+
+  async loadNextCategoryBatch(showLoading = true) {
+    if (this.data.isSearching) return
+    if (this.data.goodsLoading) return
+
+    const menuList = this.data.menuList || []
+    const start = this.data.loadedCategoryCount || 0
+    if (start >= menuList.length) {
+      this.setData({ goodsHasMore: false })
+      return
+    }
+
+    const end = Math.min(start + this.data.categoryBatchSize, menuList.length)
+    const categories = menuList.slice(start, end)
+
+    if (showLoading && this.data.categorySections.length === 0) {
+      this.setData({ loadingFrameIndex: 0 })
+      this.startOrderLoadingAnimation()
+    }
+
+    this.setData({ goodsLoading: true })
+
+    try {
+      const sections = await Promise.all(categories.map(category => this.loadCategoryGoods(category)))
+      const categorySections = this.data.categorySections.concat(sections)
+      const goodsList = categorySections.reduce((result, section) => result.concat(section.goods), [])
+
+      this.setData({
+        categorySections,
+        goodsList,
+        loadedCategoryCount: end,
+        goodsHasMore: end < menuList.length
+      }, () => {
+        this.measureCategorySections()
+      })
+    } catch (err) {
+      console.error('加载菜品分区失败', err)
+      wx.showToast({ title: '加载失败', icon: 'none' })
+    } finally {
+      if (showLoading && this.data.categorySections.length === 0) {
+        this.stopOrderLoadingAnimation()
       }
       this.setData({ goodsLoading: false })
     }
   },
 
   // 切换菜品分类
-  switchMenu(e) {
+  async switchMenu(e) {
     const menuId = e.currentTarget.dataset.id
+    const menuList = this.data.menuList || []
+    const targetIndex = menuList.findIndex(item => item._id === menuId)
+    this.clearSearchState(false)
     this.setData({
       currentMenuId: menuId,
-      goodsPage: 0,
-      goodsHasMore: true,
-      goodsList: []
+      scrollIntoSection: ''
     })
-    this.loadGoods(menuId)
+
+    let guard = 0
+    while (targetIndex >= 0 && this.data.loadedCategoryCount <= targetIndex && this.data.goodsHasMore && guard < menuList.length + 2) {
+      guard++
+      if (this.data.goodsLoading) {
+        await new Promise(resolve => setTimeout(resolve, 80))
+      } else {
+        const beforeCount = this.data.loadedCategoryCount
+        await this.loadNextCategoryBatch(false)
+        if (this.data.loadedCategoryCount === beforeCount) break
+      }
+    }
+
+    setTimeout(() => {
+      this.setData({
+        scrollIntoSection: `category-${menuId}`
+      })
+    }, 0)
+  },
+
+  loadMoreCategorySections() {
+    if (this.data.isSearching) return
+    if (this.data.goodsHasMore && !this.data.goodsLoading) {
+      this.loadNextCategoryBatch(true)
+    }
+  },
+
+  measureCategorySections() {
+    setTimeout(() => {
+      const query = wx.createSelectorQuery()
+      query.select('.goods-list').boundingClientRect()
+      query.selectAll('.category-section').boundingClientRect()
+      query.exec(res => {
+        const goodsRect = res && res[0]
+        const sectionRects = res && res[1]
+        if (!goodsRect || !sectionRects || sectionRects.length === 0) return
+
+        const scrollTop = this.data.goodsScrollTop || 0
+        const positions = sectionRects.map(rect => ({
+          id: rect.id.replace('category-', ''),
+          top: rect.top - goodsRect.top + scrollTop
+        }))
+
+        this.setData({
+          categorySectionPositions: positions,
+          goodsViewportHeight: goodsRect.height
+        })
+        this.updateCurrentMenuByScroll(scrollTop)
+      })
+    }, 80)
+  },
+
+  onGoodsScroll(e) {
+    if (this.data.isSearching) return
+    const scrollTop = e.detail.scrollTop || 0
+    this.data.goodsScrollTop = scrollTop
+
+    if (this.goodsScrollTimer) return
+    this.goodsScrollTimer = setTimeout(() => {
+      this.goodsScrollTimer = null
+      this.updateCurrentMenuByScroll(this.data.goodsScrollTop || 0)
+    }, 80)
+  },
+
+  updateCurrentMenuByScroll(scrollTop) {
+    if (this.data.isSearching) return
+    const positions = this.data.categorySectionPositions || []
+    if (positions.length === 0) return
+
+    const viewportHeight = this.data.goodsViewportHeight || 0
+    const triggerLine = scrollTop + viewportHeight / 2
+    let currentId = positions[0].id
+
+    for (const item of positions) {
+      if (item.top <= triggerLine) {
+        currentId = item.id
+      } else {
+        break
+      }
+    }
+
+    if (currentId && currentId !== this.data.currentMenuId) {
+      this.setData({ currentMenuId: currentId })
+    }
+  },
+
+  getTapPoint(e) {
+    if (e && typeof e.x === 'number' && typeof e.y === 'number') {
+      return {
+        x: e.x,
+        y: e.y
+      }
+    }
+
+    const touch = e && ((e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]))
+    if (touch && typeof touch.clientX === 'number' && typeof touch.clientY === 'number') {
+      return {
+        x: touch.clientX,
+        y: touch.clientY
+      }
+    }
+
+    if (e && e.detail && typeof e.detail.x === 'number' && typeof e.detail.y === 'number') {
+      return {
+        x: e.detail.x,
+        y: e.detail.y
+      }
+    }
+
+    const systemInfo = wx.getWindowInfo ? wx.getWindowInfo() : wx.getSystemInfoSync()
+    return {
+      x: systemInfo.windowWidth / 2,
+      y: systemInfo.windowHeight * 0.72
+    }
+  },
+
+  pushCartFxTimer(timer) {
+    if (!this.cartFxTimers) {
+      this.cartFxTimers = []
+    }
+    this.cartFxTimers.push(timer)
+  },
+
+  clearCartFxTimers() {
+    if (!this.cartFxTimers) return
+    this.cartFxTimers.forEach(timer => clearTimeout(timer))
+    this.cartFxTimers = []
+  },
+
+  triggerCartBounce() {
+    this.setData({
+      cartBounce: false,
+      cartBadgeBounce: false
+    })
+
+    this.pushCartFxTimer(setTimeout(() => {
+      this.setData({
+        cartBounce: true,
+        cartBadgeBounce: true
+      })
+    }, 16))
+
+    this.pushCartFxTimer(setTimeout(() => {
+      this.setData({
+        cartBounce: false,
+        cartBadgeBounce: false
+      })
+    }, 520))
+  },
+
+  spawnCartHeat(x, y) {
+    const id = `heat-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+    const heat = {
+      id,
+      left: x - 20,
+      top: y - 54,
+      translateY: 0,
+      opacity: 1
+    }
+
+    this.setData({
+      cartHeatAnimations: this.data.cartHeatAnimations.concat(heat)
+    })
+
+    this.pushCartFxTimer(setTimeout(() => {
+      const cartHeatAnimations = this.data.cartHeatAnimations.map(item => (
+        item.id === id
+          ? { ...item, translateY: -34, opacity: 0 }
+          : item
+      ))
+      this.setData({ cartHeatAnimations })
+    }, 20))
+
+    this.pushCartFxTimer(setTimeout(() => {
+      this.setData({
+        cartHeatAnimations: this.data.cartHeatAnimations.filter(item => item.id !== id)
+      })
+    }, 760))
+  },
+
+  playCartAddEffect(e) {
+    const start = this.getTapPoint(e)
+    const query = wx.createSelectorQuery()
+
+    query.select('.cart-icon-wrapper').boundingClientRect(rect => {
+      if (!rect) return
+
+      const targetX = rect.left + rect.width / 2
+      const targetY = rect.top + rect.height * 0.48
+      const id = `meat-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+      const meat = {
+        id,
+        left: start.x - 23,
+        top: start.y - 17,
+        translateX: 0,
+        translateY: 0,
+        scale: 1,
+        rotate: -8,
+        opacity: 1
+      }
+
+      this.setData({
+        cartMeatAnimations: this.data.cartMeatAnimations.concat(meat)
+      })
+
+      this.pushCartFxTimer(setTimeout(() => {
+        const cartMeatAnimations = this.data.cartMeatAnimations.map(item => (
+          item.id === id
+            ? {
+                ...item,
+                translateX: targetX - start.x,
+                translateY: targetY - start.y,
+                scale: 0.58,
+                rotate: 14,
+                opacity: 1
+              }
+            : item
+        ))
+        this.setData({ cartMeatAnimations })
+      }, 20))
+
+      this.pushCartFxTimer(setTimeout(() => {
+        const cartMeatAnimations = this.data.cartMeatAnimations.map(item => (
+          item.id === id ? { ...item, opacity: 0 } : item
+        ))
+        this.setData({ cartMeatAnimations })
+        this.triggerCartBounce()
+        this.spawnCartHeat(targetX, targetY)
+      }, 620))
+
+      this.pushCartFxTimer(setTimeout(() => {
+        this.setData({
+          cartMeatAnimations: this.data.cartMeatAnimations.filter(item => item.id !== id)
+        })
+      }, 820))
+    }).exec()
+  },
+
+  onSearchInput(e) {
+    const value = e.detail.value || ''
+    const keyword = value.trim()
+
+    this.setData({
+      searchKeyword: value
+    })
+
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer)
+      this.searchTimer = null
+    }
+
+    if (!keyword) {
+      this.clearSearchState(false)
+      return
+    }
+
+    this.searchTimer = setTimeout(() => {
+      this.searchDishes(keyword)
+    }, 260)
+  },
+
+  confirmSearch() {
+    const keyword = (this.data.searchKeyword || '').trim()
+    if (keyword) {
+      this.searchDishes(keyword)
+    }
+  },
+
+  clearSearch() {
+    this.clearSearchState(true)
+  },
+
+  clearSearchState(clearText = true) {
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer)
+      this.searchTimer = null
+    }
+    this.searchToken = null
+
+    const data = {
+      isSearching: false,
+      searchLoading: false,
+      searchGoodsList: []
+    }
+    if (clearText) {
+      data.searchKeyword = ''
+    }
+    this.setData(data)
+  },
+
+  escapeRegExp(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  },
+
+  async searchDishes(keyword) {
+    const currentKeyword = (keyword || '').trim()
+    if (!currentKeyword) {
+      this.clearSearchState(false)
+      return
+    }
+
+    const token = Date.now()
+    this.searchToken = token
+    this.setData({
+      isSearching: true,
+      searchLoading: true,
+      scrollIntoSection: ''
+    })
+
+    try {
+      const matcher = db.RegExp({
+        regexp: this.escapeRegExp(currentKeyword),
+        options: 'i'
+      })
+      const res = await db.collection('dish')
+        .where(_.or([
+          { status: 1, menuType: _.neq('camping'), name: matcher },
+          { status: 1, menuType: _.neq('camping'), categoryName: matcher },
+          { status: 1, menuType: _.neq('camping'), description: matcher }
+        ]))
+        .limit(50)
+        .get()
+
+      if (this.searchToken !== token) return
+
+      const searchGoodsList = (res.data || []).map(item => ({
+        ...item,
+        cartCount: this.getDishCartCount(item._id)
+      }))
+
+      this.setData({
+        searchGoodsList,
+        searchLoading: false
+      })
+    } catch (err) {
+      if (this.searchToken !== token) return
+      console.error('搜索菜品失败', err)
+      this.setData({
+        searchGoodsList: [],
+        searchLoading: false
+      })
+      wx.showToast({
+        title: '搜索失败',
+        icon: 'none'
+      })
+    }
   },
 
   // 添加到购物车 - 显示标签选择弹窗
   addToCart(e) {
     const goods = e.currentTarget.dataset.goods
+    const specAddOriginPoint = this.getTapPoint(e)
+    const flavorOptions = goods.flavorOptions && goods.flavorOptions.length
+      ? goods.flavorOptions
+      : ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3']
+    const optionGroups = (goods.optionGroups || []).map(group => ({
+      ...group,
+      selectedOption: group.options && group.options.length ? group.options[0] : ''
+    }))
     
     // 初始化标签选择状态，多选标签初始化为数组
     const selectedTags = {}
@@ -253,15 +799,38 @@ Page({
     // 总是显示弹窗，让用户选择数量
     this.setData({
       showTagModal: true,
-      currentDish: goods,
-      selectedTags: selectedTags,
+      currentDish: {
+        ...goods,
+        tags: []
+      },
+      selectedTags: {
+        flavor: flavorOptions[0],
+        ...optionGroups.reduce((result, group) => {
+          if (group.id && group.options && group.options.length) {
+            result[group.id] = group.options[0]
+          }
+          return result
+        }, {}),
+        remark: ''
+      },
+      modalFlavorTitle: goods.flavorTitle || '\u53e3\u5473',
+      modalFlavorOptions: flavorOptions,
+      modalOptionGroups: optionGroups,
+      modalRemark: '',
+      modalRemarkCount: 0,
       modalDishCount: 1,
-      modalTotalPrice: (goods.price * 1).toFixed(2)
+      modalTotalPrice: this.formatModalPrice(goods.price * 1),
+      specAddOriginPoint
     })
   },
 
+  formatModalPrice(price) {
+    const value = Number(price) || 0
+    return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  },
+
   // 确认添加到购物车
-  confirmAddToCart() {
+  confirmAddToCart(e) {
     const { currentDish, selectedTags, modalDishCount } = this.data
     const cart = this.data.cart
     
@@ -287,6 +856,20 @@ Page({
     
     // 转换标签为可显示的数组
     const tagLabels = []
+    if (selectedTags.flavor) {
+      tagLabels.push(selectedTags.flavor)
+    }
+    if (currentDish.optionGroups && currentDish.optionGroups.length > 0) {
+      currentDish.optionGroups.forEach(group => {
+        const value = selectedTags[group.id]
+        if (value) {
+          tagLabels.push(value)
+        }
+      })
+    }
+    if (selectedTags.remark) {
+      tagLabels.push(`\u5907\u6ce8\uff1a${selectedTags.remark}`)
+    }
     if (currentDish.tags && currentDish.tags.length > 0) {
       for (let tagId in selectedTags) {
         const tag = currentDish.tags.find(t => t.id === tagId)
@@ -314,6 +897,7 @@ Page({
     }
     
     this.updateCart(cart)
+    this.playCartAddEffect(this.data.specAddOriginPoint || e)
     this.closeTagModal()
   },
 
@@ -350,11 +934,16 @@ Page({
   // 从菜品列表直接添加到购物车（无标签版本）
   addDishToCartDirect(e) {
     const goods = e.currentTarget.dataset.goods
+    if (goods.needSpec !== false) {
+      this.addToCart(e)
+      return
+    }
     
     // 如果菜品没有标签，直接添加（使用菜品ID作为key）
     if (!goods.tags || goods.tags.length === 0) {
       const cart = { ...this.data.cart }
       const cartKey = goods._id
+      const minOrderCount = goods.minOrderCount || 1
       
       if (cart[cartKey]) {
         // 已存在，增加数量
@@ -363,7 +952,7 @@ Page({
         // 不存在，创建新项
         cart[cartKey] = {
           info: goods,
-          count: 1,
+          count: minOrderCount,
           tags: {},
           tagLabels: [],
           dishId: goods._id
@@ -371,6 +960,7 @@ Page({
       }
       
       this.updateCart(cart)
+      this.playCartAddEffect(e)
       wx.showToast({
         title: '已添加',
         icon: 'success',
@@ -387,11 +977,13 @@ Page({
     const goods = e.currentTarget.dataset.goods
     const cart = { ...this.data.cart }
     const cartKey = goods._id
+    const minOrderCount = goods.minOrderCount || 1
     
     if (cart[cartKey]) {
-      cart[cartKey].count--
-      if (cart[cartKey].count <= 0) {
+      if (cart[cartKey].count <= minOrderCount) {
         delete cart[cartKey]
+      } else {
+        cart[cartKey].count--
       }
       this.updateCart(cart)
     } else {
@@ -399,9 +991,11 @@ Page({
       // 找到第一个并减少（优先减少无标签的）
       for (let key in cart) {
         if (cart[key] && cart[key].dishId === goods._id) {
-          cart[key].count--
-          if (cart[key].count <= 0) {
+          const itemMinOrderCount = cart[key].info && cart[key].info.minOrderCount ? cart[key].info.minOrderCount : 1
+          if (cart[key].count <= itemMinOrderCount) {
             delete cart[key]
+          } else {
+            cart[key].count--
           }
           this.updateCart(cart)
           break
@@ -411,14 +1005,77 @@ Page({
   },
 
   // 从购物车减少
+  editDishCountFromList(e) {
+    const goods = e.currentTarget.dataset.goods
+    if (!goods || !goods._id) return
+
+    const cart = { ...this.data.cart }
+    const cartKeys = Object.keys(cart).filter(key => cart[key] && cart[key].dishId === goods._id)
+
+    if (cartKeys.length > 1 || (cartKeys.length === 1 && cartKeys[0] !== goods._id)) {
+      wx.showToast({
+        title: '请在购物车里修改',
+        icon: 'none'
+      })
+      return
+    }
+
+    wx.showModal({
+      title: goods.name || '修改数量',
+      editable: true,
+      placeholderText: '输入数量，0为删除',
+      content: String(goods.cartCount || 1),
+      success: (res) => {
+        if (!res.confirm) return
+
+        const count = parseInt((res.content || '').trim(), 10)
+        if (Number.isNaN(count) || count < 0) {
+          wx.showToast({
+            title: '请输入正确数量',
+            icon: 'none'
+          })
+          return
+        }
+
+        const minOrderCount = goods.minOrderCount || 1
+        if (count > 0 && count < minOrderCount) {
+          wx.showToast({
+            title: `${minOrderCount}个起卖`,
+            icon: 'none'
+          })
+          return
+        }
+
+        const cartKey = goods._id
+        if (count === 0) {
+          delete cart[cartKey]
+        } else if (cart[cartKey]) {
+          cart[cartKey].count = count
+        } else {
+          cart[cartKey] = {
+            info: goods,
+            count,
+            tags: {},
+            tagLabels: [],
+            dishId: goods._id
+          }
+        }
+
+        this.updateCart(cart)
+      }
+    })
+  },
+
   reduceFromCart(e) {
     const cartKey = e.currentTarget.dataset.id
     const cart = { ...this.data.cart }
     
     if (cart[cartKey]) {
-      cart[cartKey].count--
-      if (cart[cartKey].count <= 0) {
+      const minOrderCount = cart[cartKey].info && cart[cartKey].info.minOrderCount ? cart[cartKey].info.minOrderCount : 1
+      if (cart[cartKey].count <= minOrderCount) {
         delete cart[cartKey]
+      } else {
+        cart[cartKey].count--
       }
     }
     
@@ -435,9 +1092,53 @@ Page({
     }
     
     this.updateCart(cart)
+    this.playCartAddEffect(e)
   },
 
   // 选择标签选项（单选）
+  editCartItemCount(e) {
+    const cartKey = e.currentTarget.dataset.id
+    const cart = { ...this.data.cart }
+    const item = cart[cartKey]
+    if (!item) return
+
+    wx.showModal({
+      title: item.info && item.info.name ? item.info.name : '修改数量',
+      editable: true,
+      placeholderText: '输入数量，0为删除',
+      content: String(item.count || 1),
+      success: (res) => {
+        if (!res.confirm) return
+
+        const count = parseInt((res.content || '').trim(), 10)
+        if (Number.isNaN(count) || count < 0) {
+          wx.showToast({
+            title: '请输入正确数量',
+            icon: 'none'
+          })
+          return
+        }
+
+        const minOrderCount = item.info && item.info.minOrderCount ? item.info.minOrderCount : 1
+        if (count > 0 && count < minOrderCount) {
+          wx.showToast({
+            title: `${minOrderCount}个起卖`,
+            icon: 'none'
+          })
+          return
+        }
+
+        if (count === 0) {
+          delete cart[cartKey]
+        } else {
+          cart[cartKey].count = count
+        }
+
+        this.updateCart(cart)
+      }
+    })
+  },
+
   selectTagOption(e) {
     const { tagId, option } = e.currentTarget.dataset
     const selectedTags = { ...this.data.selectedTags }
@@ -495,13 +1196,56 @@ Page({
   },
 
   // 关闭标签弹窗
+  selectFlavorOption(e) {
+    const option = e.currentTarget.dataset.option
+    this.setData({
+      'selectedTags.flavor': option
+    })
+  },
+
+  selectOptionGroupOption(e) {
+    const groupId = e.currentTarget.dataset.groupId
+    const option = e.currentTarget.dataset.option
+    if (!groupId) return
+
+    const modalOptionGroups = (this.data.modalOptionGroups || []).map(group => {
+      if (group.id === groupId) {
+        return {
+          ...group,
+          selectedOption: option
+        }
+      }
+      return group
+    })
+
+    this.setData({
+      [`selectedTags.${groupId}`]: option,
+      modalOptionGroups
+    })
+  },
+
+  onRemarkInput(e) {
+    const value = (e.detail.value || '').slice(0, 10)
+    this.setData({
+      modalRemark: value,
+      modalRemarkCount: value.length,
+      'selectedTags.remark': value
+    })
+  },
+
   closeTagModal() {
     this.setData({
       showTagModal: false,
       currentDish: null,
       selectedTags: {},
+      modalFlavorTitle: '\u53e3\u5473',
+      modalFlavorOptions: ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'],
+      modalOptionGroups: [],
+      modalRemark: '',
+      modalRemarkCount: 0,
       modalDishCount: 1,
-      modalTotalPrice: 0
+      modalTotalPrice: 0,
+      specAddOriginPoint: null
     })
   },
 
@@ -511,7 +1255,7 @@ Page({
     const price = this.data.currentDish ? this.data.currentDish.price : 0
     this.setData({
       modalDishCount: newCount,
-      modalTotalPrice: (price * newCount).toFixed(2)
+      modalTotalPrice: this.formatModalPrice(price * newCount)
     })
   },
 
@@ -522,12 +1266,39 @@ Page({
       const price = this.data.currentDish ? this.data.currentDish.price : 0
       this.setData({
         modalDishCount: newCount,
-        modalTotalPrice: (price * newCount).toFixed(2)
+        modalTotalPrice: this.formatModalPrice(price * newCount)
       })
     }
   },
 
   // 阻止冒泡
+  editModalDishCount() {
+    wx.showModal({
+      title: '修改份数',
+      editable: true,
+      placeholderText: '请输入份数',
+      content: String(this.data.modalDishCount || 1),
+      success: (res) => {
+        if (!res.confirm) return
+
+        const count = parseInt((res.content || '').trim(), 10)
+        if (Number.isNaN(count) || count < 1) {
+          wx.showToast({
+            title: '份数不能低于1',
+            icon: 'none'
+          })
+          return
+        }
+
+        const price = this.data.currentDish ? this.data.currentDish.price : 0
+        this.setData({
+          modalDishCount: count,
+          modalTotalPrice: this.formatModalPrice(price * count)
+        })
+      }
+    })
+  },
+
   stopPropagation() {},
 
   // 用户信息保存回调（来自 avatarNicknameModal）
@@ -569,7 +1340,7 @@ Page({
     }
     
     try {
-      wx.showLoading({ title: '授权中...' })
+      this.showActionLoading('授权中')
           
       const openid = app.globalData.openid
       
@@ -613,7 +1384,7 @@ Page({
         showAuthModal: false
       })
       
-      wx.hideLoading()
+      this.hideActionLoading()
       wx.showToast({
         title: '授权成功',
         icon: 'success'
@@ -625,7 +1396,7 @@ Page({
       }, 500)
       
     } catch (err) {
-      wx.hideLoading()
+      this.hideActionLoading()
       console.error('授权失败', err)
       wx.showToast({
         title: '授权失败，请重试',
@@ -647,17 +1418,27 @@ Page({
     }
     
     // 更新菜品列表中的购物车数量（传入新的 cart 参数，确保使用最新的购物车数据）
-    const goodsList = this.data.goodsList.map(goods => {
-      goods.cartCount = this.getDishCartCount(goods._id, cart)
-      return goods
-    })
+    const categorySections = this.data.categorySections.map(section => ({
+      ...section,
+      goods: section.goods.map(goods => ({
+        ...goods,
+        cartCount: this.getDishCartCount(goods._id, cart)
+      }))
+    }))
+    const goodsList = categorySections.reduce((result, section) => result.concat(section.goods), [])
+    const searchGoodsList = this.data.searchGoodsList.map(goods => ({
+      ...goods,
+      cartCount: this.getDishCartCount(goods._id, cart)
+    }))
     
     this.setData({
       cart: cart,
       cartCount: totalCount,
       cartTotalPrice: totalPrice,
       cartTotalPriceText: totalPrice.toFixed(2),
+      categorySections,
       goodsList: goodsList, // 更新菜品列表，包含购物车数量
+      searchGoodsList,
       showCart: totalCount > 0 ? this.data.showCart : false // 购物车为空时自动关闭
     })
   },
@@ -673,17 +1454,27 @@ Page({
   // 清空购物车
   clearCart() {
     // 更新菜品列表中的购物车数量
-    const goodsList = this.data.goodsList.map(goods => {
-      goods.cartCount = 0
-      return goods
-    })
+    const categorySections = this.data.categorySections.map(section => ({
+      ...section,
+      goods: section.goods.map(goods => ({
+        ...goods,
+        cartCount: 0
+      }))
+    }))
+    const goodsList = categorySections.reduce((result, section) => result.concat(section.goods), [])
+    const searchGoodsList = this.data.searchGoodsList.map(goods => ({
+      ...goods,
+      cartCount: 0
+    }))
     
     this.setData({
       cart: {},
       cartCount: 0,
       cartTotalPrice: 0,
       cartTotalPriceText: '0.00',
+      categorySections,
       goodsList: goodsList,
+      searchGoodsList,
       showCart: false
     })
   },
@@ -715,6 +1506,24 @@ Page({
     this.navigateToSettle()
   },
 
+  getActiveOrderSessionForSettle() {
+    try {
+      const session = wx.getStorageSync('activeOrderSession')
+      if (!session || session.orderScene !== 'dineIn') {
+        return null
+      }
+
+      if (String(session.tableNumber || '') !== String(this.data.tableNumber || '')) {
+        return null
+      }
+
+      return session
+    } catch (err) {
+      console.error('读取当前用餐订单失败', err)
+      return null
+    }
+  },
+
   // 跳转到结算页面（内部方法，用于有桌码后的跳转）
   navigateToSettle() {
     // 将购物车数据存储到本地，供结算页面使用
@@ -722,7 +1531,10 @@ Page({
       wx.setStorageSync('settleCartData', {
         cart: this.data.cart,
         totalPrice: this.data.cartTotalPrice,
-        tableNumber: this.data.tableNumber || ''
+        tableNumber: this.data.tableNumber || '',
+        orderType: 'dineIn',
+        orderScene: 'dineIn',
+        activeOrderSession: this.getActiveOrderSessionForSettle()
       })
       
       // 跳转到结算页面
@@ -740,15 +1552,12 @@ Page({
 
   // 扫码获取桌码
   scanTableCode() {
-    wx.showLoading({
-      title: '识别中...',
-      mask: true
-    })
+    this.showActionLoading('识别中')
     wx.scanCode({
       onlyFromCamera: false, // 允许从相册选择
       scanType: ['qrCode', 'barCode', 'wxCode'],
       success: (res) => {
-        wx.hideLoading()
+        this.hideActionLoading()
         console.log(res)
         let tableNumber = ''
         
@@ -770,15 +1579,9 @@ Page({
         if (tableNumber) {
           this.setData({
             tableNumber: tableNumber
-          })
-          wx.showToast({
-            title: `桌码：${tableNumber}`,
-            icon: 'success'
-          })
-          // 扫码成功后，跳转到结算页面
-          setTimeout(() => {
+          }, () => {
             this.navigateToSettle()
-          }, 1000)
+          })
         } else {
           wx.showToast({
             title: '未能识别桌码',
@@ -787,7 +1590,7 @@ Page({
         }
       },
       fail: (err) => {
-        wx.hideLoading()
+        this.hideActionLoading()
         console.error('扫码失败', err)
         if (err.errMsg && !err.errMsg.includes('cancel')) {
           wx.showToast({
@@ -802,7 +1605,7 @@ Page({
   // 创建订单
   async createOrder(options = {}) {
     const { payWithBalance = true } = options
-    wx.showLoading({ title: '下单中...' })
+    this.showActionLoading('下单中')
     
     try {
       const openid = app.globalData.openid
@@ -885,12 +1688,11 @@ Page({
 
       if (payWithBalance) {
         // 余额支付：云函数已处理完成
-        wx.hideLoading()
+        this.hideActionLoading()
         wx.showToast({ title: '下单成功', icon: 'success' })
       } else {
         // 微信支付：调用统一下单云函数
-        wx.hideLoading()
-        wx.showLoading({ title: '拉起支付中...' })
+        this.showActionLoading('拉起支付中')
 
         const nonceStr = Math.random().toString(36).substr(2, 15) + Date.now().toString(36)
 
@@ -906,7 +1708,11 @@ Page({
 
         const payment = payRes.result && payRes.result.payment ? payRes.result.payment : payRes.result
 
-        wx.hideLoading()
+        if (!payment || !payment.timeStamp || !payment.nonceStr || !payment.package || !payment.paySign) {
+          throw new Error('微信支付未配置，暂时无法拉起支付')
+        }
+
+        this.hideActionLoading()
         await wx.requestPayment(payment)
 
         wx.showToast({ title: '支付成功，已下单', icon: 'success' })
@@ -933,7 +1739,7 @@ Page({
       
     } catch (err) {
       console.error('创建订单失败', err)
-      wx.hideLoading()
+      this.hideActionLoading()
       wx.showToast({ 
         title: err.message || '下单失败', 
         icon: 'none' 
@@ -944,9 +1750,7 @@ Page({
 
   // 页面触底加载更多菜品
   onReachBottom() {
-    if (this.data.goodsHasMore && !this.data.goodsLoading && this.data.currentMenuId) {
-      this.loadGoods(this.data.currentMenuId, true)
-    }
+    this.loadMoreCategorySections()
   },
 
   // 分享功能
@@ -974,7 +1778,11 @@ Page({
       this.setData({
         goodsPage: 0,
         goodsHasMore: true,
-        goodsLoading: false
+        goodsLoading: false,
+        categorySections: [],
+        loadedCategoryCount: 0,
+        goodsList: [],
+        scrollIntoSection: ''
       })
 
       // 并行刷新所有数据（不显示 loading，使用系统下拉刷新动画）

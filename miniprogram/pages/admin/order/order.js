@@ -4,11 +4,9 @@ const db = wx.cloud.database()
 Page({
   data: {
     orders: [],
-    orderType: 0, // 0: 全部, 1: 充值订单, 2: 点餐订单
+    orderType: 0,
     typeOptions: [
-      { text: '全部订单', value: 0 },
-      { text: '充值订单', value: 1 },
-      { text: '点餐订单', value: 2 }
+      { text: '点餐订单', value: 0 }
     ],
     // 分页相关
     orderPage: 0,
@@ -47,14 +45,8 @@ Page({
 
     try {
       let where = {
-        pay_status: true // 只获取已支付成功的订单
-      }
-      
-      // 按类型筛选
-      if (this.data.orderType === 1) {
-        where.type = 'recharge'
-      } else if (this.data.orderType === 2) {
-        where.type = 'order'
+        pay_status: true,
+        type: 'order'
       }
       
       const pageSize = this.data.orderPageSize

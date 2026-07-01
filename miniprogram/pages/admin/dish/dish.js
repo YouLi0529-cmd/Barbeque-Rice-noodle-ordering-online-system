@@ -29,8 +29,7 @@ Page({
         image: '',
         status: 1, // 1: 上架, 0: 下架
         sort: 0,
-        tags: [], // 标签数组
-        canUseMiandan: false // 是否可以参与免单
+        tags: [] // 标签数组
       },
     
     // 标签编辑
@@ -321,8 +320,7 @@ Page({
         image: '',
         status: 1,
         sort: this.data.dishes.length,
-        tags: [],
-        canUseMiandan: false // 是否可以参与免单
+        tags: []
       }
     })
   },
@@ -459,13 +457,6 @@ Page({
   onDishSortInput(e) {
     this.setData({
       'currentDish.sort': parseInt(e.detail.value) || 0
-    })
-  },
-
-  // 切换可参与免单
-  onCanUseMiandanChange(e) {
-    this.setData({
-      'currentDish.canUseMiandan': e.detail.value
     })
   },
 

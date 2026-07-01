@@ -2,86 +2,137 @@
 .page {
   min-height: 100vh;
   background: #f5f5f5;
-  padding-bottom: 40rpx;
+  padding-bottom: 184rpx;
+}
+
+.my-page-header {
+  position: relative;
+  background: #f5e7d5;
+  padding-left: 30rpx;
+  padding-right: 30rpx;
+  text-align: center;
+  box-sizing: content-box;
+}
+
+.my-page-nav {
+  position: relative;
+  display: block;
+}
+
+.my-page-nav-content {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.my-page-title {
+  color: #5f3d20;
+  font-weight: bold;
+  margin: 0;
+  line-height: 1;
+  text-align: center;
+  box-sizing: border-box;
+  position: relative;
 }
 
 /* 用户头部 */
 .user-header {
-  background: #e54d42;
-  padding: 80rpx 30rpx 100rpx;
-  min-height: 500rpx;
+  background: #f5e7d5;
+  padding: 34rpx 30rpx 48rpx;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-/* 未登录状态提示文字 */
-.login-prompt-text {
-  margin-top: 10rpx;
-  margin-bottom: 30rpx;
-}
-
-/* 内联登录按钮 */
-.login-btn-inline {
-  background: white;
-  color: #e54d42;
-  padding: 16rpx 60rpx;
-  border-radius: 50rpx;
-  font-size: 28rpx;
-  font-weight: bold;
-  margin-top: 20rpx;
-  line-height: 1;
-  display: inline-block;
-}
-
-.login-btn-inline::after {
-  border: none;
-}
-
-/* 用户主区域（上下布局） */
-.user-main {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+.member-card {
+  position: relative;
   width: 100%;
-}
-
-.user-avatar {
-  width: 180rpx;
-  height: 180rpx;
-  border-radius: 50%;
+  min-height: 386rpx;
+  padding: 42rpx 38rpx 34rpx;
+  border-radius: 16rpx;
   overflow: hidden;
-  background: white;
-  border: 6rpx solid rgba(255,255,255,0.3);
-  margin-bottom: 40rpx;
+  background:
+    radial-gradient(circle at 82% 8%, rgba(238, 202, 133, 0.34) 0, rgba(238, 202, 133, 0) 34%),
+    linear-gradient(135deg, #16120e 0%, #2b2117 46%, #090806 100%);
+  box-shadow: 0 26rpx 54rpx rgba(35, 24, 13, 0.28);
+  box-sizing: border-box;
 }
 
-.user-avatar image {
-  width: 100%;
-  height: 100%;
+.card-shine {
+  position: absolute;
+  left: -30%;
+  top: -65%;
+  width: 86%;
+  height: 180%;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 238, 194, 0.18) 50%, rgba(255, 255, 255, 0) 100%);
+  transform: rotate(28deg);
+}
+
+.card-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  padding-right: 120rpx;
 }
 
 .user-detail {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  width: 100%;
+  min-width: 0;
 }
 
 .user-name {
-  font-size: 44rpx;
-  color: white;
+  font-size: 38rpx;
+  color: #f7dfaa;
   font-weight: bold;
-  margin-bottom: 20rpx;
-  text-align: center;
+  line-height: 1.2;
+  text-align: left;
 }
 
 .user-phone {
-  font-size: 28rpx;
-  color: rgba(255,255,255,0.9);
-  text-align: center;
+  margin-top: 10rpx;
+  font-size: 24rpx;
+  color: rgba(247, 223, 170, 0.7);
+  text-align: left;
+}
+
+.login-prompt-text {
+  color: rgba(247, 223, 170, 0.64);
+}
+
+.card-mark {
+  position: absolute;
+  right: 36rpx;
+  top: 36rpx;
+  z-index: 1;
+  color: rgba(247, 223, 170, 0.42);
+  font-size: 48rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.member-code-block {
+  position: absolute;
+  left: 38rpx;
+  bottom: 34rpx;
+  z-index: 1;
+}
+
+.member-code {
+  color: #f7dfaa;
+  font-size: 42rpx;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
 }
 
 .member-tag {
@@ -216,6 +267,52 @@
   color: #333;
 }
 
+.profile-menu {
+  margin: -60rpx 30rpx 20rpx;
+  background: #ffffff;
+  border-radius: 20rpx;
+  overflow: hidden;
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.05);
+}
+
+.profile-menu-item {
+  height: 104rpx;
+  padding: 0 30rpx;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.menu-icon {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 22rpx;
+  background: #fff1f0;
+  color: #e54d42;
+  font-size: 28rpx;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.menu-title {
+  flex: 1;
+  margin-left: 20rpx;
+  color: #333333;
+  font-size: 30rpx;
+}
+
+.menu-arrow {
+  color: #bbbbbb;
+  font-size: 44rpx;
+  line-height: 1;
+}
+
+.menu-hover {
+  background: #f8f8f8;
+}
+
 /* 管理员入口触发区域 */
 .admin-trigger {
   position: fixed;
@@ -304,7 +401,7 @@
 /* 版本号信息 */
 .version-info {
   position: fixed;
-  bottom: 0;
+  bottom: 144rpx;
   left: 0;
   right: 0;
   text-align: center;
@@ -315,4 +412,74 @@
 .version-text {
   font-size: 24rpx;
   color: #999;
+}
+
+.cover-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  height: 144rpx;
+  border-top: 2rpx solid rgba(225, 195, 157, 0.9);
+  background: rgba(235, 208, 171, 0.96);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  box-shadow: 0 -10rpx 28rpx rgba(95, 61, 32, 0.12);
+}
+
+.cover-tab {
+  color: #684626;
+  font-size: 28rpx;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cover-tab.active {
+  color: #4f321a;
+  background: rgba(225, 195, 157, 0.72);
+}
+
+.btn-hover {
+  opacity: 0.86;
+}
+
+.action-loading-layer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 9998;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.action-loading-card {
+  width: 260rpx;
+  min-height: 260rpx;
+  background: transparent;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-loading-img {
+  width: 230rpx;
+  height: 230rpx;
+}
+
+.action-loading-text {
+  margin-top: 4rpx;
+  color: #6a4527;
+  font-size: 28rpx;
+  font-weight: 600;
+  line-height: 1.3;
 }

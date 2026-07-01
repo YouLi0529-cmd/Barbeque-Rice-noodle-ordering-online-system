@@ -27,82 +27,11 @@
         <view class="user-detail">
           <text>📱 {{item.phoneNumber || '未绑定号码'}}</text>
         </view>
-        <view class="user-detail">
-          <text>💰 余额: ¥{{item.balance || 0}}</text>
-        </view>
-        <view class="user-detail" wx:if="{{item.miandanCount !== undefined}}">
-          <text>🎁 免单次数: {{item.miandanCount || 0}}次</text>
-        </view>
-      </view>
-      <view class="user-actions">
-        <view class="action-btn balance-btn" catchtap="showEditBalanceModal" data-user="{{item}}">修改余额</view>
-        <view class="action-btn miandan-btn" catchtap="showEditMiandanModal" data-user="{{item}}">修改免单</view>
       </view>
     </view>
 
     <van-empty wx:if="{{users.length === 0}}" description="暂无用户数据" />
   </view>
 
-  <!-- 编辑余额弹窗 -->
-  <view class="modal-mask" wx:if="{{showBalanceModal}}" catchtap="closeBalanceModal">
-    <view class="modal-dialog" catchtap="stopPropagation">
-      <view class="modal-title">修改会员余额</view>
-      <view class="modal-content">
-        <view class="user-preview">
-          <view class="preview-avatar">
-            <image wx:if="{{currentUser.avatarUrl}}" src="{{currentUser.avatarUrl}}" mode="aspectFill"></image>
-            <view wx:else class="default-avatar">👤</view>
-          </view>
-          <view class="preview-name">{{currentUser.nickName || '未设置'}}</view>
-        </view>
-
-        <view class="form-item">
-          <view class="form-label">账户余额</view>
-          <input 
-            class="form-input" 
-            type="digit" 
-            placeholder="请输入余额" 
-            value="{{editBalance}}"
-            bindinput="onBalanceInput"
-          />
-        </view>
-      </view>
-      <view class="modal-footer">
-        <view class="modal-btn cancel" bindtap="closeBalanceModal">取消</view>
-        <view class="modal-btn confirm" bindtap="saveBalance">保存</view>
-      </view>
-    </view>
-  </view>
-
-  <!-- 编辑免单次数弹窗 -->
-  <view class="modal-mask" wx:if="{{showMiandanModal}}" catchtap="closeMiandanModal">
-    <view class="modal-dialog" catchtap="stopPropagation">
-      <view class="modal-title">修改免单次数</view>
-      <view class="modal-content">
-        <view class="user-preview">
-          <view class="preview-avatar">
-            <image wx:if="{{currentUser.avatarUrl}}" src="{{currentUser.avatarUrl}}" mode="aspectFill"></image>
-            <view wx:else class="default-avatar">👤</view>
-          </view>
-          <view class="preview-name">{{currentUser.nickName || '未设置'}}</view>
-        </view>
-
-        <view class="form-item">
-          <view class="form-label">免单次数</view>
-          <input 
-            class="form-input" 
-            type="number" 
-            placeholder="请输入免单次数" 
-            value="{{editMiandanCount}}"
-            bindinput="onMiandanCountInput"
-          />
-        </view>
-      </view>
-      <view class="modal-footer">
-        <view class="modal-btn cancel" bindtap="closeMiandanModal">取消</view>
-        <view class="modal-btn confirm" bindtap="saveMiandan">保存</view>
-      </view>
-    </view>
-  </view>
 </view>
 

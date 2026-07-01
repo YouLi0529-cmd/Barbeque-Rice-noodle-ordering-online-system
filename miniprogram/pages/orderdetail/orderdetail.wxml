@@ -1,0 +1,84 @@
+<!--pages/orderdetail/orderdetail.wxml-->
+<view class="page">
+  <view class="detail-header" style="padding-top: {{statusBarHeight}}px;">
+    <view class="detail-nav" style="height: {{navBarHeight}}px;">
+      <view class="detail-nav-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">
+        <view class="back-btn" bindtap="goBack">
+          <view class="back-icon" style="width: {{navIconSize}}px; height: {{navIconSize}}px; border-width: {{navIconStroke}}px;"></view>
+        </view>
+        <view class="detail-title" style="font-size: {{navTitleFontSize}}px; line-height: {{navTitleFontSize}}px;">订单详情</view>
+      </view>
+    </view>
+  </view>
+
+  <scroll-view class="detail-scroll" scroll-y="true" wx:if="{{!empty}}">
+    <view class="detail-card">
+      <view class="detail-card-head">
+        <view class="detail-head-left">
+          <view class="order-label">点餐单</view>
+          <view class="order-time">{{order.createTimeText}}</view>
+        </view>
+        <view class="order-status {{order.statusClass}}">{{order.statusText}}</view>
+      </view>
+
+      <view class="order-info-row">
+        <text>{{order.tableNumberText}}</text>
+      </view>
+
+      <view class="detail-divider"></view>
+
+      <view class="goods-list">
+        <view class="goods-item" wx:for="{{goods}}" wx:key="detailKey">
+          <image wx:if="{{item.dishImage}}" class="goods-image" src="{{item.dishImage}}" mode="aspectFill"></image>
+          <view wx:else class="goods-image-fallback">{{item.shortName}}</view>
+          <view class="goods-main">
+            <view class="goods-name">{{item.dishName}}</view>
+            <view class="goods-options" wx:if="{{item.tagText}}">{{item.tagText}}</view>
+          </view>
+          <view class="goods-count">x{{item.count}}</view>
+          <view class="goods-price">¥{{item.subtotalText}}</view>
+        </view>
+      </view>
+
+      <view class="detail-divider"></view>
+
+      <view class="total-row">
+        <view class="total-label">总价</view>
+        <view class="total-price">¥{{order.finalPriceText}}</view>
+      </view>
+
+      <view class="detail-divider light"></view>
+
+      <view class="count-row">共{{order.goodsCount}}件菜品</view>
+    </view>
+
+    <view class="state-card saved-card" wx:if="{{order.isSavedOrder}}">
+      <view class="state-card-title">已保存订单</view>
+      <view class="state-card-text">订单将保存24小时，请在到店落座后扫码提交。</view>
+    </view>
+
+    <view class="state-card info-card" wx:if="{{order.isCompletedOrder}}">
+      <view class="info-row">
+        <view class="info-label">桌号</view>
+        <view class="info-value">{{order.tableNumberValue}}</view>
+      </view>
+      <view class="info-row">
+        <view class="info-label">订单号</view>
+        <view class="info-value order-no">{{order.orderNoText}}</view>
+      </view>
+      <view class="info-row">
+        <view class="info-label">下单时间</view>
+        <view class="info-value">{{order.createTimeText}}</view>
+      </view>
+      <view class="info-row">
+        <view class="info-label">订单状态</view>
+        <view class="info-value">{{order.statusText}}</view>
+      </view>
+    </view>
+  </scroll-view>
+
+  <view class="empty-state" wx:else>
+    <view class="empty-title">暂无订单详情</view>
+    <view class="empty-back" bindtap="goBack">返回订单</view>
+  </view>
+</view>

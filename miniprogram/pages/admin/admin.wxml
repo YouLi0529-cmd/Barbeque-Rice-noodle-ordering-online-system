@@ -25,12 +25,6 @@
         bind:click="goToOrder"
       />
       <van-grid-item 
-        icon="credit-pay" 
-        icon-color="#ff976a"
-        text="充值选项管理" 
-        bind:click="goToRechargeOptions"
-      />
-      <van-grid-item 
         icon="volume-o" 
         icon-color="#ffd700"
         text="公告管理" 

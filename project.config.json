@@ -57,13 +57,7 @@
       "list": []
     },
     "miniprogram": {
-      "list": [
-        {
-          "id": -1,
-          "name": "db guide",
-          "pathName": "pages/databaseGuide/databaseGuide"
-        }
-      ]
+      "list": []
     }
   },
   "compileType": "miniprogram",
@@ -76,8 +70,8 @@
     "ignore": [],
     "include": []
   },
-  "appid": "wx57595aaf3f7c3344",
+  "appid": "wx62f32034d874ae93",
   "cloud": true,
-  "libVersion": "3.8.0",
+  "libVersion": "3.12.1",
   "simulatorPluginLibVersion": {}
 }

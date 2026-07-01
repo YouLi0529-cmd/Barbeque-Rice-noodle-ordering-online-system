@@ -1,11 +1,16 @@
 // pages/myhome/myhome.js
 const app = getApp()
 const db = wx.cloud.database()
+const { getCustomNavOptions } = require('../../utils/customNav')
 
 Page({
   data: {
+    statusBarHeight: 44,
+    navBarHeight: 44,
+    navContentTop: 0,
+    navContentHeight: 44,
+    navTitleFontSize: 18,
     userInfo: null, // 用户信息
-    miandanCount: 0, // 免单次数
     showAuthModal: false, // 显示授权弹窗
     // 管理员相关
     clickCount: 0, // 连续点击次数
@@ -13,68 +18,103 @@ Page({
     showPasswordModal: false, // 显示密码输入框
     adminPassword: '', // 管理员密码
     isFirstTime: false, // 是否首次登录
-    version: '' // 版本号
+    version: '', // 版本号
+    actionLoading: false,
+    actionLoadingText: '',
+    actionLoadingGif: '/images/orderloadinggif-transparent.gif'
   },
 
+  showActionLoading(text = '加载中') {
+    this.setData({
+      actionLoading: true,
+      actionLoadingText: text
+    })
+  },
+
+  hideActionLoading() {
+    this.setData({
+      actionLoading: false,
+      actionLoadingText: ''
+    })
+  },
+
+  catchActionLoadingMove() {},
+
   onLoad() {
+    this.setData(getCustomNavOptions())
     this.loadUserInfo()
-    this.loadMiandanCount()
     this.getVersion()
   },
 
   onShow() {
-    this.loadUserInfo()
-    this.loadMiandanCount()
+    this.loadUserInfo().then((user) => {
+      if (!this.isProfileCompleted(user)) {
+        this.setData({
+          showAuthModal: true
+        })
+      }
+    })
   },
+
+  goCover() {
+    wx.reLaunch({
+      url: '/pages/covertest/covertest'
+    })
+  },
+
+  goMyOrder() {
+    wx.reLaunch({
+      url: '/pages/myorder/myorder'
+    })
+  },
+
+  goMyHome() {},
 
   // 加载用户信息
   async loadUserInfo() {
     try {
       const openid = app.globalData.openid
+      if (!openid) {
+        this.setData({
+          userInfo: null
+        })
+        app.globalData.userInfo = null
+        return null
+      }
+
       const res = await db.collection('user').where({
         _openid: openid
       }).get()
       
       if (res.data && res.data.length > 0) {
         const user = res.data[0]
-        // 初始化余额字段
-        if (typeof user.balance === 'undefined') {
-          await db.collection('user').doc(user._id).update({
-            data: {
-              balance: 0
-            }
-          })
-          user.balance = 0
-        }
-
         this.setData({
           userInfo: user
         })
         
         // 同时更新全局数据，确保其他页面也能获取最新信息
         app.globalData.userInfo = user
+        return user
       }
+
+      this.setData({
+        userInfo: null
+      })
+      app.globalData.userInfo = null
+      return null
     } catch (err) {
       console.error('获取用户信息失败', err)
+      return null
     }
   },
 
-  // 加载免单次数
-  async loadMiandanCount() {
-    try {
-      const openid = app.globalData.openid
-      const res = await db.collection('freeBuy').where({
-        _openid: openid
-      }).get()
-      
-      if (res.data && res.data.length > 0) {
-        this.setData({
-          miandanCount: res.data[0].count || 0
-        })
-      }
-    } catch (err) {
-      console.error('获取免单次数失败', err)
-    }
+  isProfileCompleted(userInfo) {
+    return !!(
+      userInfo &&
+      userInfo.userCode &&
+      userInfo.profileCompleted === true &&
+      userInfo.status === 1
+    )
   },
 
   // 显示授权弹窗
@@ -86,30 +126,34 @@ Page({
 
   // 用户信息保存成功回调
   onUserInfoSaved(e) {
+    if (e.detail && e.detail.user) {
+      app.globalData.userInfo = e.detail.user
+      this.setData({
+        userInfo: e.detail.user,
+        showAuthModal: false
+      })
+    }
     // 刷新用户信息
     this.loadUserInfo()
   },
 
-  // 跳转到充值页面
-  goToRecharge() {
-    if (!this.data.userInfo || !this.data.userInfo.phoneNumber) {
-      wx.showToast({
-        title: '请先登录',
-        icon: 'none'
-      })
-      return
-    }
-
-    wx.switchTab({
-      url: '/pages/recharge/recharge'
+  onAuthModalClosed() {
+    this.setData({
+      showAuthModal: false
     })
   },
 
   // 跳转到订单页面
   goToOrder(e) {
     const status = e.currentTarget.dataset.status
-    wx.switchTab({
+    wx.navigateTo({
       url: '/pages/myorder/myorder'
+    })
+  },
+
+  goAbout() {
+    wx.navigateTo({
+      url: '/pages/about/about'
     })
   },
 
@@ -144,17 +188,17 @@ Page({
   // 检查是否首次设置管理员
   async checkAdminFirstTime() {
     try {
-      wx.showLoading({ title: '检查中...' })
+      this.showActionLoading('检查中')
       const res = await db.collection('admin').get()
       
-      wx.hideLoading()
+      this.hideActionLoading()
       this.setData({
         showPasswordModal: true,
         isFirstTime: res.data.length === 0,
         adminPassword: ''
       })
     } catch (err) {
-      wx.hideLoading()
+      this.hideActionLoading()
       console.error('检查管理员失败', err)
       this.setData({
         showPasswordModal: true,
@@ -206,7 +250,7 @@ Page({
     }
 
     try {
-      wx.showLoading({ title: this.data.isFirstTime ? '设置中...' : '验证中...' })
+      this.showActionLoading(this.data.isFirstTime ? '设置中' : '验证中')
       
       // 查询管理员记录（只取第一条）
       const res = await db.collection('admin').limit(1).get()
@@ -215,7 +259,7 @@ Page({
         // 首次设置密码
         if (res.data && res.data.length > 0) {
           // 如果已存在记录，提示管理员已存在，需要登录
-          wx.hideLoading()
+          this.hideActionLoading()
           wx.showToast({
             title: '管理员已存在，请登录',
             icon: 'none'
@@ -236,7 +280,7 @@ Page({
             }
           })
           
-          wx.hideLoading()
+          this.hideActionLoading()
           wx.showToast({
             title: '密码设置成功',
             icon: 'success'
@@ -251,7 +295,7 @@ Page({
         }
       } else {
         // 验证密码
-        wx.hideLoading()
+        this.hideActionLoading()
         
         if (res.data.length === 0) {
           wx.showToast({
@@ -277,7 +321,7 @@ Page({
         }
       }
     } catch (err) {
-      wx.hideLoading()
+      this.hideActionLoading()
       console.error('操作失败', err)
       wx.showToast({
         title: '操作失败，请重试',

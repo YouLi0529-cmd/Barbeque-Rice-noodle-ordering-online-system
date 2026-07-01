@@ -1,0 +1,23 @@
+<!--pages/about.wxml-->
+<view class="about-page">
+  <view class="about-header" style="padding-top: {{statusBarHeight}}px;">
+    <view class="about-nav" style="height: {{navBarHeight}}px;">
+      <view class="about-nav-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">
+        <view class="back-btn" bindtap="goBack">
+          <view class="back-icon" style="width: {{navIconSize}}px; height: {{navIconSize}}px; border-width: {{navIconStroke}}px;"></view>
+        </view>
+        <view class="about-title" style="font-size: {{navTitleFontSize}}px;">关于</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="about-content">
+    <view class="shop-card">
+      <view class="shop-logo">
+        <image src="/images/shopping.png" mode="aspectFit"></image>
+      </view>
+      <view class="shop-name">餐厅点餐</view>
+      <view class="shop-desc">这里后续可以放店铺介绍、营业时间、联系方式、活动说明。</view>
+    </view>
+  </view>
+</view>
