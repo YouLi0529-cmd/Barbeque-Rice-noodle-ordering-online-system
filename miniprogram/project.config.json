@@ -26,7 +26,32 @@
   "compileType": "miniprogram",
   "simulatorPluginLibVersion": {},
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      {
+        "type": "folder",
+        "value": "components/colorui"
+      },
+      {
+        "type": "folder",
+        "value": "pages/recharge"
+      },
+      {
+        "type": "file",
+        "value": "pages/about.js"
+      },
+      {
+        "type": "file",
+        "value": "pages/about.json"
+      },
+      {
+        "type": "file",
+        "value": "pages/about.wxml"
+      },
+      {
+        "type": "file",
+        "value": "pages/about.wxss"
+      }
+    ],
     "include": []
   },
   "appid": "wx62f32034d874ae93",

@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "我的",
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "van-grid": "/vant/grid/index",
+    "van-grid-item": "/vant/grid-item/index",
+    "avatar-nickname-modal": "/components/avatarNicknameModal/avatarNicknameModal"
+  }
+}

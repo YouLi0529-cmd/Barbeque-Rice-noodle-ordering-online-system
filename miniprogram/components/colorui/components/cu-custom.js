@@ -1,4 +1,4 @@
-const app = getApp();
+﻿const app = getApp();
 Component({
   /**
    * 组件的一些选项
@@ -47,7 +47,7 @@ Component({
     },
     toHome(){
       wx.reLaunch({
-        url: '/pages/index/index',
+        url: '/packages/order/pages/index/index',
       })
     }
   }

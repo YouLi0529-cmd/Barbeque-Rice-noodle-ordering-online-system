@@ -1,4 +1,4 @@
-// pages/about/about.js
+// pages/about.js
 const { getCustomNavOptions } = require('../../utils/customNav')
 
 Page({
@@ -24,7 +24,7 @@ Page({
     }
 
     wx.reLaunch({
-      url: '/pages/myhome/myhome'
+      url: '/packages/user/pages/myhome/myhome'
     })
   }
 })

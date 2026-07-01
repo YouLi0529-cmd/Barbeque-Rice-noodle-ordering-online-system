@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "公告管理",
+  "usingComponents": {
+    "van-empty": "/vant/empty/index"
+  }
+}

@@ -1,44 +1,5 @@
-// pages/covertest/covertest.js
+﻿// pages/covertest/covertest.js
 const { getCustomNavOptions } = require('../../utils/customNav')
-
-const orderLoadingFrames = [
-  '/images/orderloadinggif_frames/frame_00.png',
-  '/images/orderloadinggif_frames/frame_01.png',
-  '/images/orderloadinggif_frames/frame_02.png',
-  '/images/orderloadinggif_frames/frame_03.png',
-  '/images/orderloadinggif_frames/frame_04.png',
-  '/images/orderloadinggif_frames/frame_05.png',
-  '/images/orderloadinggif_frames/frame_06.png',
-  '/images/orderloadinggif_frames/frame_07.png',
-  '/images/orderloadinggif_frames/frame_08.png',
-  '/images/orderloadinggif_frames/frame_09.png',
-  '/images/orderloadinggif_frames/frame_10.png',
-  '/images/orderloadinggif_frames/frame_11.png',
-  '/images/orderloadinggif_frames/frame_12.png',
-  '/images/orderloadinggif_frames/frame_13.png',
-  '/images/orderloadinggif_frames/frame_14.png',
-  '/images/orderloadinggif_frames/frame_15.png'
-]
-
-const campingLoadingFrames = [
-  '/images/loadinggif_frames/frame_00.png',
-  '/images/loadinggif_frames/frame_01.png',
-  '/images/loadinggif_frames/frame_02.png',
-  '/images/loadinggif_frames/frame_03.png',
-  '/images/loadinggif_frames/frame_04.png',
-  '/images/loadinggif_frames/frame_05.png',
-  '/images/loadinggif_frames/frame_06.png',
-  '/images/loadinggif_frames/frame_07.png',
-  '/images/loadinggif_frames/frame_08.png',
-  '/images/loadinggif_frames/frame_09.png',
-  '/images/loadinggif_frames/frame_10.png',
-  '/images/loadinggif_frames/frame_11.png',
-  '/images/loadinggif_frames/frame_12.png',
-  '/images/loadinggif_frames/frame_13.png',
-  '/images/loadinggif_frames/frame_14.png',
-  '/images/loadinggif_frames/frame_15.png',
-  '/images/loadinggif_frames/frame_16.png'
-]
 
 Page({
   data: {
@@ -56,11 +17,7 @@ Page({
     orderTransitioning: false,
     showOrderPreview: false,
     showCampingPreview: false,
-    showContactModal: false,
-    orderLoadingFrameIndex: 0,
-    orderLoadingFrames,
-    campingLoadingFrameIndex: 0,
-    campingLoadingFrames
+    showContactModal: false
   },
 
   refreshCustomNav() {
@@ -110,13 +67,27 @@ Page({
     this.campingLoadingTimer = null
   },
 
+  preloadPackage(root) {
+    try {
+      if (wx.preloadSubpackage) {
+        wx.preloadSubpackage({
+          name: root,
+          fail: err => console.warn('预加载分包失败', root, err)
+        })
+      }
+    } catch (err) {
+      console.warn('预加载分包异常', root, err)
+    }
+  },
+
   goOrder() {
     if (this.data.orderTransitioning || this.data.planeState) return
+    this.preloadPackage('packages/order')
 
     try {
       if (wx.preloadPage) {
         wx.preloadPage({
-          url: 'pages/index/index'
+          url: '/packages/order/pages/index/index'
         })
       }
     } catch (err) {
@@ -132,7 +103,7 @@ Page({
 
     setTimeout(() => {
       wx.navigateTo({
-        url: '/pages/index/index',
+        url: '/packages/order/pages/index/index',
         fail: () => {
           this.setData({
             orderTransitioning: false,
@@ -166,13 +137,14 @@ Page({
 
   goCamping() {
     if (this.data.planeState) return
-    const targetRoute = 'pages/campingorderfood/campingorderfood'
+    const targetRoute = 'packages/camping/pages/campingorderfood/campingorderfood'
     const targetUrl = `/${targetRoute}`
+    this.preloadPackage('packages/camping')
 
     try {
       if (wx.preloadPage) {
         wx.preloadPage({
-          url: targetRoute
+          url: targetUrl
         })
       }
     } catch (err) {
@@ -212,14 +184,16 @@ Page({
   },
 
   goMyOrder() {
+    this.preloadPackage('packages/user')
     wx.navigateTo({
-      url: '/pages/myorder/myorder'
+      url: '/packages/user/pages/myorder/myorder'
     })
   },
 
   goMyHome() {
+    this.preloadPackage('packages/user')
     wx.navigateTo({
-      url: '/pages/myhome/myhome'
+      url: '/packages/user/pages/myhome/myhome'
     })
   }
 })

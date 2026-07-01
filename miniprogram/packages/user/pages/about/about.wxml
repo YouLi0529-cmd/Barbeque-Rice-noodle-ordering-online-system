@@ -1,4 +1,4 @@
-<!--pages/about.wxml-->
+﻿<!--packages/user/pages/about/about.wxml-->
 <view class="about-page">
   <view class="about-header" style="padding-top: {{statusBarHeight}}px;">
     <view class="about-nav" style="height: {{navBarHeight}}px;">
@@ -6,7 +6,7 @@
         <view class="back-btn" bindtap="goBack">
           <view class="back-icon" style="width: {{navIconSize}}px; height: {{navIconSize}}px; border-width: {{navIconStroke}}px;"></view>
         </view>
-        <view class="about-title" style="font-size: {{navTitleFontSize}}px;">关于</view>
+        <view class="about-title" style="font-size: {{navTitleFontSize}}px; line-height: {{navTitleFontSize}}px;">关于</view>
       </view>
     </view>
   </view>

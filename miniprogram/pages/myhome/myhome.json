@@ -1,7 +1,0 @@
-{
-  "navigationBarTitleText": "我的",
-  "navigationStyle": "custom",
-  "usingComponents": {
-    "avatar-nickname-modal": "/components/avatarNicknameModal/avatarNicknameModal"
-  }
-}

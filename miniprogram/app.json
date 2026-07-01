@@ -1,21 +1,43 @@
 {
   "pages": [
-    "pages/covertest/covertest",
-    "pages/campingorderfood/campingorderfood",
-    "pages/index/index",
-    "pages/myorder/myorder",
-    "pages/orderdetail/orderdetail",
-    "pages/myhome/myhome",
-    "pages/about/about",
-    "pages/settle/settle",
-    "pages/admin/admin",
-    "pages/admin/dish/dish",
-    "pages/admin/user/user",
-    "pages/admin/order/order",
-    "pages/admin/notice/notice",
-    "pages/admin/shopInfo/shopInfo",
-    "pages/admin/tableCode/tableCode",
-    "pages/admin/printer/printer"
+    "pages/covertest/covertest"
+  ],
+  "subpackages": [
+    {
+      "root": "packages/order",
+      "pages": [
+        "pages/index/index",
+        "pages/settle/settle"
+      ]
+    },
+    {
+      "root": "packages/camping",
+      "pages": [
+        "pages/campingorderfood/campingorderfood"
+      ]
+    },
+    {
+      "root": "packages/user",
+      "pages": [
+        "pages/myorder/myorder",
+        "pages/orderdetail/orderdetail",
+        "pages/myhome/myhome",
+        "pages/about/about"
+      ]
+    },
+    {
+      "root": "packages/admin",
+      "pages": [
+        "pages/admin/admin",
+        "pages/admin/dish/dish",
+        "pages/admin/user/user",
+        "pages/admin/order/order",
+        "pages/admin/notice/notice",
+        "pages/admin/shopInfo/shopInfo",
+        "pages/admin/tableCode/tableCode",
+        "pages/admin/printer/printer"
+      ]
+    }
   ],
 
   "window": {
@@ -24,20 +46,6 @@
     "navigationBarBackgroundColor": "#e54d42",
     "navigationBarTitleText": "餐饮点餐",
     "navigationBarTextStyle": "white"
-  },
-  "usingComponents": {
-    "van-notice-bar": "/vant/notice-bar/index",
-    "van-search": "/vant/search/index",
-    "van-dropdown-menu": "/vant/dropdown-menu/index",
-    "van-dropdown-item": "/vant/dropdown-item/index",
-    "van-cell": "/vant/cell/index",
-    "van-cell-group": "/vant/cell-group/index",
-    "van-grid": "/vant/grid/index",
-    "van-grid-item": "/vant/grid-item/index",
-    "van-tabs": "/vant/tabs/index",
-    "van-tab": "/vant/tab/index",
-    "van-tag": "/vant/tag/index",
-    "van-empty": "/vant/empty/index"
   },
   "sitemapLocation": "sitemap.json",
   "style": "v2"

@@ -1,5 +1,5 @@
-﻿// pages/about.js
-const { getCustomNavOptions } = require('../utils/customNav')
+﻿// packages/user/pages/about/about.js
+const { getCustomNavOptions } = require('../../../../utils/customNav')
 
 Page({
   data: {
