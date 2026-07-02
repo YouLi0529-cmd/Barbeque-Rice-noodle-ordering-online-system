@@ -349,21 +349,19 @@
 }
 
 /* 空状态 */
-.empty-state {
-  text-align: center;
-  padding: 150rpx 0;
+.empty-order {
+  min-height: 62vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx 20rpx 120rpx;
+  box-sizing: border-box;
 }
 
-.empty-image {
-  width: 200rpx;
-  height: 200rpx;
-  opacity: 0.3;
-  margin-bottom: 30rpx;
-}
-
-.empty-text {
-  font-size: 28rpx;
-  color: #999;
+.empty-order-image {
+  width: 620rpx;
+  height: 620rpx;
+  display: block;
 }
 
 .cover-tabbar {

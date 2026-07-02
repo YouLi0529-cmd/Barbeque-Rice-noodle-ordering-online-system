@@ -55,6 +55,9 @@ Page({
     searchRowTop: 50,
     shopNavTotalHeight: 84,
     tableNumber: '', // 桌码号
+    sharedSessionId: '',
+    sharedCartReady: false,
+    sharedCartWatchReady: false,
     // 菜品分页
     goodsPage: 0,
     goodsPageSize: 20,
@@ -95,6 +98,7 @@ Page({
 
   onLoad(options) {
     this.refreshCustomNav()
+    let scannedTableNumber = ''
     
     // 检查是否从扫码进入，获取桌码号
     // 小程序码扫码进入时，scene参数会在options.scene中
@@ -103,6 +107,7 @@ Page({
       try {
         const scene = decodeURIComponent(options.scene)
         if (scene) {
+          scannedTableNumber = scene
           this.setData({
             tableNumber: scene
           })
@@ -116,6 +121,9 @@ Page({
     this.loadMenu()
     this.loadUserInfo()
     this.loadNotices()
+    if (scannedTableNumber) {
+      this.initSharedCart(scannedTableNumber)
+    }
   },
 
   onReady() {
@@ -126,6 +134,9 @@ Page({
   onShow() {
     this.refreshCustomNav()
     this.loadUserInfo()
+    if (this.data.tableNumber && !this.data.sharedSessionId) {
+      this.initSharedCart(this.data.tableNumber)
+    }
   },
 
   onUnload() {
@@ -135,6 +146,228 @@ Page({
     }
     this.clearCartFxTimers()
     this.stopOrderLoadingAnimation()
+    this.stopSharedCartSync()
+  },
+
+  isSharedCartMode() {
+    return !!(this.data.tableNumber && this.data.sharedSessionId)
+  },
+
+  async initSharedCart(tableNumber) {
+    const currentTable = String(tableNumber || '').trim()
+    if (!currentTable) return
+    if (this.sharedCartInitPromise) {
+      return this.sharedCartInitPromise
+    }
+    if (this.data.sharedSessionId && String(this.data.tableNumber || '') === currentTable) {
+      return
+    }
+
+    const localCartBeforeJoin = this.data.cartCount > 0 ? { ...this.data.cart } : null
+
+    this.sharedCartInitPromise = wx.cloud.callFunction({
+      name: 'sharedCart',
+      data: {
+        action: 'join',
+        tableNumber: currentTable
+      }
+    }).then(async res => {
+      const result = res.result || {}
+      if (!result.success || !result.sessionId) {
+        throw new Error(result.message || '加入共同点单失败')
+      }
+
+      this.stopSharedCartSync()
+      this.setData({
+        tableNumber: currentTable,
+        sharedSessionId: result.sessionId,
+        sharedCartReady: true
+      })
+
+      await this.fetchSharedCart(false)
+      if (localCartBeforeJoin) {
+        const mergedCart = { ...this.data.cart }
+        Object.keys(localCartBeforeJoin).forEach(cartKey => {
+          const localItem = localCartBeforeJoin[cartKey]
+          if (!localItem) return
+          if (mergedCart[cartKey]) {
+            mergedCart[cartKey] = {
+              ...mergedCart[cartKey],
+              count: Number(mergedCart[cartKey].count || 0) + Number(localItem.count || 0)
+            }
+          } else {
+            mergedCart[cartKey] = localItem
+          }
+        })
+        this.updateCart(mergedCart)
+      }
+      this.startSharedCartWatch(result.sessionId)
+    }).catch(err => {
+      console.error('初始化共同点单失败', err)
+      this.startSharedCartFallback()
+    }).finally(() => {
+      this.sharedCartInitPromise = null
+    })
+
+    return this.sharedCartInitPromise
+  },
+
+  startSharedCartWatch(sessionId) {
+    if (!sessionId) return
+    this.stopSharedCartWatch()
+
+    try {
+      this.sharedCartWatcher = db.collection('tableCartItem')
+        .where({
+          sessionId,
+          deleted: _.neq(true)
+        })
+        .watch({
+          onChange: snapshot => {
+            this.setData({ sharedCartWatchReady: true })
+            this.stopSharedCartFallback()
+            this.applySharedCartDocs(snapshot.docs || [])
+          },
+          onError: err => {
+            console.error('共同点单实时监听失败', err)
+            this.setData({ sharedCartWatchReady: false })
+            this.stopSharedCartWatch()
+            this.startSharedCartFallback()
+          }
+        })
+    } catch (err) {
+      console.error('启动共同点单实时监听失败', err)
+      this.setData({ sharedCartWatchReady: false })
+      this.startSharedCartFallback()
+    }
+  },
+
+  stopSharedCartWatch() {
+    if (this.sharedCartWatcher) {
+      try {
+        this.sharedCartWatcher.close()
+      } catch (err) {
+        console.error('关闭共同点单监听失败', err)
+      }
+      this.sharedCartWatcher = null
+    }
+  },
+
+  startSharedCartFallback() {
+    if (!this.data.sharedSessionId || this.sharedCartFallbackTimer) return
+    this.sharedCartFallbackTimer = setInterval(() => {
+      this.fetchSharedCart(false)
+    }, 2000)
+  },
+
+  stopSharedCartFallback() {
+    if (this.sharedCartFallbackTimer) {
+      clearInterval(this.sharedCartFallbackTimer)
+      this.sharedCartFallbackTimer = null
+    }
+  },
+
+  stopSharedCartSync() {
+    this.stopSharedCartWatch()
+    this.stopSharedCartFallback()
+  },
+
+  async fetchSharedCart(showError = true) {
+    if (!this.data.sharedSessionId) return
+
+    try {
+      const res = await wx.cloud.callFunction({
+        name: 'sharedCart',
+        data: {
+          action: 'get',
+          sessionId: this.data.sharedSessionId,
+          tableNumber: this.data.tableNumber
+        }
+      })
+      const result = res.result || {}
+      if (!result.success) {
+        throw new Error(result.message || '同步购物车失败')
+      }
+      this.applySharedCartDocs(result.items || [])
+    } catch (err) {
+      console.error('拉取共同点单购物车失败', err)
+      if (showError) {
+        wx.showToast({ title: '同步失败', icon: 'none' })
+      }
+    }
+  },
+
+  applySharedCartDocs(docs) {
+    const cart = {}
+    ;(docs || []).forEach(doc => {
+      if (!doc || !doc.cartKey || Number(doc.count || 0) <= 0) return
+      cart[doc.cartKey] = {
+        info: doc.info || {},
+        count: Number(doc.count) || 0,
+        tags: doc.tags || {},
+        tagLabels: Array.isArray(doc.tagLabels) ? doc.tagLabels : [],
+        dishId: doc.dishId || (doc.info && doc.info._id) || ''
+      }
+    })
+    this.updateCart(cart, { skipSync: true })
+  },
+
+  serializeSharedCartItem(item) {
+    const info = item && item.info ? { ...item.info } : {}
+    delete info.cartCount
+
+    return {
+      info,
+      tags: item && item.tags ? item.tags : {},
+      tagLabels: item && Array.isArray(item.tagLabels) ? item.tagLabels : [],
+      dishId: item ? (item.dishId || info._id || '') : ''
+    }
+  },
+
+  buildSharedCartOperations(prevCart, nextCart) {
+    const operations = []
+    const keys = Object.keys({
+      ...(prevCart || {}),
+      ...(nextCart || {})
+    })
+
+    keys.forEach(cartKey => {
+      const prevItem = prevCart && prevCart[cartKey]
+      const nextItem = nextCart && nextCart[cartKey]
+      const prevCount = prevItem ? Number(prevItem.count || 0) : 0
+      const nextCount = nextItem ? Number(nextItem.count || 0) : 0
+      const delta = nextCount - prevCount
+      if (delta === 0) return
+
+      operations.push({
+        cartKey,
+        delta,
+        item: this.serializeSharedCartItem(nextItem || prevItem)
+      })
+    })
+
+    return operations
+  },
+
+  syncSharedCartPatch(prevCart, nextCart) {
+    if (!this.isSharedCartMode()) return
+
+    const operations = this.buildSharedCartOperations(prevCart, nextCart)
+    if (operations.length === 0) return
+
+    wx.cloud.callFunction({
+      name: 'sharedCart',
+      data: {
+        action: 'patch',
+        sessionId: this.data.sharedSessionId,
+        tableNumber: this.data.tableNumber,
+        operations
+      }
+    }).catch(err => {
+      console.error('同步共同点单购物车失败', err)
+      this.startSharedCartFallback()
+      wx.showToast({ title: '同步稍慢，正在重试', icon: 'none' })
+    })
   },
 
   startOrderLoadingAnimation() {
@@ -808,7 +1041,7 @@ Page({
   // 确认添加到购物车
   confirmAddToCart(e) {
     const { currentDish, selectedTags, modalDishCount } = this.data
-    const cart = this.data.cart
+    const cart = { ...this.data.cart }
     
     // 验证必选标签
     if (currentDish.tags && currentDish.tags.length > 0) {
@@ -1382,7 +1615,8 @@ Page({
   },
 
   // 更新购物车
-  updateCart(cart) {
+  updateCart(cart, options = {}) {
+    const prevCart = { ...this.data.cart }
     let totalCount = 0
     let totalPrice = 0
     
@@ -1417,6 +1651,10 @@ Page({
       searchGoodsList,
       showCart: totalCount > 0 ? this.data.showCart : false // 购物车为空时自动关闭
     })
+
+    if (!options.skipSync) {
+      this.syncSharedCartPatch(prevCart, cart)
+    }
   },
 
   // 显示/隐藏购物车详情
@@ -1429,30 +1667,7 @@ Page({
 
   // 清空购物车
   clearCart() {
-    // 更新菜品列表中的购物车数量
-    const categorySections = this.data.categorySections.map(section => ({
-      ...section,
-      goods: section.goods.map(goods => ({
-        ...goods,
-        cartCount: 0
-      }))
-    }))
-    const goodsList = categorySections.reduce((result, section) => result.concat(section.goods), [])
-    const searchGoodsList = this.data.searchGoodsList.map(goods => ({
-      ...goods,
-      cartCount: 0
-    }))
-    
-    this.setData({
-      cart: {},
-      cartCount: 0,
-      cartTotalPrice: 0,
-      cartTotalPriceText: '0.00',
-      categorySections,
-      goodsList: goodsList,
-      searchGoodsList,
-      showCart: false
-    })
+    this.updateCart({})
   },
 
   // 去结算
@@ -1480,6 +1695,43 @@ Page({
 
     // 有桌码，跳转到结算页面
     this.navigateToSettle()
+  },
+
+  async saveOrderDraft() {
+    if (this.data.cartCount === 0) {
+      wx.showToast({ title: '购物车为空', icon: 'none' })
+      return
+    }
+
+    this.showActionLoading('保存中')
+
+    try {
+      const res = await wx.cloud.callFunction({
+        name: 'orderDraft',
+        data: {
+          action: 'save',
+          cart: this.data.cart,
+          totalPrice: this.data.cartTotalPrice
+        }
+      })
+
+      if (!res.result || !res.result.success) {
+        throw new Error(res.result && res.result.message ? res.result.message : '保存失败')
+      }
+
+      wx.showToast({
+        title: '已保存24小时',
+        icon: 'success'
+      })
+    } catch (err) {
+      console.error('保存预点单失败', err)
+      wx.showToast({
+        title: err.message || '保存失败',
+        icon: 'none'
+      })
+    } finally {
+      this.hideActionLoading()
+    }
   },
 
   getActiveOrderSessionForSettle() {
@@ -1510,6 +1762,7 @@ Page({
         tableNumber: this.data.tableNumber || '',
         orderType: 'dineIn',
         orderScene: 'dineIn',
+        sharedSessionId: this.data.sharedSessionId || '',
         activeOrderSession: this.getActiveOrderSessionForSettle()
       })
       

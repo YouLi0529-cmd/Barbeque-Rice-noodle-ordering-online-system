@@ -73,8 +73,9 @@
         <text>{{order.tableNumberText}}</text>
       </view>
     </view>
-    <!-- 空状态 -->
-    <van-empty wx:if="{{orderList.length === 0}}" description="暂无订单" />
+    <view class="empty-order" wx:if="{{orderList.length === 0}}">
+      <image class="empty-order-image" src="/packages/user/images/meidingdan-transparent.png" mode="aspectFit"></image>
+    </view>
   </view>
 
   <view class="action-loading-layer" wx:if="{{actionLoading}}" catchtouchmove="catchActionLoadingMove">

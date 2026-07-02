@@ -27,6 +27,12 @@ Page({
       return
     }
 
+    if (this.isExpiredSavedOrder(order)) {
+      wx.removeStorageSync('selectedOrderDetail')
+      this.setData({ empty: true })
+      return
+    }
+
     const goods = this.normalizeGoods(order.goods || [])
     const goodsCount = goods.reduce((sum, item) => sum + (Number(item.count) || 0), 0)
     const finalPrice = order.finalPrice !== undefined && order.finalPrice !== null
@@ -87,11 +93,31 @@ Page({
     return Number.isInteger(num) ? String(num) : num.toFixed(2)
   },
 
+  getTimeValue(time) {
+    if (!time) return 0
+    const source = time && time.$date ? time.$date : time
+    const date = source instanceof Date ? source : new Date(source)
+    const value = date.getTime()
+    return Number.isNaN(value) ? 0 : value
+  },
+
+  isSavedOrder(order) {
+    return order && (order.pay_status === false || order.savedOnly === true || order.isDraft === true)
+  },
+
+  isExpiredSavedOrder(order) {
+    if (!this.isSavedOrder(order)) {
+      return false
+    }
+    const expiresAt = this.getTimeValue(order.expiresAt)
+    return expiresAt > 0 && expiresAt <= Date.now()
+  },
+
   getOrderStatusText(order) {
     const status = Number(order.status)
     if (status === 2) return '已完成'
     if (status === 3) return '已取消'
-    if (order.pay_status === false || order.savedOnly === true || order.isDraft === true) {
+    if (this.isSavedOrder(order)) {
       return '已保存'
     }
     return '已提交'

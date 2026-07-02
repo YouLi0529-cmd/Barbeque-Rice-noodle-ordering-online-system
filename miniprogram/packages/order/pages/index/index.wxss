@@ -14,10 +14,21 @@ page {
   overflow: hidden;
 }
 
+.top-safe-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: #f5e7d5;
+  pointer-events: none;
+}
+
 /* 状态栏占位 */
 /* 店名 */
 .shop-header {
   position: relative;
+  z-index: 21;
   background: #f5e7d5;
   padding-left: 30rpx;
   padding-right: 30rpx;

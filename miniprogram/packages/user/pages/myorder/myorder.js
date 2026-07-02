@@ -148,7 +148,7 @@ Page({
       const sceneOrders = rawList
         .filter(order => {
           const orderScene = order.orderScene || 'dineIn'
-          return order.deleted !== true && orderScene === currentScene
+          return order.deleted !== true && orderScene === currentScene && !this.isExpiredSavedOrder(order)
         })
       const groupedOrders = this.groupOrdersByRoot(sceneOrders)
       const mergedOrders = append
@@ -253,6 +253,18 @@ Page({
     return Number.isNaN(value) ? 0 : value
   },
 
+  isSavedOrder(order) {
+    return order && (order.pay_status === false || order.savedOnly === true || order.isDraft === true)
+  },
+
+  isExpiredSavedOrder(order) {
+    if (!this.isSavedOrder(order)) {
+      return false
+    }
+    const expiresAt = this.getTimeValue(order.expiresAt)
+    return expiresAt > 0 && expiresAt <= Date.now()
+  },
+
   getMergedStatus(orders) {
     const statuses = orders.map(order => Number(order.status))
     if (statuses.length > 0 && statuses.every(status => status === 3)) {
@@ -344,7 +356,7 @@ Page({
     if (status === 3) {
       return '已取消'
     }
-    if (order.pay_status === false || order.savedOnly === true || order.isDraft === true) {
+    if (this.isSavedOrder(order)) {
       return '已保存'
     }
     return '已提交'

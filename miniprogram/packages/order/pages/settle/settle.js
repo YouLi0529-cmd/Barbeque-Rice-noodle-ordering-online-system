@@ -32,6 +32,7 @@ Page({
     sessionTotalPrice: 0,
     sessionGoodsCount: 0,
     activeOrderSession: null,
+    sharedSessionId: '',
     appendToOrderId: '',
     isAddOnOrder: false,
     addOnIndex: 0,
@@ -237,6 +238,7 @@ Page({
         tableNumber: cartData.tableNumber || '',
         orderType: cartData.orderType || 'dineIn',
         orderScene,
+        sharedSessionId: cartData.sharedSessionId || '',
         submitLoadingGif: orderScene === 'camping'
           ? '/images/loadinggif-cutout-transparent.gif'
           : '/images/orderloadinggif-transparent.gif',
@@ -393,6 +395,7 @@ Page({
           tableNumber: this.data.orderScene === 'camping' ? '' : this.data.tableNumber,
           orderType: this.data.orderType,
           orderScene: this.data.orderScene,
+          sharedSessionId: this.data.sharedSessionId,
           parentOrderId: this.data.appendToOrderId,
           addOnIndex: this.data.addOnIndex,
           orderCardTitle: this.data.currentCardTitle
@@ -414,6 +417,7 @@ Page({
 
       if (this.data.orderScene !== 'camping') {
         await this.deleteOrderDraft()
+        await this.clearSharedCart()
       }
       this.clearCart()
 
@@ -523,6 +527,23 @@ Page({
       })
     } catch (err) {
       console.error('删除预点单草稿失败', err)
+    }
+  },
+
+  async clearSharedCart() {
+    if (!this.data.sharedSessionId) return
+
+    try {
+      await wx.cloud.callFunction({
+        name: 'sharedCart',
+        data: {
+          action: 'clear',
+          sessionId: this.data.sharedSessionId,
+          tableNumber: this.data.tableNumber
+        }
+      })
+    } catch (err) {
+      console.error('清空共同点单购物车失败', err)
     }
   },
 
