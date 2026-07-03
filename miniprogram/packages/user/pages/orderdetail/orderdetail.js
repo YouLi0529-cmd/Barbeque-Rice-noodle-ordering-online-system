@@ -1,5 +1,6 @@
 ﻿// packages/user/pages/orderdetail/orderdetail.js
 const { getCustomNavOptions } = require('../../../../utils/customNav')
+const apiClient = require('../../../../utils/apiClient')
 
 Page({
   data: {
@@ -20,11 +21,26 @@ Page({
     this.loadOrderDetail()
   },
 
-  loadOrderDetail() {
-    const order = wx.getStorageSync('selectedOrderDetail')
+  async loadOrderDetail() {
+    let order = wx.getStorageSync('selectedOrderDetail')
     if (!order || !order._id) {
       this.setData({ empty: true })
       return
+    }
+
+    if (apiClient.isEnabled()) {
+      try {
+        const result = await apiClient.call('order.detail', {
+          orderId: order._id,
+          rootOrderId: order.rootOrderId || order._id
+        })
+        const orders = result.data || []
+        if (orders.length > 0) {
+          order = this.mergeOrderGroup(orders)
+        }
+      } catch (err) {
+        console.error('刷新订单详情失败', err)
+      }
     }
 
     if (this.isExpiredSavedOrder(order)) {
@@ -47,6 +63,7 @@ Page({
         ...order,
         goodsCount,
         finalPriceText: order.finalPriceText || this.formatPrice(finalPrice),
+        createTimeText: order.createTimeText || this.formatTime(order.createTime),
         statusText,
         statusClass: order.statusClass || this.getOrderStatusClass(order),
         tableNumberText: order.tableNumberText || this.getOrderTableText(order),
@@ -58,6 +75,37 @@ Page({
       goods,
       empty: false
     })
+  },
+
+  mergeOrderGroup(orders) {
+    const rootOrderId = orders[0].rootOrderId || orders[0]._id
+    const rootOrder = orders.find(item => item._id === rootOrderId || item.isAddOnOrder !== true) || orders[0]
+    const goods = orders.reduce((list, item) => {
+      return list.concat(Array.isArray(item.goods) ? item.goods : [])
+    }, [])
+    const totalPrice = orders.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0)
+    const finalPrice = orders.reduce((sum, item) => {
+      return sum + Number(item.finalPrice || item.totalPrice || 0)
+    }, 0)
+
+    return {
+      ...rootOrder,
+      rootOrderId,
+      orderIds: orders.map(item => item._id).filter(Boolean),
+      goods,
+      totalPrice,
+      finalPrice,
+      pay_status: orders.every(item => item.pay_status !== false),
+      status: this.getMergedStatus(orders)
+    }
+  },
+
+  getMergedStatus(orders) {
+    const statuses = orders.map(order => Number(order.status))
+    if (statuses.length > 0 && statuses.every(status => status === 3)) return 3
+    if (statuses.length > 0 && statuses.every(status => status === 2)) return 2
+    const rootOrder = orders.find(order => order.isAddOnOrder !== true) || orders[0] || {}
+    return rootOrder.status
   },
 
   normalizeGoods(goods) {
@@ -91,6 +139,15 @@ Page({
       return '0'
     }
     return Number.isInteger(num) ? String(num) : num.toFixed(2)
+  },
+
+  formatTime(time) {
+    if (!time) return ''
+    const source = time && time.$date ? time.$date : time
+    const date = source instanceof Date ? source : new Date(source)
+    if (Number.isNaN(date.getTime())) return ''
+    const pad = (n) => (n < 10 ? '0' + n : n)
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
   },
 
   getTimeValue(time) {

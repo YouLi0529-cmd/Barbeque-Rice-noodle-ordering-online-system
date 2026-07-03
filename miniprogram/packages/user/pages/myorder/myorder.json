@@ -1,4 +1,7 @@
 {
   "navigationBarTitleText": "我的订单",
-  "navigationStyle": "custom"
+  "navigationStyle": "custom",
+  "backgroundColor": "#f5e7d5",
+  "backgroundColorTop": "#f5e7d5",
+  "backgroundColorBottom": "#f7ead8"
 }

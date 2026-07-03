@@ -1,6 +1,7 @@
 ﻿// packages/user/pages/myorder/myorder.js
 const app = getApp()
-const db = wx.cloud.database()
+const apiClient = require('../../../../utils/apiClient')
+const db = apiClient.isEnabled() ? null : wx.cloud.database()
 const { getCustomNavOptions } = require('../../../../utils/customNav')
 
 Page({
@@ -66,6 +67,18 @@ Page({
   // 加载用户信息
   async loadUserInfo() {
     try {
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('user.me')
+        const user = result.data || null
+        if (user) {
+          this.setData({
+            userInfo: user
+          })
+          app.globalData.userInfo = user
+        }
+        return
+      }
+
       const openid = app.globalData.openid
       const res = await db.collection('user').where({
         _openid: openid
@@ -108,26 +121,34 @@ Page({
       this.setData({ loadingOrders: true })
 
       const currentScene = this.data.currentTab === 1 ? 'camping' : 'dineIn'
-      const openid = app.globalData.openid
-      
-      let query = {
-        _openid: openid,
-        type: 'order'
-      }
-      if (currentScene === 'camping') {
-        query.orderScene = 'camping'
-      }
-      
       const pageSize = this.data.orderPageSize
       const page = append ? this.data.orderPage + 1 : 0
       const skip = page * pageSize
-      
-      const res = await db.collection('order')
-        .where(query)
-        .orderBy('createTime', 'desc')
-        .skip(skip)
-        .limit(pageSize)
-        .get()
+      let res
+
+      if (apiClient.isEnabled()) {
+        res = await apiClient.call('order.list', {
+          orderScene: currentScene,
+          page,
+          limit: pageSize
+        })
+      } else {
+        const openid = app.globalData.openid
+        let query = {
+          _openid: openid,
+          type: 'order'
+        }
+        if (currentScene === 'camping') {
+          query.orderScene = 'camping'
+        }
+
+        res = await db.collection('order')
+          .where(query)
+          .orderBy('createTime', 'desc')
+          .skip(skip)
+          .limit(pageSize)
+          .get()
+      }
 
       // 格式化时间，避免界面显示 [object Object]
       const formatTime = (time) => {
@@ -420,14 +441,20 @@ Page({
         ? order.orderIds
         : [order._id]
 
-      await Promise.all(orderIds.map(orderId => {
-        return db.collection('order').doc(orderId).update({
-          data: {
-            deleted: true,
-            updateTime: new Date()
-          }
+      if (apiClient.isEnabled()) {
+        await apiClient.call('order.delete', {
+          orderIds
         })
-      }))
+      } else {
+        await Promise.all(orderIds.map(orderId => {
+          return db.collection('order').doc(orderId).update({
+            data: {
+              deleted: true,
+              updateTime: new Date()
+            }
+          })
+        }))
+      }
 
       const rootOrderId = order.rootOrderId || order._id
       const orderList = this.data.orderList.filter(item => {
@@ -468,12 +495,18 @@ Page({
     this.showActionLoading('处理中')
     
     try {
-      // 更新订单状态
-      await db.collection('order').doc(order._id).update({
-        data: {
-          status: 3 // 已取消
-        }
-      })
+      if (apiClient.isEnabled()) {
+        await apiClient.call('order.cancel', {
+          orderId: order._id
+        })
+      } else {
+        // 更新订单状态
+        await db.collection('order').doc(order._id).update({
+          data: {
+            status: 3 // 已取消
+          }
+        })
+      }
       
       this.hideActionLoading()
       wx.showToast({ title: '订单已取消', icon: 'success' })

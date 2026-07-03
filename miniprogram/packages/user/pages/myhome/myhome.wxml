@@ -1,5 +1,6 @@
 ﻿<!--packages/user/pages/myhome/myhome.wxml-->
 <view class="page">
+  <view class="top-safe-bg" style="height: {{statusBarHeight}}px;"></view>
   <view class="my-page-header" style="padding-top: {{statusBarHeight}}px;">
     <view class="my-page-nav" style="height: {{navBarHeight}}px;">
       <view class="my-page-nav-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">

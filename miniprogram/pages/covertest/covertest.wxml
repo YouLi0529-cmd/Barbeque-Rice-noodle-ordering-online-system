@@ -54,7 +54,7 @@
       </view>
     </view>
     <view class="order-preview-cart">
-      <image class="order-preview-cart-icon" src="/images/shopping.png" mode="aspectFit"></image>
+      <image class="order-preview-cart-icon" src="/images/campingshoppingcar-transparent.png" mode="aspectFit"></image>
       <view class="order-preview-cart-text">
         <view class="order-preview-cart-title"></view>
         <view class="order-preview-cart-line"></view>
@@ -156,7 +156,7 @@
     <view class="float-cart-wrapper">
       <view class="float-cart-card">
         <view class="cart-icon-wrapper">
-          <image class="cart-icon" src="/images/shopping.png" mode="aspectFit"></image>
+          <image class="cart-icon" src="/images/campingshoppingcar-transparent.png" mode="aspectFit"></image>
         </view>
         <view class="cart-info">
           <view class="cart-title">露营清单</view>

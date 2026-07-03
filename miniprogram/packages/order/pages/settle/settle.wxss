@@ -5,8 +5,19 @@
   padding-bottom: 120rpx; /* 为底部按钮留出空间 */
 }
 
+.top-safe-bg {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 20;
+  background: #f5e7d5;
+  pointer-events: none;
+}
+
 .settle-header {
   position: relative;
+  z-index: 21;
   background: #f5e7d5;
   padding-left: 30rpx;
   padding-right: 30rpx;

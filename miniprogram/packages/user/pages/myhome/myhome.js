@@ -1,6 +1,7 @@
 ﻿// packages/user/pages/myhome/myhome.js
 const app = getApp()
-const db = wx.cloud.database()
+const apiClient = require('../../../../utils/apiClient')
+const db = apiClient.isEnabled() ? null : wx.cloud.database()
 const { getCustomNavOptions } = require('../../../../utils/customNav')
 
 Page({
@@ -80,6 +81,16 @@ Page({
         })
         app.globalData.userInfo = null
         return null
+      }
+
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('user.me')
+        const user = result.data || null
+        this.setData({
+          userInfo: user
+        })
+        app.globalData.userInfo = user
+        return user
       }
 
       const res = await db.collection('user').where({

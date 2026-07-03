@@ -1,7 +1,8 @@
 ﻿// packages/order/pages/index/index.js
 const app = getApp()
-const db = wx.cloud.database()
-const _ = db.command
+const apiClient = require('../../../../utils/apiClient')
+const db = apiClient.isEnabled() ? null : wx.cloud.database()
+const _ = db ? db.command : null
 const { getCustomNavOptions } = require('../../../../utils/customNav')
 
 Page({
@@ -254,6 +255,16 @@ Page({
 
   async loadShopInfo() {
     try {
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('shop.info')
+        if (result.data) {
+          this.setData({
+            shopInfo: result.data
+          })
+        }
+        return
+      }
+
       const res = await db.collection('shopInfo').limit(1).get()
       
       if (res.data && res.data.length > 0) {
@@ -269,6 +280,18 @@ Page({
   // 加载用户信息
   async loadUserInfo() {
     try {
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('user.me')
+        const user = result.data || null
+        if (user) {
+          this.setData({
+            userInfo: user
+          })
+          app.globalData.userInfo = user
+        }
+        return
+      }
+
       const openid = app.globalData.openid
       const res = await db.collection('user').where({
         _openid: openid
@@ -298,6 +321,16 @@ Page({
   // 加载公告
   async loadNotices() {
     try {
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('notice.list')
+        const noticeList = result.data || []
+        this.setData({
+          noticeList,
+          noticeText: noticeList.map(item => item.content).join('    ')
+        })
+        return
+      }
+
       const res = await db.collection('notice')
         .where({ status: 1 }) // 只显示启用的公告
         .orderBy('sort', 'asc')
@@ -326,13 +359,16 @@ Page({
       this.startOrderLoadingAnimation()
     }
     try {
-      const res = await wx.cloud.callFunction({
-        name: 'getCategory',
-        data: {
+      const result = apiClient.isEnabled()
+        ? await apiClient.call('menu.categories', {
           menuType: 'camping'
-        }
-      })
-      const result = res.result || {}
+        })
+        : (await wx.cloud.callFunction({
+          name: 'getCategory',
+          data: {
+            menuType: 'camping'
+          }
+        })).result || {}
       const list = result.success ? (result.data || []) : []
       
       if (list.length > 0) {
@@ -386,16 +422,23 @@ Page({
       const page = append ? this.data.goodsPage + 1 : 0
       const skip = page * pageSize
 
-      const goodsRes = await db.collection('dish')
-        .where({
-          categoryId: menuId,
+      const goodsRes = apiClient.isEnabled()
+        ? await apiClient.call('menu.categoryGoods', {
           menuType: 'camping',
-          status: 1 // 1表示上架
+          categoryId: menuId,
+          page,
+          limit: pageSize
         })
-        .orderBy('sort', 'asc')
-        .skip(skip)
-        .limit(pageSize)
-        .get()
+        : await db.collection('dish')
+          .where({
+            categoryId: menuId,
+            menuType: 'camping',
+            status: 1 // 1表示上架
+          })
+          .orderBy('sort', 'asc')
+          .skip(skip)
+          .limit(pageSize)
+          .get()
       
       // 为每个菜品添加购物车数量
       const list = goodsRes.data || []
@@ -423,15 +466,21 @@ Page({
   },
 
   async loadCategoryGoods(category) {
-    const goodsRes = await db.collection('dish')
-      .where({
-        categoryId: category._id,
+    const goodsRes = apiClient.isEnabled()
+      ? await apiClient.call('menu.categoryGoods', {
         menuType: 'camping',
-        status: 1
+        categoryId: category._id,
+        limit: 100
       })
-      .orderBy('sort', 'asc')
-      .limit(100)
-      .get()
+      : await db.collection('dish')
+        .where({
+          categoryId: category._id,
+          menuType: 'camping',
+          status: 1
+        })
+        .orderBy('sort', 'asc')
+        .limit(100)
+        .get()
 
     const goods = (goodsRes.data || []).map(item => ({
       ...item,
@@ -657,18 +706,41 @@ Page({
     })
 
     try {
-      const matcher = db.RegExp({
-        regexp: this.escapeRegExp(currentKeyword),
-        options: 'i'
-      })
-      const res = await db.collection('dish')
-        .where(_.or([
-          { status: 1, menuType: 'camping', name: matcher },
-          { status: 1, menuType: 'camping', categoryName: matcher },
-          { status: 1, menuType: 'camping', description: matcher }
-        ]))
-        .limit(50)
-        .get()
+      const res = apiClient.isEnabled()
+        ? await apiClient.call('menu.search', {
+          menuType: 'camping',
+          keyword: currentKeyword,
+          limit: 50
+        })
+        : await db.collection('dish')
+          .where(_.or([
+            {
+              status: 1,
+              menuType: 'camping',
+              name: db.RegExp({
+                regexp: this.escapeRegExp(currentKeyword),
+                options: 'i'
+              })
+            },
+            {
+              status: 1,
+              menuType: 'camping',
+              categoryName: db.RegExp({
+                regexp: this.escapeRegExp(currentKeyword),
+                options: 'i'
+              })
+            },
+            {
+              status: 1,
+              menuType: 'camping',
+              description: db.RegExp({
+                regexp: this.escapeRegExp(currentKeyword),
+                options: 'i'
+              })
+            }
+          ]))
+          .limit(50)
+          .get()
 
       if (this.searchToken !== token) return
 
@@ -1268,6 +1340,25 @@ Page({
     
     try {
       this.showActionLoading('授权中')
+
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('user.completeProfile', {
+          avatarUrl: avatarUrl || '',
+          nickName,
+          phoneNumber
+        })
+        const user = result.data && result.data.user ? result.data.user : null
+        if (user) {
+          app.globalData.userInfo = user
+          this.setData({
+            userInfo: user,
+            showAuthModal: false
+          })
+        }
+        this.hideActionLoading()
+        this.goToSettle()
+        return
+      }
           
       const openid = app.globalData.openid
       

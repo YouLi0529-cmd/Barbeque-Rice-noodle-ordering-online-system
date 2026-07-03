@@ -1,5 +1,6 @@
 ﻿<!--packages/user/pages/orderdetail/orderdetail.wxml-->
 <view class="page">
+  <view class="top-safe-bg" style="height: {{statusBarHeight}}px;"></view>
   <view class="detail-header" style="padding-top: {{statusBarHeight}}px;">
     <view class="detail-nav" style="height: {{navBarHeight}}px;">
       <view class="detail-nav-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">

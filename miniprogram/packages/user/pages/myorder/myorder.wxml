@@ -1,5 +1,6 @@
 ﻿<!--packages/user/pages/myorder/myorder.wxml-->
 <view class="page">
+  <view class="top-safe-bg" style="height: {{statusBarHeight}}px;"></view>
   <view class="order-page-header" style="padding-top: {{statusBarHeight}}px;">
     <view class="order-page-nav" style="height: {{navBarHeight}}px;">
       <view class="order-page-nav-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">

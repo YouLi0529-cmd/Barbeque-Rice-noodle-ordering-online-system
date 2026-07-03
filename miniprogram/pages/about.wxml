@@ -14,7 +14,7 @@
   <view class="about-content">
     <view class="shop-card">
       <view class="shop-logo">
-        <image src="/images/shopping.png" mode="aspectFit"></image>
+        <image src="/images/campingshoppingcar-transparent.png" mode="aspectFit"></image>
       </view>
       <view class="shop-name">餐厅点餐</view>
       <view class="shop-desc">这里后续可以放店铺介绍、营业时间、联系方式、活动说明。</view>

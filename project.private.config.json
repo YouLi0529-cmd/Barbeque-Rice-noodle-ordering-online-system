@@ -1,7 +1,7 @@
 {
   "setting": {
     "compileHotReLoad": true,
-    "urlCheck": true,
+    "urlCheck": false,
     "coverView": true,
     "lazyloadPlaceholderEnable": false,
     "skylineRenderEnable": false,
@@ -23,7 +23,7 @@
       "list": [
         {
           "name": "pages/index/index",
-          "pathName": "pages/index/index",
+          "pathName": "packages/order/pages/index/index",
           "query": "scene=01",
           "scene": null,
           "launchMode": "default"

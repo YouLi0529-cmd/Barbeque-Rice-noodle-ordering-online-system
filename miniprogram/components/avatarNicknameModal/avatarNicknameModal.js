@@ -1,4 +1,5 @@
 // components/avatarNicknameModal/avatarNicknameModal.js
+const apiClient = require('../../utils/apiClient')
 const USE_TEST_PHONE = true
 const TEST_PHONE_NUMBER = '13800000000'
 
@@ -70,13 +71,15 @@ Component({
             saving: true
           })
           
-          const phoneRes = await wx.cloud.callFunction({
-            name: 'getPhoneNumber',
-            data: { code: e.detail.code }
-          })
+          const phoneResult = apiClient.isEnabled()
+            ? await apiClient.call('phone.getNumber', { code: e.detail.code })
+            : (await wx.cloud.callFunction({
+              name: 'getPhoneNumber',
+              data: { code: e.detail.code }
+            })).result
           
-          if (phoneRes.result && phoneRes.result.success && phoneRes.result.phoneNumber) {
-            const phoneNumber = phoneRes.result.phoneNumber
+          if (phoneResult && phoneResult.success && phoneResult.phoneNumber) {
+            const phoneNumber = phoneResult.phoneNumber
             // 格式化显示手机号（中间4位用*代替，保护隐私）
            // const displayPhone = phoneNumber.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')
             
@@ -88,7 +91,7 @@ Component({
             
             await this.saveUserInfo()
           } else {
-            const errorMsg = phoneRes.result?.message || '获取手机号失败，请重试'
+            const errorMsg = phoneResult?.message || '获取手机号失败，请重试'
             throw new Error(errorMsg)
           }
         } catch (err) {
@@ -136,19 +139,24 @@ Component({
         const app = getApp()
         const avatarUrlForSave = avatarUrl || ''
 
-        const profileRes = await wx.cloud.callFunction({
-          name: 'completeUserProfile',
-          data: {
+        const profileResult = apiClient.isEnabled()
+          ? await apiClient.call('user.completeProfile', {
             avatarUrl: avatarUrlForSave,
             phoneNumber: phone
-          }
-        })
+          })
+          : (await wx.cloud.callFunction({
+            name: 'completeUserProfile',
+            data: {
+              avatarUrl: avatarUrlForSave,
+              phoneNumber: phone
+            }
+          })).result
 
-        if (!profileRes.result || !profileRes.result.success) {
-          throw new Error(profileRes.result?.error || '保存用户信息失败')
+        if (!profileResult || !profileResult.success) {
+          throw new Error(profileResult?.error || profileResult?.message || '保存用户信息失败')
         }
 
-        const user = profileRes.result.data.user
+        const user = profileResult.data.user
         app.globalData.userInfo = user
 
         wx.showToast({

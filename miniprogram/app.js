@@ -1,6 +1,24 @@
 //app.js
+const apiClient = require('./utils/apiClient')
+
 App({
   onLaunch: async function () {
+    if (apiClient.isEnabled()) {
+      this.globalData = {
+        openid: '',
+        openidReady: false,
+        openidPromise: null,
+        userInfo: null,
+        userInfoReady: false,
+        userInfoPromise: null
+      }
+
+      this.getOpenidPromise()
+      this.overridePage()
+      this.checkForUpdate()
+      return
+    }
+
     if (!wx.cloud) {
       console.error('请使用 2.2.3 或以上的基础库以使用云能力')
     } else {
@@ -77,11 +95,26 @@ App({
     }
     
     // 创建新的Promise并保存
-    const db = wx.cloud.database();
     let that = this;
     
     this.globalData.openidPromise = new Promise(async (resolve, reject) => {
       try {
+        if (apiClient.isEnabled()) {
+          const loginRes = await apiClient.login()
+          const data = loginRes.data || {}
+          const openid = data.openid || ''
+
+          that.globalData.openid = openid
+          that.globalData.userInfo = data.user || null
+          wx.setStorageSync('openid', openid)
+
+          that.globalData.openidReady = true
+          that.globalData.userInfoReady = true
+          resolve(openid)
+          return
+        }
+
+        const db = wx.cloud.database();
         let openid = wx.getStorageSync('openid');
         if (!openid) {
           const res = await wx.cloud.callFunction({

@@ -1,6 +1,7 @@
 ﻿// packages/order/pages/settle/settle.js
 const app = getApp()
-const db = wx.cloud.database()
+const apiClient = require('../../../../utils/apiClient')
+const db = apiClient.isEnabled() ? null : wx.cloud.database()
 const { getCustomNavOptions } = require('../../../../utils/customNav')
 
 Page({
@@ -275,6 +276,18 @@ Page({
 
   async loadUserInfoFromDB() {
     try {
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('user.me')
+        const user = result.data || null
+        if (user) {
+          app.globalData.userInfo = user
+          this.setData({
+            userInfo: user
+          })
+        }
+        return
+      }
+
       const openid = app.globalData.openid
       const res = await db.collection('user').where({
         _openid: openid
@@ -386,32 +399,35 @@ Page({
     this.setData({ submitting: true })
 
     try {
-      const doBuyRes = await wx.cloud.callFunction({
-        name: 'doBuy',
-        data: {
-          orderGoods: this.data.orderGoods,
-          totalPrice: this.data.totalPrice,
-          finalPrice: this.data.finalPrice,
-          tableNumber: this.data.orderScene === 'camping' ? '' : this.data.tableNumber,
-          orderType: this.data.orderType,
-          orderScene: this.data.orderScene,
-          sharedSessionId: this.data.sharedSessionId,
-          parentOrderId: this.data.appendToOrderId,
-          addOnIndex: this.data.addOnIndex,
-          orderCardTitle: this.data.currentCardTitle
-        }
-      })
+      const orderPayload = {
+        orderGoods: this.data.orderGoods,
+        totalPrice: this.data.totalPrice,
+        finalPrice: this.data.finalPrice,
+        tableNumber: this.data.orderScene === 'camping' ? '' : this.data.tableNumber,
+        orderType: this.data.orderType,
+        orderScene: this.data.orderScene,
+        sharedSessionId: this.data.sharedSessionId,
+        parentOrderId: this.data.appendToOrderId,
+        addOnIndex: this.data.addOnIndex,
+        orderCardTitle: this.data.currentCardTitle
+      }
+      const doBuyResult = apiClient.isEnabled()
+        ? await apiClient.call('order.create', orderPayload)
+        : (await wx.cloud.callFunction({
+          name: 'doBuy',
+          data: orderPayload
+        })).result
 
-      if (!doBuyRes.result || !doBuyRes.result.success) {
-        const errorMsg = doBuyRes.result?.error || '下单失败'
+      if (!doBuyResult || !doBuyResult.success) {
+        const errorMsg = doBuyResult?.error || doBuyResult?.message || '下单失败'
         throw new Error(errorMsg)
       }
 
-      const orderId = doBuyRes.result.orderId
-      const serverOrder = doBuyRes.result.order || {}
+      const orderId = doBuyResult.orderId
+      const serverOrder = doBuyResult.order || {}
       const serverFinalPrice = Number(
-        doBuyRes.result.order && doBuyRes.result.order.finalPrice !== undefined
-          ? doBuyRes.result.order.finalPrice
+        doBuyResult.order && doBuyResult.order.finalPrice !== undefined
+          ? doBuyResult.order.finalPrice
           : this.data.finalPrice
       )
 
@@ -519,6 +535,13 @@ Page({
 
   async deleteOrderDraft() {
     try {
+      if (apiClient.isEnabled()) {
+        await apiClient.call('orderDraft.delete', {
+          action: 'delete'
+        })
+        return
+      }
+
       await wx.cloud.callFunction({
         name: 'orderDraft',
         data: {
@@ -534,6 +557,15 @@ Page({
     if (!this.data.sharedSessionId) return
 
     try {
+      if (apiClient.isEnabled()) {
+        await apiClient.call('sharedCart.clear', {
+          action: 'clear',
+          sessionId: this.data.sharedSessionId,
+          tableNumber: this.data.tableNumber
+        })
+        return
+      }
+
       await wx.cloud.callFunction({
         name: 'sharedCart',
         data: {

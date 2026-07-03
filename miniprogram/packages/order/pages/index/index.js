@@ -1,7 +1,8 @@
 ﻿// packages/order/pages/index/index.js
 const app = getApp()
-const db = wx.cloud.database()
-const _ = db.command
+const apiClient = require('../../../../utils/apiClient')
+const db = apiClient.isEnabled() ? null : wx.cloud.database()
+const _ = db ? db.command : null
 const { getCustomNavOptions } = require('../../../../utils/customNav')
 
 Page({
@@ -165,14 +166,19 @@ Page({
 
     const localCartBeforeJoin = this.data.cartCount > 0 ? { ...this.data.cart } : null
 
-    this.sharedCartInitPromise = wx.cloud.callFunction({
-      name: 'sharedCart',
-      data: {
+    this.sharedCartInitPromise = (apiClient.isEnabled()
+      ? apiClient.call('sharedCart.join', {
         action: 'join',
         tableNumber: currentTable
-      }
-    }).then(async res => {
-      const result = res.result || {}
+      })
+      : wx.cloud.callFunction({
+        name: 'sharedCart',
+        data: {
+          action: 'join',
+          tableNumber: currentTable
+        }
+      })).then(async res => {
+      const result = apiClient.isEnabled() ? (res || {}) : (res.result || {})
       if (!result.success || !result.sessionId) {
         throw new Error(result.message || '加入共同点单失败')
       }
@@ -215,6 +221,12 @@ Page({
   startSharedCartWatch(sessionId) {
     if (!sessionId) return
     this.stopSharedCartWatch()
+
+    if (apiClient.isEnabled()) {
+      this.setData({ sharedCartWatchReady: false })
+      this.startSharedCartFallback()
+      return
+    }
 
     try {
       this.sharedCartWatcher = db.collection('tableCartItem')
@@ -276,15 +288,20 @@ Page({
     if (!this.data.sharedSessionId) return
 
     try {
-      const res = await wx.cloud.callFunction({
-        name: 'sharedCart',
-        data: {
+      const result = apiClient.isEnabled()
+        ? await apiClient.call('sharedCart.get', {
           action: 'get',
           sessionId: this.data.sharedSessionId,
           tableNumber: this.data.tableNumber
-        }
-      })
-      const result = res.result || {}
+        })
+        : (await wx.cloud.callFunction({
+          name: 'sharedCart',
+          data: {
+            action: 'get',
+            sessionId: this.data.sharedSessionId,
+            tableNumber: this.data.tableNumber
+          }
+        })).result || {}
       if (!result.success) {
         throw new Error(result.message || '同步购物车失败')
       }
@@ -355,15 +372,24 @@ Page({
     const operations = this.buildSharedCartOperations(prevCart, nextCart)
     if (operations.length === 0) return
 
-    wx.cloud.callFunction({
-      name: 'sharedCart',
-      data: {
+    const request = apiClient.isEnabled()
+      ? apiClient.call('sharedCart.patch', {
         action: 'patch',
         sessionId: this.data.sharedSessionId,
         tableNumber: this.data.tableNumber,
         operations
-      }
-    }).catch(err => {
+      })
+      : wx.cloud.callFunction({
+        name: 'sharedCart',
+        data: {
+          action: 'patch',
+          sessionId: this.data.sharedSessionId,
+          tableNumber: this.data.tableNumber,
+          operations
+        }
+      })
+
+    request.catch(err => {
       console.error('同步共同点单购物车失败', err)
       this.startSharedCartFallback()
       wx.showToast({ title: '同步稍慢，正在重试', icon: 'none' })
@@ -390,6 +416,16 @@ Page({
 
   async loadShopInfo() {
     try {
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('shop.info')
+        if (result.data) {
+          this.setData({
+            shopInfo: result.data
+          })
+        }
+        return
+      }
+
       const res = await db.collection('shopInfo').limit(1).get()
       
       if (res.data && res.data.length > 0) {
@@ -405,6 +441,18 @@ Page({
   // 加载用户信息
   async loadUserInfo() {
     try {
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('user.me')
+        const user = result.data || null
+        if (user) {
+          this.setData({
+            userInfo: user
+          })
+          app.globalData.userInfo = user
+        }
+        return
+      }
+
       const openid = app.globalData.openid
       const res = await db.collection('user').where({
         _openid: openid
@@ -434,6 +482,16 @@ Page({
   // 加载公告
   async loadNotices() {
     try {
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('notice.list')
+        const noticeList = result.data || []
+        this.setData({
+          noticeList,
+          noticeText: noticeList.map(item => item.content).join('    ')
+        })
+        return
+      }
+
       const res = await db.collection('notice')
         .where({ status: 1 }) // 只显示启用的公告
         .orderBy('sort', 'asc')
@@ -462,13 +520,16 @@ Page({
       this.startOrderLoadingAnimation()
     }
     try {
-      const res = await wx.cloud.callFunction({
-        name: 'getCategory',
-        data: {
+      const result = apiClient.isEnabled()
+        ? await apiClient.call('menu.categories', {
           menuType: 'dineIn'
-        }
-      })
-      const result = res.result || {}
+        })
+        : (await wx.cloud.callFunction({
+          name: 'getCategory',
+          data: {
+            menuType: 'dineIn'
+          }
+        })).result || {}
       const list = result.success ? (result.data || []) : []
       
       if (list.length > 0) {
@@ -522,16 +583,23 @@ Page({
       const page = append ? this.data.goodsPage + 1 : 0
       const skip = page * pageSize
 
-      const goodsRes = await db.collection('dish')
-        .where({
+      const goodsRes = apiClient.isEnabled()
+        ? await apiClient.call('menu.categoryGoods', {
+          menuType: 'dineIn',
           categoryId: menuId,
-          menuType: _.neq('camping'),
-          status: 1 // 1表示上架
+          page,
+          limit: pageSize
         })
-        .orderBy('sort', 'asc')
-        .skip(skip)
-        .limit(pageSize)
-        .get()
+        : await db.collection('dish')
+          .where({
+            categoryId: menuId,
+            menuType: _.neq('camping'),
+            status: 1 // 1表示上架
+          })
+          .orderBy('sort', 'asc')
+          .skip(skip)
+          .limit(pageSize)
+          .get()
       
       // 为每个菜品添加购物车数量
       const list = goodsRes.data || []
@@ -559,15 +627,21 @@ Page({
   },
 
   async loadCategoryGoods(category) {
-    const goodsRes = await db.collection('dish')
-      .where({
+    const goodsRes = apiClient.isEnabled()
+      ? await apiClient.call('menu.categoryGoods', {
+        menuType: 'dineIn',
         categoryId: category._id,
-        menuType: _.neq('camping'),
-        status: 1
+        limit: 100
       })
-      .orderBy('sort', 'asc')
-      .limit(100)
-      .get()
+      : await db.collection('dish')
+        .where({
+          categoryId: category._id,
+          menuType: _.neq('camping'),
+          status: 1
+        })
+        .orderBy('sort', 'asc')
+        .limit(100)
+        .get()
 
     const goods = (goodsRes.data || []).map(item => ({
       ...item,
@@ -945,18 +1019,41 @@ Page({
     })
 
     try {
-      const matcher = db.RegExp({
-        regexp: this.escapeRegExp(currentKeyword),
-        options: 'i'
-      })
-      const res = await db.collection('dish')
-        .where(_.or([
-          { status: 1, menuType: _.neq('camping'), name: matcher },
-          { status: 1, menuType: _.neq('camping'), categoryName: matcher },
-          { status: 1, menuType: _.neq('camping'), description: matcher }
-        ]))
-        .limit(50)
-        .get()
+      const res = apiClient.isEnabled()
+        ? await apiClient.call('menu.search', {
+          menuType: 'dineIn',
+          keyword: currentKeyword,
+          limit: 50
+        })
+        : await db.collection('dish')
+          .where(_.or([
+            {
+              status: 1,
+              menuType: _.neq('camping'),
+              name: db.RegExp({
+                regexp: this.escapeRegExp(currentKeyword),
+                options: 'i'
+              })
+            },
+            {
+              status: 1,
+              menuType: _.neq('camping'),
+              categoryName: db.RegExp({
+                regexp: this.escapeRegExp(currentKeyword),
+                options: 'i'
+              })
+            },
+            {
+              status: 1,
+              menuType: _.neq('camping'),
+              description: db.RegExp({
+                regexp: this.escapeRegExp(currentKeyword),
+                options: 'i'
+              })
+            }
+          ]))
+          .limit(50)
+          .get()
 
       if (this.searchToken !== token) return
 
@@ -1550,6 +1647,25 @@ Page({
     
     try {
       this.showActionLoading('授权中')
+
+      if (apiClient.isEnabled()) {
+        const result = await apiClient.call('user.completeProfile', {
+          avatarUrl: avatarUrl || '',
+          nickName,
+          phoneNumber
+        })
+        const user = result.data && result.data.user ? result.data.user : null
+        if (user) {
+          app.globalData.userInfo = user
+          this.setData({
+            userInfo: user,
+            showAuthModal: false
+          })
+        }
+        this.hideActionLoading()
+        this.goToSettle()
+        return
+      }
           
       const openid = app.globalData.openid
       
@@ -1706,17 +1822,23 @@ Page({
     this.showActionLoading('保存中')
 
     try {
-      const res = await wx.cloud.callFunction({
-        name: 'orderDraft',
-        data: {
+      const result = apiClient.isEnabled()
+        ? await apiClient.call('orderDraft.save', {
           action: 'save',
           cart: this.data.cart,
           totalPrice: this.data.cartTotalPrice
-        }
-      })
+        })
+        : (await wx.cloud.callFunction({
+          name: 'orderDraft',
+          data: {
+            action: 'save',
+            cart: this.data.cart,
+            totalPrice: this.data.cartTotalPrice
+          }
+        })).result
 
-      if (!res.result || !res.result.success) {
-        throw new Error(res.result && res.result.message ? res.result.message : '保存失败')
+      if (!result || !result.success) {
+        throw new Error(result && result.message ? result.message : '保存失败')
       }
 
       wx.showToast({
