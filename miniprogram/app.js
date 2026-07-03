@@ -1,6 +1,24 @@
 //app.js
+const apiClient = require('./utils/apiClient')
+
 App({
   onLaunch: async function () {
+    if (apiClient.isEnabled()) {
+      this.globalData = {
+        openid: '',
+        openidReady: false,
+        openidPromise: null,
+        userInfo: null,
+        userInfoReady: false,
+        userInfoPromise: null
+      }
+
+      this.getOpenidPromise()
+      this.overridePage()
+      this.checkForUpdate()
+      return
+    }
+
     if (!wx.cloud) {
       console.error('请使用 2.2.3 或以上的基础库以使用云能力')
     } else {
@@ -42,14 +60,9 @@ App({
       
       // 重写onLoad方法
       pageConfig.onLoad = async function(options) {
-        wx.showLoading({
-          title: '加载中...',
-        });
-        
         try {
           // 等待openid获取完成
           await that.checkOpenid();
-          wx.hideLoading();
           
           // 调用原来的onLoad
           if (originalOnLoad) {
@@ -57,7 +70,6 @@ App({
           }
         } catch (error) {
           console.error('获取用户信息失败', error);
-          wx.hideLoading();
           wx.showToast({
             title: '加载失败，请重试',
             icon: 'none'
@@ -83,11 +95,26 @@ App({
     }
     
     // 创建新的Promise并保存
-    const db = wx.cloud.database();
     let that = this;
     
     this.globalData.openidPromise = new Promise(async (resolve, reject) => {
       try {
+        if (apiClient.isEnabled()) {
+          const loginRes = await apiClient.login()
+          const data = loginRes.data || {}
+          const openid = data.openid || ''
+
+          that.globalData.openid = openid
+          that.globalData.userInfo = data.user || null
+          wx.setStorageSync('openid', openid)
+
+          that.globalData.openidReady = true
+          that.globalData.userInfoReady = true
+          resolve(openid)
+          return
+        }
+
+        const db = wx.cloud.database();
         let openid = wx.getStorageSync('openid');
         if (!openid) {
           const res = await wx.cloud.callFunction({
@@ -102,21 +129,10 @@ App({
         const queryRes = await db.collection('user').where({
           _openid: openid
         }).get();
-        if (queryRes.data && queryRes.data.length === 0) {
-          // 创建新用户记录
-          const addRes = await db.collection('user').add({
-            data: {
-              balance: 0,
-              createTime: new Date().getTime(),
-            }
-          });
-          // 获取创建的用户信息
-          const newUserRes = await db.collection('user').doc(addRes._id).get()
-          if (newUserRes.data) {
-            that.globalData.userInfo = newUserRes.data
-          }
-        }else{
+        if (queryRes.data && queryRes.data.length > 0) {
           that.globalData.userInfo = queryRes.data[0]
+        } else {
+          that.globalData.userInfo = null
         }
         
         // 标记openid已准备好

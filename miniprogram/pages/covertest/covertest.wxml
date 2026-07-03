@@ -1,0 +1,189 @@
+<!--pages/covertest/covertest.wxml-->
+<view class="cover-page {{planeState}} {{orderTransitioning ? 'order-lifting' : ''}}">
+  <image class="cover-bg" src="/images/covertrue3.jpg" mode="aspectFill"></image>
+  <view class="cover-mask"></view>
+
+  <view class="status-bar" style="height: {{statusBarHeight}}px;"></view>
+
+  <view class="cover-content">
+    <view class="actions action-grid">
+      <view class="action-card" hover-class="btn-hover" bindtap="goOrder">
+        <text>预点单</text>
+      </view>
+      <view class="action-card" hover-class="btn-hover" bindtap="goContact">
+        <text>联系我</text>
+      </view>
+      <view class="action-card camping-card" hover-class="btn-hover" bindtap="goCamping">
+        <image class="plane-img corner-plane" src="/images/zhifeiji2-transparent.png" mode="aspectFit"></image>
+        <text>{{planeState ? '出发中...' : '去露营'}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="cover-tabbar">
+    <view class="cover-tab active" hover-class="btn-hover" bindtap="goCover">
+      <text>首页</text>
+    </view>
+    <view class="cover-tab" hover-class="btn-hover" bindtap="goMyOrder">
+      <text>订单</text>
+    </view>
+    <view class="cover-tab" hover-class="btn-hover" bindtap="goMyHome">
+      <text>我的</text>
+    </view>
+  </view>
+
+  <view class="order-preview {{showOrderPreview ? 'show' : ''}}">
+    <view class="order-preview-status" style="height: {{statusBarHeight}}px;"></view>
+    <view class="order-preview-notice">
+      <view class="order-preview-dot"></view>
+      <view class="order-preview-line"></view>
+    </view>
+    <view class="order-preview-main">
+      <view class="order-preview-sidebar">
+        <view class="order-preview-menu active"></view>
+        <view class="order-preview-menu"></view>
+        <view class="order-preview-menu"></view>
+        <view class="order-preview-menu"></view>
+        <view class="order-preview-menu"></view>
+      </view>
+      <view class="order-preview-list">
+        <view class="order-preview-loading">
+          <image class="order-preview-loading-img" src="/images/orderloadinggif-transparent.gif" mode="aspectFit"></image>
+          <view class="order-preview-loading-text">正在准备菜单</view>
+        </view>
+      </view>
+    </view>
+    <view class="order-preview-cart">
+      <image class="order-preview-cart-icon" src="/images/campingshoppingcar-transparent.png" mode="aspectFit"></image>
+      <view class="order-preview-cart-text">
+        <view class="order-preview-cart-title"></view>
+        <view class="order-preview-cart-line"></view>
+      </view>
+      <view class="order-preview-cart-btn"></view>
+    </view>
+  </view>
+
+  <view class="camping-preview-real page {{showCampingPreview ? 'show' : ''}}">
+    <view class="camping-preview-header" style="padding-top: {{statusBarHeight}}px;">
+      <view class="camping-preview-nav" style="height: {{shopNavTotalHeight}}px;">
+        <view class="camping-preview-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">
+          <view class="camping-preview-back-btn">
+            <view class="camping-preview-back-icon" style="width: {{navIconSize}}px; height: {{navIconSize}}px; border-width: {{navIconStroke}}px;"></view>
+          </view>
+          <view class="camping-preview-title" style="font-size: {{navTitleFontSize}}px; line-height: {{navTitleFontSize}}px;">露营点单</view>
+        </view>
+        <view class="camping-preview-search-row" style="top: {{searchRowTop}}px; height: {{searchRowHeight}}px;">
+          <view class="camping-preview-search-box">
+            <view class="camping-preview-search-icon"></view>
+            <view class="camping-preview-search-text">搜索露营菜品</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="camping-preview-main-content">
+      <view class="camping-preview-sidebar">
+        <view class="camping-preview-menu active"><view class="camping-preview-menu-line"></view></view>
+        <view class="camping-preview-menu"><view class="camping-preview-menu-line"></view></view>
+        <view class="camping-preview-menu"><view class="camping-preview-menu-line"></view></view>
+        <view class="camping-preview-menu"><view class="camping-preview-menu-line"></view></view>
+        <view class="camping-preview-menu"><view class="camping-preview-menu-line"></view></view>
+        <view class="camping-preview-menu"><view class="camping-preview-menu-line"></view></view>
+      </view>
+      <view class="camping-preview-goods-list">
+        <view class="camping-preview-loading-card">
+          <image class="camping-preview-loading-img" src="/images/loadinggif-cutout-transparent.gif" mode="aspectFit"></image>
+          <view class="camping-preview-loading-text">正在准备菜单</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="camping-preview-cart-wrapper">
+      <view class="camping-preview-cart-card">
+        <view class="camping-preview-cart-left">
+          <view class="camping-preview-cart-icon-wrapper">
+            <image class="camping-preview-cart-icon" src="/images/campingshoppingcar-transparent.png" mode="aspectFit"></image>
+          </view>
+          <view class="camping-preview-cart-info">
+            <view class="camping-preview-cart-price">
+              <text class="camping-preview-price-label">总价：</text>
+              <text class="camping-preview-price-symbol">¥</text>
+              <text class="camping-preview-price-num">0.00</text>
+            </view>
+          </view>
+        </view>
+        <view class="camping-preview-cart-right">
+          <view class="camping-preview-settle-btn">选好了</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="camping-preview-old page">
+    <view class="shop-header-empty" style="height: {{statusBarHeight + navBarHeight}}px;"></view>
+    <view class="notice-placeholder">
+      <view class="notice-dot"></view>
+      <view class="notice-line"></view>
+    </view>
+    <view class="main-content">
+      <view class="menu-sidebar">
+        <view class="menu-item active">
+          <view class="skeleton menu-name-skeleton"></view>
+          <view class="menu-indicator"></view>
+        </view>
+        <view class="menu-item">
+          <view class="skeleton menu-name-skeleton"></view>
+        </view>
+        <view class="menu-item">
+          <view class="skeleton menu-name-skeleton"></view>
+        </view>
+        <view class="menu-item">
+          <view class="skeleton menu-name-skeleton"></view>
+        </view>
+        <view class="menu-item">
+          <view class="skeleton menu-name-skeleton"></view>
+        </view>
+      </view>
+      <view class="goods-list">
+        <view class="camping-loading">
+          <view class="camping-art">
+            <image class="camping-loading-img" src="/images/loadinggif-cutout-transparent.gif" mode="aspectFit"></image>
+          </view>
+          <view class="loading-text">正在准备露营菜单</view>
+        </view>
+      </view>
+    </view>
+    <view class="float-cart-wrapper">
+      <view class="float-cart-card">
+        <view class="cart-icon-wrapper">
+          <image class="cart-icon" src="/images/campingshoppingcar-transparent.png" mode="aspectFit"></image>
+        </view>
+        <view class="cart-info">
+          <view class="cart-title">露营清单</view>
+          <view class="cart-tip">菜品内容稍后接入</view>
+        </view>
+        <view class="settle-btn">待开放</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="plane-screen">
+    <image class="plane-img giant-plane" src="/images/zhifeiji2-transparent.png" mode="aspectFit"></image>
+  </view>
+
+  <view class="contact-mask {{showContactModal ? 'show' : ''}}" catchtap="closeContact">
+    <view class="contact-dialog" catchtap="stopPropagation">
+      <view class="contact-close" bindtap="closeContact">×</view>
+      <view class="contact-title">联系我</view>
+      <view class="qr-placeholder">
+        <view class="qr-inner">
+          <text>二维码</text>
+        </view>
+      </view>
+      <view class="phone-box">
+        <text class="phone-label">电话</text>
+        <text class="phone-value">待添加</text>
+      </view>
+    </view>
+  </view>
+</view>

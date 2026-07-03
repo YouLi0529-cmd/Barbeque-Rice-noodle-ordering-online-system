@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "充值选项管理",
+  "usingComponents": {
+    "van-empty": "/vant/empty/index"
+  }
+}

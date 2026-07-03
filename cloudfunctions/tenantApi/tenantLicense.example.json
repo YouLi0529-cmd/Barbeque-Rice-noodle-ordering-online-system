@@ -1,0 +1,7 @@
+{
+  "tenantId": "zhangnan",
+  "storeName": "Zhangnan BBQ",
+  "status": "active",
+  "expireAt": "2027-07-02T23:59:59+08:00",
+  "graceUntil": "2027-07-09T23:59:59+08:00"
+}

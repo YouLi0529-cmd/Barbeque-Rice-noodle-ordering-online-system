@@ -1,373 +1,204 @@
-// 云函数入口文件
 const cloud = require('wx-server-sdk')
+
 cloud.init({
-  env: 'cloud1-d9gapt5hcfe195b65'
+  env: cloud.DYNAMIC_CURRENT_ENV
 })
 
+const db = cloud.database({
+  throwOnNotFound: false
+})
 
-const db = cloud.database()
-
-// 生成打印内容
-function generatePrintContent(order, shopInfo) {
-  const orderTypeText = order.orderType === 'dineIn' ? '堂食' : (order.orderType === 'outdoor' ? '户外烧烤' : '打包')
-  
-  // 处理时间：如果 createTime 是服务器时间对象，需要特殊处理
-  let date = new Date()
-  if (order.createTime) {
-    if (order.createTime instanceof Date) {
-      date = order.createTime
-    } else if (typeof order.createTime === 'object' && order.createTime.getTime) {
-      date = new Date(order.createTime.getTime())
-    } else {
-      date = new Date(order.createTime)
-    }
-  }
-  
-  const formatDate = (d) => {
-    // 转换为北京时间（UTC+8）
-    const beijingTime = new Date(d.getTime() + 8 * 60 * 60 * 1000)
-    const pad = (n) => (n < 10 ? '0' + n : n)
-    // 使用UTC方法获取转换后的时间
-    return `${beijingTime.getUTCFullYear()}-${pad(beijingTime.getUTCMonth() + 1)}-${pad(beijingTime.getUTCDate())} ${pad(beijingTime.getUTCHours())}:${pad(beijingTime.getUTCMinutes())}`
-  }
-  
-  // 计算字符串的显示宽度（中文字符占2个宽度，英文数字占1个宽度）
-  const getStringWidth = (str) => {
-    if (!str) return 0
-    let width = 0
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charAt(i)
-      // 判断是否为中文字符（包括中文标点）
-      if (/[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(char)) {
-        width += 2
-      } else {
-        width += 1
-      }
-    }
-    return width
-  }
-  
-  // 生成指定宽度的空格字符串
-  const generateSpaces = (count) => {
-    return ' '.repeat(count)
-  }
-  
-  // 转义HTML特殊字符
-  const escapeHtml = (str) => {
-    if (!str) return ''
-    return String(str).replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  }
-  
-  // 隐藏电话号码中间4位
-  const hidePhoneNumber = (phone) => {
-    if (!phone) return ''
-    const phoneStr = String(phone)
-    // 如果是11位手机号，隐藏中间4位（第4-7位）
-    if (phoneStr.length === 11) {
-      return phoneStr.substring(0, 3) + '****' + phoneStr.substring(7)
-    }
-    // 如果不是11位，返回原值
-    return phoneStr
-  }
-  let content = `<C>*</C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C><font# bolder=1 height=2 width=2>${orderTypeText}订单</font#></C><BR>`
-  content += `<C><font# bolder=1 height=2 width=2>${escapeHtml(shopInfo?.name || '餐饮店')}</font#></C><BR>`
-  content += `<BR>`
-  
-  // 订单编号和时间
-  content += `<C>********************************</C><BR>`
-  content += `<LEFT>订单编号: ${escapeHtml(order._id)}</LEFT><BR>`
-  content += `<LEFT>下单时间: ${formatDate(date)}</LEFT><BR>`
-  
-  // 桌码号（如果有）
-  if (order.tableNumber) {
-    content += `<C><font# bolder=1 height=2 width=2>桌码: ${escapeHtml(order.tableNumber)}</font#></C><BR>`
-  }
-  if (order.orderType === 'outdoor' && order.grillName) {
-    content += `<C><font# bolder=1 height=2 width=2>烤架: ${escapeHtml(order.grillName)}</font#></C><BR>`
-    content += `<C>取餐方式: 顾客自取</C><BR>`
-  }
-  
-  content += `<C>--------------商品--------------</C><BR>`
-  
-  // 商品列表
-  if (order.goods && order.goods.length > 0) {
-    order.goods.forEach(item => {
-      const dishName = escapeHtml(item.dishName || item.goodsName || '未知菜品')
-      const count = item.count || 1
-      // 确保价格格式正确，避免小数点0换行
-      const price = parseFloat(item.price || 0).toFixed(2)
-      // 格式化商品行：商品名称 + 空格填充 + 数量 × 价格
-      // 总宽度32个字符，自动计算空格数（减少1个空格避免价格最后一个0换行）
-      const rightPart = `×${count}  ￥${price}`
-      const dishNameWidth = getStringWidth(dishName)
-      const rightPartWidth = getStringWidth(rightPart)
-      const totalWidth = 31 // 总宽度31个字符（减少1个避免换行）
-      const spacesNeeded = totalWidth - dishNameWidth - rightPartWidth
-      const spaces = spacesNeeded > 0 ? generateSpaces(spacesNeeded) : ' '
-      content += `<LEFT><font# bolder=0 height=2 width=1>${dishName}${spaces}${rightPart}</font#></LEFT><BR>`
-      
-      // 打印标签（如果有）
-      if (item.tags && Array.isArray(item.tags) && item.tags.length > 0) {
-        const tagsText = item.tags.map(tag => escapeHtml(tag)).join(' ')
-        content += `<LEFT><font# bolder=0 height=2 width=1>  ${tagsText}</font#></LEFT><BR>`
-      }
-    })
-  }
-  
-  // 价格信息
-  const finalPrice = (order.finalPrice || 0).toFixed(2)
-  
-  // 添加分隔线隔开菜品
-  content += `<C>--------------------------------</C><BR>`
-  
-  // if (order.useMiandan) {
-  //   const originalPrice = (order.totalPrice || 0).toFixed(2)
-  //   content += `<LEFT>免单优惠                  ￥${originalPrice}</LEFT><BR>`
-  // }
-  
-  // 实付价格，居右显示
-  content += `<RIGHT><font# bolder=0 height=2 width=1>实付  ￥${finalPrice}</font#></RIGHT><BR>`
-  
-  // 显示支付方式
-  let payMethodText = ''
-  if (order.useMiandan) {
-    payMethodText = '免单支付'
-  } else if (order.payWithBalance !== undefined) {
-    // 如果payWithBalance字段存在，使用它来判断
-    payMethodText = order.payWithBalance ? '余额支付' : '微信支付'
-  } else if (order.pay_status) {
-    // 如果已支付但没有payWithBalance字段，可能是余额支付（余额支付会在创建订单时标记为已支付）
-    payMethodText = '余额支付'
-  } else {
-    payMethodText = '微信支付'
-  }
-  if (payMethodText) {
-    content += `<LEFT>支付方式: ${payMethodText}</LEFT><BR>`
-  }
-  
-  content += `<C>--------------------------------</C><BR>`
-  
-  // 用户信息
-  // if (order.userNickName) {
-  //   content += `<LEFT><font# bolder=0 height=2 width=1>${escapeHtml(order.userNickName)}</font#></LEFT><BR>`
-  // }
-  if (order.userPhone) {
-    const hiddenPhone = hidePhoneNumber(order.userPhone)
-    content += `<LEFT><font# bolder=1 height=1 width=1>客户电话: ${escapeHtml(hiddenPhone)}</font#></LEFT><BR>`
-  }
-  
-  content += `<C>**************<font# bolder=1 height=2 width=1>完</font#><font# bolder=0 height=1 width=1>**************</font#></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  content += `<C></C><BR>`
-  return content
+function roundMoney(value) {
+  return Math.round(Number(value || 0) * 100) / 100
 }
 
-// 打印订单
-async function printOrder(orderId, orderData) {
-  try {
-    // 1. 查询打印机信息
-    const printerRes = await db.collection('printer').limit(1).get()
-    if (!printerRes.data || printerRes.data.length === 0) {
-      console.log('未绑定打印机，跳过打印')
-      return
+function normalizeCount(count) {
+  const value = Math.floor(Number(count) || 0)
+  if (value <= 0) {
+    throw new Error('菜品数量不正确')
+  }
+  if (value > 99) {
+    throw new Error('单个菜品数量过多')
+  }
+  return value
+}
+
+function normalizeTags(tags) {
+  if (!tags) return []
+  if (Array.isArray(tags)) {
+    return tags.filter(Boolean).map(item => String(item))
+  }
+  if (typeof tags === 'object') {
+    return Object.values(tags).flat().filter(Boolean).map(item => String(item))
+  }
+  return [String(tags)]
+}
+
+async function getActiveUser(transaction, openid) {
+  const userRes = await transaction.collection('user').where({
+    _openid: openid,
+    status: db.command.neq(0)
+  }).limit(1).get()
+
+  const user = userRes.data && userRes.data[0]
+  if (!user) {
+    throw new Error('请先完善个人信息')
+  }
+  if (!user.phoneNumber) {
+    throw new Error('请先授权手机号')
+  }
+  return user
+}
+
+async function buildServerOrderGoods(transaction, orderGoods) {
+  if (!Array.isArray(orderGoods) || orderGoods.length === 0) {
+    throw new Error('购物车为空')
+  }
+
+  const list = []
+  let totalPrice = 0
+
+  for (const item of orderGoods) {
+    const dishId = item && item.dishId
+    if (!dishId) {
+      throw new Error('菜品信息缺失')
     }
-    
-    const printer = printerRes.data[0]
-    
-    // 2. 查询店铺信息
-    const shopRes = await db.collection('shopInfo').limit(1).get()
-    const shopInfo = shopRes.data && shopRes.data.length > 0 ? shopRes.data[0] : null
-    
-    // 3. 生成打印内容
-    const printContent = generatePrintContent(orderData, shopInfo)
-    
-    // 4. 调用打印接口
-    // 根据订单类型设置播报音源：16-堂食订单，19-打包订单
-    const voice = orderData.orderType === 'dineIn' ? '16' : '19'
-    
-    const printRes = await cloud.callFunction({
-      name: 'printManage',
-      data: {
-        $url: 'printNote',
-        sn: printer.sn,
-        voice: voice,
-        voicePlayTimes: 1,
-        voicePlayInterval: 3,
-        content: printContent,
-        copies: 1,
-        expiresInSeconds: 7200, // 2小时
-        outTradeNo: orderId
-      }
+
+    const count = normalizeCount(item.count)
+    const dishRes = await transaction.collection('dish').doc(dishId).get()
+    const dish = dishRes.data
+
+    if (!dish) {
+      throw new Error('菜品不存在或已删除')
+    }
+    if (dish.status !== undefined && dish.status !== 1) {
+      throw new Error(`菜品“${dish.name || item.dishName || ''}”已下架`)
+    }
+
+    const price = roundMoney(dish.price)
+    const subtotal = roundMoney(price * count)
+    totalPrice = roundMoney(totalPrice + subtotal)
+
+    list.push({
+      dishId,
+      dishName: dish.name || item.dishName || '',
+      dishImage: dish.image || item.dishImage || '',
+      price,
+      count,
+      subtotal,
+      tags: normalizeTags(item.tags)
     })
-    
-    if (printRes.result && printRes.result.success) {
-      console.log('打印订单成功', printRes.result)
-    } else {
-      console.error('打印订单失败', printRes.result)
-    }
-  } catch (err) {
-    console.error('打印订单异常', err)
-    throw err
+  }
+
+  return {
+    goods: list,
+    totalPrice,
+    finalPrice: totalPrice
   }
 }
 
-
-// 云函数入口函数
-exports.main = async (event, context) => {
+exports.main = async (event) => {
   const wxContext = cloud.getWXContext()
   const openid = wxContext.OPENID
 
-  const {
-    orderGoods,        // 订单商品列表
-    totalPrice,        // 订单总价
-    finalPrice,        // 最终支付金额
-    useMiandan,        // 是否使用免单
-    payWithBalance,    // 是否使用余额支付
-    tableNumber,       // 桌码号
-    orderType          // 订单类型：dineIn-堂食，takeOut-打包
-  } = event
+  const orderScene = event.orderScene === 'camping' || event.orderType === 'camping'
+    ? 'camping'
+    : 'dineIn'
+  const tableNumber = String(event.tableNumber || '').trim()
+  const parentOrderId = String(event.parentOrderId || '').trim()
+  const isAddOnOrder = !!parentOrderId
+  const addOnIndex = Math.max(0, Math.floor(Number(event.addOnIndex) || 0))
+
+  if (orderScene !== 'camping' && !tableNumber) {
+    return {
+      success: false,
+      error: '请先扫码绑定桌号'
+    }
+  }
 
   try {
     const result = await db.runTransaction(async transaction => {
-      // 1. 检查用户是否存在
-      const userRes = await transaction.collection('user').where({
-        _openid: openid
-      }).get()
+      const user = await getActiveUser(transaction, openid)
+      const priceResult = await buildServerOrderGoods(transaction, event.orderGoods)
+      let rootOrderId = ''
 
-      if (!userRes.data || userRes.data.length === 0) {
-        throw new Error('用户不存在')
-      }
+      if (isAddOnOrder) {
+        const parentRes = await transaction.collection('order').doc(parentOrderId).get()
+        const parentOrder = parentRes.data
 
-      const user = userRes.data[0]
-      const currentBalance = user.balance || 0
-
-      // 2. 如果使用免单，检查并减少免单次数
-      if (useMiandan) {
-        const miandanRes = await transaction.collection('freeBuy').where({
-          _openid: openid
-        }).get()
-
-        if (!miandanRes.data || miandanRes.data.length === 0 || miandanRes.data[0].count <= 0) {
-          throw new Error('免单次数不足')
+        if (!parentOrder) {
+          throw new Error('原订单不存在，无法加菜')
+        }
+        if (parentOrder._openid !== openid) {
+          throw new Error('不能给他人的订单加菜')
+        }
+        if (parentOrder.orderScene !== orderScene) {
+          throw new Error('加菜场景与原订单不一致')
+        }
+        if (orderScene !== 'camping' && String(parentOrder.tableNumber || '') !== tableNumber) {
+          throw new Error('加菜桌号与原订单不一致')
         }
 
-        const miandan = miandanRes.data[0]
-        if (miandan.count < 1) {
-          throw new Error('免单次数不足')
-        }
-
-        // 减少免单次数
-        await transaction.collection('freeBuy').doc(miandan._id).update({
-          data: {
-            count: db.command.inc(-1)
-          }
-        })
+        rootOrderId = parentOrder.rootOrderId || parentOrder._id || parentOrderId
       }
 
-      // 3. 如果余额支付，检查余额并扣除
-      if (payWithBalance && finalPrice > 0) {
-        if (currentBalance < finalPrice) {
-          throw new Error('余额不足')
-        }
-
-        // 扣除余额
-        await transaction.collection('user').doc(user._id).update({
-          data: {
-            balance: db.command.inc(-finalPrice)
-          }
-        })
-      }
-
-      // 4. 创建订单
-      // 确定订单类型：如果有 tableNumber 且未指定 orderType，则默认为堂食；否则为打包
-      const finalOrderType = orderType || (tableNumber ? 'dineIn' : 'takeOut')
-      const date = new Date() // 记录订单创建时间
-      const paidNow = payWithBalance || useMiandan
-      
       const orderData = {
         type: 'order',
-        goods: orderGoods,
-        totalPrice: totalPrice,
-        finalPrice: finalPrice,
-        useMiandan: useMiandan,
-        orderType: finalOrderType, // 订单类型：dineIn-堂食，takeOut-打包
-        status: paidNow ? 'pending_prepare' : 'waiting_pay',
-        pay_status: paidNow ? true : false, // 余额支付或免单直接标记为已支付，微信支付由回调更新
-        payStatus: paidNow ? true : false,
+        orderScene,
+        orderType: orderScene,
+        isAddOnOrder,
+        parentOrderId: isAddOnOrder ? parentOrderId : '',
+        rootOrderId,
+        addOnIndex: isAddOnOrder ? addOnIndex : 0,
+        orderCardTitle: event.orderCardTitle || (isAddOnOrder ? `加菜单${addOnIndex}` : '第一单'),
+        goods: priceResult.goods,
+        totalPrice: priceResult.totalPrice,
+        finalPrice: priceResult.finalPrice,
+        pay_status: true,
+        payTime: db.serverDate(),
         createTime: db.serverDate(),
         _openid: openid,
-        // 用户信息
+        userId: user._id,
+        userCode: user.userCode || '',
+        userSnapshot: {
+          userCode: user.userCode || '',
+          nickName: user.nickName || '',
+          avatarUrl: user.avatarUrl || '',
+          phoneNumber: user.phoneNumber || ''
+        },
         userNickName: user.nickName || '',
         userAvatar: user.avatarUrl || '',
         userPhone: user.phoneNumber || '',
-        // 桌码号
-        tableNumber: tableNumber || ''
+        tableNumber: orderScene === 'camping' ? '' : tableNumber
       }
 
       const orderRes = await transaction.collection('order').add({
         data: orderData
       })
+      const savedRootOrderId = rootOrderId || orderRes._id
 
-      const orderId = orderRes._id
-      // 添加 _id 和实际时间到订单数据中，用于打印
-      const orderWithId = {
-        ...orderData,
-        _id: orderId,
-        createTime: date, // 使用实际的 Date 对象替代 db.serverDate()
-        payWithBalance: payWithBalance // 添加支付方式标识，用于打印时显示
+      if (!rootOrderId) {
+        await transaction.collection('order').doc(orderRes._id).update({
+          data: {
+            rootOrderId: savedRootOrderId
+          }
+        })
       }
 
       return {
         success: true,
-        orderId: orderId,
-        order: orderWithId
+        orderId: orderRes._id,
+        order: {
+          ...orderData,
+          _id: orderRes._id,
+          rootOrderId: savedRootOrderId
+        }
       }
     })
 
-    // 5. 余额支付或免单订单立即打印（微信支付在支付回调中打印）
-    if (result.success && result.orderId && (payWithBalance || useMiandan)) {
-      try {
-        await printOrder(result.orderId, result.order)
-      } catch (printErr) {
-        // 打印失败不影响订单创建，只记录日志
-        console.error('打印订单失败', printErr)
-      }
-    }
-
     return result
   } catch (err) {
-    console.error('下单失败', err)
+    console.error('doBuy failed', err)
     return {
       success: false,
       error: err.message || '下单失败'

@@ -1,20 +1,51 @@
 const cloud = require('wx-server-sdk')
+
 cloud.init({
-  env: 'cloud1-d9gapt5hcfe195b65'
+  env: cloud.DYNAMIC_CURRENT_ENV
 })
 
-exports.main = async (event, context) => {
+const db = cloud.database({
+  throwOnNotFound: false
+})
 
-  const res = await cloud.cloudPay.unifiedOrder({
-    "body": event.body,
-    "outTradeNo" : event.outTradeNo, //不能重复，否则报错
-    "spbillCreateIp" : "127.0.0.1", //就是这个值，不要改
-    "subMchId" : "填写你的商户ID",  //填写你的商户ID,
-    "totalFee" : parseFloat(event.totalFee)*100,  //单位为分
-    "envId": "cloud1-d9gapt5hcfe195b65",  //填写你的云开发环境ID
-    "functionName": "pay_success",  //支付成功的回调云函数
-    "nonceStr":event.nonceStr,  //随便弄的32位字符串，建议自己生成
-    "tradeType":"JSAPI"   //默认是JSAPI
+exports.main = async (event) => {
+  const wxContext = cloud.getWXContext()
+  const openid = wxContext.OPENID
+  const orderId = event.outTradeNo
+
+  if (!orderId) {
+    throw new Error('缺少订单号')
+  }
+
+  const orderRes = await db.collection('order').doc(orderId).get()
+  const order = orderRes.data
+
+  if (!order) {
+    throw new Error('订单不存在')
+  }
+  if (order._openid !== openid) {
+    throw new Error('不能支付他人的订单')
+  }
+  if (order.pay_status) {
+    throw new Error('订单已支付')
+  }
+
+  const finalPrice = Number(order.finalPrice || 0)
+  const totalFee = Math.round(finalPrice * 100)
+
+  if (!Number.isFinite(totalFee) || totalFee <= 0) {
+    throw new Error('订单金额不正确')
+  }
+
+  return cloud.cloudPay.unifiedOrder({
+    body: event.body || '点餐订单支付',
+    outTradeNo: orderId,
+    spbillCreateIp: '127.0.0.1',
+    subMchId: '填入你的商户ID',
+    totalFee,
+    envId: wxContext.ENV || process.env.TCB_ENV,
+    functionName: 'pay_success',
+    nonceStr: event.nonceStr || Math.random().toString(36).slice(2) + Date.now().toString(36),
+    tradeType: 'JSAPI'
   })
-  return res
 }

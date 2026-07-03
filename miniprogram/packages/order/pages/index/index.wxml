@@ -1,0 +1,335 @@
+﻿<!--packages/order/pages/index/index.wxml-->
+<wxs module="tagHelper" src="../../../../utils/tagHelper.wxs"></wxs>
+<view class="page">
+  <view class="top-safe-bg" style="height: {{statusBarHeight}}px;"></view>
+  <view class="cart-fx-layer">
+    <view
+      class="meat-flight"
+      wx:for="{{cartMeatAnimations}}"
+      wx:key="id"
+      style="left: {{item.left}}px; top: {{item.top}}px; opacity: {{item.opacity}}; transform: translate3d({{item.translateX}}px, {{item.translateY}}px, 0) scale({{item.scale}}) rotate({{item.rotate}}deg);">
+      <view class="meat-piece">
+        <view class="meat-mark mark-one"></view>
+        <view class="meat-mark mark-two"></view>
+      </view>
+    </view>
+    <view
+      class="cart-heat"
+      wx:for="{{cartHeatAnimations}}"
+      wx:key="id"
+      style="left: {{item.left}}px; top: {{item.top}}px; opacity: {{item.opacity}}; transform: translate3d(0, {{item.translateY}}px, 0);">
+      <view class="heat-line heat-a"></view>
+      <view class="heat-line heat-b"></view>
+    </view>
+  </view>
+
+  <!-- 状态栏占位 -->
+  <!-- 店名 -->
+  <view class="shop-header" style="padding-top: {{statusBarHeight}}px;">
+    <view class="shop-nav" style="height: {{shopNavTotalHeight}}px;">
+      <view class="shop-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">
+        <view class="cover-back-btn" bindtap="goCover">
+          <view class="back-icon" style="width: {{navIconSize}}px; height: {{navIconSize}}px; border-width: {{navIconStroke}}px;"></view>
+        </view>
+        <view class="shop-name nav-shop-name" style="font-size: {{navTitleFontSize}}px; line-height: {{navTitleFontSize}}px;">{{shopInfo.name || '张南烤肉'}}</view>
+      </view>
+      <view class="shop-search-row" style="top: {{searchRowTop}}px; height: {{searchRowHeight}}px;">
+        <view class="order-search-box">
+          <view class="search-icon"></view>
+          <input
+            class="order-search-input"
+            value="{{searchKeyword}}"
+            placeholder="搜索菜品"
+            confirm-type="search"
+            bindinput="onSearchInput"
+            bindconfirm="confirmSearch"
+          />
+          <view class="search-clear" wx:if="{{searchKeyword}}" bindtap="clearSearch"></view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 轮播公告 -->
+  <view class="notice-wrapper" wx:if="{{noticeList.length > 0}}">
+    <van-notice-bar 
+      left-icon="volume-o"
+      text="{{noticeText}}"
+      scrollable
+    />
+  </view>
+
+  <!-- 主内容区 -->
+  <view class="main-content">
+    <!-- 左侧分类菜单 -->
+    <scroll-view class="menu-sidebar" scroll-y enable-flex="{{true}}">
+      <view 
+        class="menu-item {{currentMenuId === item._id ? 'active' : ''}}" 
+        wx:for="{{menuList}}" 
+        wx:key="_id"
+        bindtap="switchMenu"
+        data-id="{{item._id}}">
+        <text class="menu-name">{{item.name}}</text>
+        <view class="menu-indicator" wx:if="{{currentMenuId === item._id}}"></view>
+      </view>
+    </scroll-view>
+
+    <!-- 右侧菜品列表 -->
+    <scroll-view class="goods-list" scroll-y enable-flex="{{true}}" enhanced="{{true}}" bounces="{{false}}" scroll-with-animation scroll-into-view="{{scrollIntoSection}}" lower-threshold="260" bindscroll="onGoodsScroll" bindscrolltolower="loadMoreCategorySections">
+      <view class="order-loading" wx:if="{{isSearching && searchLoading}}">
+        <image class="order-loading-img" src="/images/orderloadinggif-transparent.gif" mode="aspectFit"></image>
+        <view class="order-loading-text">正在搜索菜品</view>
+      </view>
+
+      <block wx:elif="{{isSearching}}">
+        <view class="goods-item" wx:for="{{searchGoodsList}}" wx:for-item="item" wx:key="_id">
+          <image class="goods-image" src="{{item.image}}" mode="aspectFill"></image>
+          <view class="goods-info">
+            <view class="goods-name">{{item.name}}</view>
+            <view class="goods-desc" wx:if="{{item.description || item.desc}}">{{item.description || item.desc}}</view>
+            <view class="goods-footer">
+              <view class="goods-price">
+                <text class="price-symbol">¥</text>
+                <text class="price-num">{{item.price}}</text>
+                <text class="price-unit">/份</text>
+              </view>
+              <view class="goods-actions">
+                <view class="action-btn reduce" wx:if="{{item.cartCount > 0}}" bindtap="reduceDishFromCart" data-goods="{{item}}">
+                  <text class="minus-icon"></text>
+                </view>
+                <view class="goods-count" wx:if="{{item.cartCount > 0}}" bindtap="editDishCountFromList" data-goods="{{item}}">{{item.cartCount}}</view>
+                <view class="action-btn add" bindtap="addDishToCartDirect" data-goods="{{item}}">
+                  <text class="plus-icon"></text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+        <van-empty wx:if="{{searchGoodsList.length === 0}}" description="暂无相关菜品" />
+      </block>
+
+      <view class="order-loading" wx:elif="{{menuLoading || (goodsLoading && goodsList.length === 0)}}">
+        <image class="order-loading-img" src="/images/orderloadinggif-transparent.gif" mode="aspectFit"></image>
+        <view class="order-loading-text">正在准备菜单</view>
+      </view>
+
+      <block wx:else>
+        <view class="category-section" id="category-{{section.id}}" wx:for="{{categorySections}}" wx:for-item="section" wx:key="id">
+          <view class="category-divider">
+            <view class="divider-line left"></view>
+            <view class="divider-title">{{section.name}}</view>
+            <view class="divider-line right"></view>
+          </view>
+          <view class="goods-item" wx:for="{{section.goods}}" wx:for-item="item" wx:key="_id">
+            <image class="goods-image" src="{{item.image}}" mode="aspectFill"></image>
+            <view class="goods-info">
+              <view class="goods-name">{{item.name}}</view>
+              <view class="goods-desc" wx:if="{{item.description || item.desc}}">{{item.description || item.desc}}</view>
+              <view class="goods-footer">
+                <view class="goods-price">
+                  <text class="price-symbol">¥</text>
+                  <text class="price-num">{{item.price}}</text>
+                  <text class="price-unit">/份</text>
+                </view>
+                <view class="goods-actions">
+                  <view class="action-btn reduce" wx:if="{{item.cartCount > 0}}" bindtap="reduceDishFromCart" data-goods="{{item}}">
+                    <text class="minus-icon"></text>
+                  </view>
+                  <view class="goods-count" wx:if="{{item.cartCount > 0}}" bindtap="editDishCountFromList" data-goods="{{item}}">{{item.cartCount}}</view>
+                  <view class="action-btn add" bindtap="addDishToCartDirect" data-goods="{{item}}">
+                    <text class="plus-icon"></text>
+                  </view>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+        <view class="section-loading" wx:if="{{goodsLoading && goodsList.length > 0}}">
+          <image class="section-loading-img" src="/images/orderloadinggif-transparent.gif" mode="aspectFit"></image>
+        </view>
+      </block>
+      
+      <van-empty wx:if="{{!isSearching && !menuLoading && !goodsLoading && goodsList.length === 0}}" description="暂无菜品" />
+    </scroll-view>
+  </view>
+
+  <!-- 悬浮购物车 -->
+  <view class="float-cart-wrapper">
+    <view class="float-cart-card">
+      <view class="cart-left {{!tableNumber ? 'preorder-cart-left' : ''}}" bindtap="toggleCart">
+        <view class="cart-icon-wrapper {{cartBounce ? 'cart-bounce' : ''}}">
+          <image class="cart-icon" src="/packages/order/images/shoppingcar-transparent.png" mode="aspectFit"></image>
+          <view class="cart-badge {{cartBadgeBounce ? 'badge-bounce' : ''}}" wx:if="{{cartCount > 0}}">{{cartCount}}</view>
+        </view>
+        <view class="cart-info" wx:if="{{tableNumber}}">
+          <view class="cart-price">
+            <text class="price-label">总价：</text>
+            <text class="price-symbol">¥</text>
+            <text class="price-num">{{cartTotalPriceText}}</text>
+          </view>
+          <view class="cart-tip" wx:if="{{tableNumber}}">{{tableNumber}}号桌</view>
+        </view>
+      </view>
+      <view class="cart-right" wx:if="{{tableNumber}}">
+        <view class="settle-btn {{cartCount > 0 ? 'active' : ''}}" bindtap="goToSettle">
+          提交订单
+        </view>
+      </view>
+      <view class="cart-right cart-right-preorder" wx:else>
+        <view class="cart-action-pill seated {{cartCount > 0 ? 'active' : ''}}" bindtap="scanTableCode">
+          已落座，扫码下单
+        </view>
+        <view class="cart-action-pill preorder {{cartCount > 0 ? 'active' : ''}}" bindtap="saveOrderDraft">
+          未落座，保存订单
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 购物车详情弹窗 -->
+  <view class="cart-mask {{showCart ? 'show' : ''}}" bindtap="toggleCart"></view>
+  <view class="cart-detail {{showCart ? 'show' : ''}}">
+    <view class="cart-header">
+      <text class="cart-title">购物车</text>
+      <text class="cart-clear" bindtap="clearCart">清空</text>
+    </view>
+    <scroll-view class="cart-content" scroll-y>
+      <view class="cart-goods-item" wx:for="{{cart}}" wx:for-item="item" wx:key="index">
+        <view class="cart-goods-info">
+          <image class="cart-goods-image" src="{{item.info.image}}" mode="aspectFill"></image>
+          <view class="cart-goods-detail">
+            <view class="cart-goods-name">{{item.info.name}}</view>
+            <view class="cart-goods-tags" wx:if="{{item.tagLabels && item.tagLabels.length > 0}}">
+              <text class="tag-text" wx:for="{{item.tagLabels}}" wx:key="index" wx:for-item="tagVal">
+                {{tagVal}}
+              </text>
+            </view>
+            <view class="cart-goods-price">¥{{item.info.price}} × {{item.count}}</view>
+          </view>
+        </view>
+        <view class="cart-goods-actions">
+          <view class="action-btn reduce" bindtap="reduceFromCart" data-id="{{index}}">
+            <text class="minus-icon"></text>
+          </view>
+          <view class="cart-count" bindtap="editCartItemCount" data-id="{{index}}">{{item.count}}</view>
+          <view class="action-btn add" bindtap="addToCartFromCart" data-id="{{index}}">
+            <text class="plus-icon"></text>
+          </view>
+        </view>
+      </view>
+      
+      <van-empty wx:if="{{cartCount === 0}}" description="购物车是空的" />
+    </scroll-view>
+    
+    <!-- 购物车底部栏 -->
+    <view class="cart-footer" wx:if="{{cartCount > 0}}">
+      <view class="cart-footer-left" wx:if="{{tableNumber}}">
+        <view class="cart-total-label">合计：</view>
+        <view class="cart-total-price">
+          <text class="price-symbol">¥</text>
+          <text class="price-num">{{cartTotalPriceText}}</text>
+        </view>
+      </view>
+      <view class="cart-footer-right" wx:if="{{tableNumber}}">
+        <view class="cart-settle-btn" bindtap="goToSettle">提交订单</view>
+      </view>
+      <view class="cart-footer-right cart-footer-actions preorder-footer-actions" wx:else>
+        <view class="cart-action-pill seated active" bindtap="scanTableCode">
+          已落座，扫码下单
+        </view>
+        <view class="cart-action-pill preorder active" bindtap="saveOrderDraft">
+          未落座，保存订单
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 菜品规格选择弹窗 -->
+  <view class="modal-mask" wx:if="{{showTagModal}}" catchtap="closeTagModal">
+    <view class="spec-modal" catchtap="stopPropagation">
+      <view class="spec-product-card">
+        <image class="spec-product-image" src="{{currentDish.image}}" mode="aspectFill"></image>
+        <view class="spec-product-info">
+          <view class="spec-product-name">{{currentDish.name}}</view>
+          <view class="spec-product-desc" wx:if="{{currentDish.description || currentDish.desc}}">{{currentDish.description || currentDish.desc}}</view>
+        </view>
+      </view>
+
+      <scroll-view class="spec-content" scroll-y>
+        <view class="spec-section">
+          <view class="spec-title">{{modalFlavorTitle}}</view>
+          <view class="flavor-options">
+            <view
+              class="flavor-option {{selectedTags.flavor === item ? 'selected' : ''}}"
+              wx:for="{{modalFlavorOptions}}"
+              wx:key="*this"
+              bindtap="selectFlavorOption"
+              data-option="{{item}}"
+            >{{item}}</view>
+          </view>
+          <view class="flavor-note" wx:if="{{currentDish.flavorNote}}">{{currentDish.flavorNote}}</view>
+        </view>
+
+        <view class="spec-section" wx:for="{{modalOptionGroups}}" wx:key="id">
+          <view class="spec-title">{{item.title}}</view>
+          <view class="flavor-options">
+            <view
+              class="flavor-option {{item.selectedOption === option ? 'selected' : ''}}"
+              wx:for="{{item.options}}"
+              wx:for-item="option"
+              wx:key="*this"
+              bindtap="selectOptionGroupOption"
+              data-group-id="{{item.id}}"
+              data-option="{{option}}"
+            >{{option}}</view>
+          </view>
+          <view class="flavor-note" wx:if="{{item.note}}">{{item.note}}</view>
+        </view>
+
+        <view class="spec-section">
+          <view class="spec-title">菜品备注</view>
+          <view class="remark-box">
+            <input class="remark-input" value="{{modalRemark}}" maxlength="10" placeholder="请输入备注" bindinput="onRemarkInput" />
+            <text class="remark-count">{{modalRemarkCount}}/10</text>
+          </view>
+        </view>
+      </scroll-view>
+
+      <view class="spec-footer">
+        <view class="spec-footer-top">
+          <view class="spec-price-block">
+            <view class="spec-price">
+              <text class="spec-price-symbol">¥</text>
+              <text class="spec-price-num">{{modalTotalPrice}}</text>
+            </view>
+            <view class="spec-selected">已选：{{modalDishCount}}份</view>
+          </view>
+          <view class="modal-quantity">
+            <view class="modal-qty-btn {{modalDishCount <= 1 ? 'disabled' : ''}}" bindtap="decreaseModalCount">
+              <text class="minus-icon"></text>
+            </view>
+            <view class="modal-qty-num" bindtap="editModalDishCount">{{modalDishCount}}</view>
+            <view class="modal-qty-btn add" bindtap="increaseModalCount">
+              <text class="plus-icon"></text>
+            </view>
+          </view>
+        </view>
+        <view class="spec-submit-btn" bindtap="confirmAddToCart">加入购物车</view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 用户授权组件 -->
+  <view class="action-loading-layer" wx:if="{{actionLoading}}" catchtouchmove="catchActionLoadingMove">
+    <view class="action-loading-card">
+      <image class="action-loading-img" src="{{actionLoadingGif}}" mode="aspectFit"></image>
+      <view class="action-loading-text">{{actionLoadingText}}</view>
+    </view>
+  </view>
+
+  <avatar-nickname-modal 
+    showAvaModal="{{showAuthModal}}" 
+    loadingGif="{{actionLoadingGif}}"
+    bind:saved="onUserInfoSaved">
+  </avatar-nickname-modal>
+</view>

@@ -1,6 +1,6 @@
 /* components/avatarNicknameModal/avatarNicknameModal.wxss */
 .super-page-box {
-	background-color: rgba(51, 51, 51, 0.35);
+	background-color: transparent;
 	position: fixed;
 	width: 100vw;
 	height: 100vh;
@@ -23,7 +23,7 @@
 .super-modal-box {
 	position: fixed;
 	z-index: 999;
-	height: 75%;
+	height: auto;
 	width: 100vw;
 	bottom: 0rpx;
 	left: 0rpx;
@@ -33,7 +33,9 @@
 	background-color: #ffffff;
 	border-top-left-radius: 30rpx;
 	border-top-right-radius: 30rpx;
-	height: 100%;
+	height: auto;
+	min-height: 310rpx;
+	padding-bottom: calc(30rpx + env(safe-area-inset-bottom));
 	width: 100%;
 	display: flex;
 	flex-direction: column;
@@ -41,12 +43,20 @@
 }
 
 .super-modal-title {
-	height: 105rpx;
+	height: 88rpx;
 	width: 100%;
 	font-size: 30rpx;
 	font-weight: bold;
 	color: #222222;
 	position: relative;
+}
+
+.auth-desc {
+	padding: 12rpx 42rpx 20rpx;
+	color: #8c7b68;
+	font-size: 24rpx;
+	line-height: 1.6;
+	text-align: center;
 }
 
 .super-modal-content {
@@ -87,9 +97,9 @@
 }
 
 .super-nick-name-box {
-	height: 105rpx;
-	padding: 0rpx 25rpx;
-	margin-top: 15rpx;
+	height: 92rpx;
+	padding: 0rpx 32rpx;
+	margin-top: 4rpx;
 	border-bottom: 1rpx solid #f0f0f0;
 }
 
@@ -98,13 +108,13 @@
 	width: 85%;
 }
 .nick-name-input{
-	height: 105rpx;
+	height: 92rpx;
 }
 
 .super-phone-box {
-	height: 105rpx;
-	padding: 0rpx 25rpx;
-	margin-top: 15rpx;
+	height: 96rpx;
+	padding: 0rpx 32rpx;
+	margin-top: 0;
 }
 
 .phone-label-box {
@@ -119,10 +129,10 @@
 
 .phone-btn {
 	padding: 12rpx 30rpx;
-	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-	color: white;
+	background: linear-gradient(135deg, #d6a24a 0%, #b8792f 100%);
+	color: #fff7e8;
 	font-size: 24rpx;
-	border-radius: 50rpx;
+	border-radius: 14rpx;
 	border: none;
 	line-height: 1.5;
 	width:250rpx !important;
@@ -133,6 +143,7 @@
 }
 
 .apply-btn {
+	display: none;
 	width: 450rpx;
 	height: 95rpx;
 	border-radius: 20rpx;
@@ -162,4 +173,32 @@
 
 .flex-jb-ac {
 	justify-content: space-between;
+}
+
+.auth-loading-float {
+	position: fixed;
+	left: 0;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	z-index: 1200;
+	background: transparent;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	pointer-events: none;
+}
+
+.auth-loading-img {
+	width: 230rpx;
+	height: 230rpx;
+}
+
+.auth-loading-text {
+	margin-top: 4rpx;
+	color: #6a4527;
+	font-size: 28rpx;
+	font-weight: 600;
+	line-height: 1.3;
 }
