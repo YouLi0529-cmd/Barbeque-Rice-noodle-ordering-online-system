@@ -1,4 +1,4 @@
-﻿// packages/admin/pages/admin/notice/notice.js
+﻿// pages/admin/notice/notice.js
 const db = wx.cloud.database()
 
 Page({
@@ -26,13 +26,13 @@ Page({
   async loadNotices() {
     try {
       wx.showLoading({ title: '加载中...' })
-      
+
       const res = await db.collection('notice')
         .orderBy('sort', 'asc')
         .get()
 
       wx.hideLoading()
-      
+
       this.setData({
         notices: res.data
       })
@@ -56,7 +56,7 @@ Page({
       })
       return
     }
-    
+
     this.setData({
       showModal: true,
       editMode: false,
@@ -120,7 +120,7 @@ Page({
       const { _id, _openid, ...updateData } = currentNotice
       if (editMode) {
         // 编辑
-        
+
         await db.collection('notice').doc(_id).update({
           data: updateData
         })
@@ -213,4 +213,3 @@ Page({
     })
   }
 })
-

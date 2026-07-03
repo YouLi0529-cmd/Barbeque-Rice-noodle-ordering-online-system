@@ -1,4 +1,4 @@
-﻿// packages/admin/pages/admin/dish/dish.js
+﻿// pages/admin/dish/dish.js
 const db = wx.cloud.database()
 
 Page({
@@ -13,7 +13,7 @@ Page({
       name: '',
       sort: 0
     },
-    
+
     // 菜品相关
     dishes: [],
     showDishModal: false,
@@ -29,9 +29,10 @@ Page({
         image: '',
         status: 1, // 1: 上架, 0: 下架
         sort: 0,
-        tags: [] // 标签数组
+        tags: [], // 标签数组
+        canUseMiandan: false // 是否可以参与免单
       },
-    
+
     // 标签编辑
     showTagModal: false,
     editingTagIndex: -1, // -1表示新增，>=0表示编辑
@@ -60,7 +61,7 @@ Page({
   },
 
   // ==================== 分类管理 ====================
-  
+
   // 加载分类列表
   async loadCategories() {
     try {
@@ -69,7 +70,7 @@ Page({
       })
       const result = res.result || {}
       const categories = result.success ? (result.data || []) : []
-      
+
       // 如果有分类且没有选中分类，默认选中第一个
       if (categories.length > 0 && !this.data.currentCategoryId) {
         this.setData({
@@ -177,7 +178,7 @@ Page({
             createTime: new Date()
           }
         })
-        
+
         // 添加后自动选中新分类
         this.setData({
           currentCategoryId: addRes._id
@@ -273,7 +274,7 @@ Page({
         .skip(skip)
         .limit(pageSize)
         .get()
-      
+
       const list = res.data || []
       const newDishes = append ? this.data.dishes.concat(list) : list
       const hasMore = list.length === pageSize
@@ -320,7 +321,8 @@ Page({
         image: '',
         status: 1,
         sort: this.data.dishes.length,
-        tags: []
+        tags: [],
+        canUseMiandan: false // 是否可以参与免单
       }
     })
   },
@@ -457,6 +459,13 @@ Page({
   onDishSortInput(e) {
     this.setData({
       'currentDish.sort': parseInt(e.detail.value) || 0
+    })
+  },
+
+  // 切换可参与免单
+  onCanUseMiandanChange(e) {
+    this.setData({
+      'currentDish.canUseMiandan': e.detail.value
     })
   },
 
@@ -615,10 +624,10 @@ Page({
       // 确保价格和原价是数字类型
       updateData.price = price
       updateData.originalPrice = originalPrice
-      
+
       if (editDishMode) {
         // 编辑（去掉 _id 和 _openid 等系统字段）
-        
+
         await db.collection('dish').doc(_id).update({
           data: updateData
         })

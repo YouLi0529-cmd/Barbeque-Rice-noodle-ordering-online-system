@@ -1,6 +1,8 @@
 ﻿// packages/admin/pages/admin/tableCode/tableCode.js
 const db = wx.cloud.database()
 
+const CUSTOMER_ORDER_PAGE = 'packages/order/pages/index/index'
+
 Page({
   data: {
     tableCodeList: [],
@@ -126,7 +128,7 @@ Page({
         name: 'get_code',
         data: {
           scene: `${tableNumber}`,
-          page: 'packages/order/pages/index/index'
+          page: CUSTOMER_ORDER_PAGE
         }
       })
 
@@ -405,7 +407,7 @@ Page({
       })
     } catch (err) {
       wx.hideLoading()
-      
+
       // 用户拒绝授权
       if (err.errMsg && (err.errMsg.includes('auth deny') || err.errMsg.includes('authorize'))) {
         wx.showModal({
@@ -457,4 +459,3 @@ Page({
     })
   }
 })
-

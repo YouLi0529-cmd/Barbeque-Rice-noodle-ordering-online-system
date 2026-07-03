@@ -1,4 +1,4 @@
-﻿// packages/admin/pages/admin/rechargeOptions/rechargeOptions.js
+﻿// pages/admin/rechargeOptions/rechargeOptions.js
 const db = wx.cloud.database()
 
 Page({
@@ -250,4 +250,3 @@ Page({
     })
   }
 })
-

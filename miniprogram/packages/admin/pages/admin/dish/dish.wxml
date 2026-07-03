@@ -1,12 +1,12 @@
-﻿<!--packages/admin/pages/admin/dish/dish.wxml-->
+﻿<!--pages/admin/dish/dish.wxml-->
 <view class="page">
   <!-- 主内容区 -->
   <view class="main-content">
     <!-- 左侧分类菜单 -->
     <scroll-view class="category-sidebar" scroll-y>
-      <view 
-        class="category-item {{currentCategoryId === item._id ? 'active' : ''}}" 
-        wx:for="{{categories}}" 
+      <view
+        class="category-item {{currentCategoryId === item._id ? 'active' : ''}}"
+        wx:for="{{categories}}"
         wx:key="_id"
         bindtap="switchCategory"
         data-id="{{item._id}}">
@@ -18,7 +18,7 @@
           <text class="action-icon delete" catchtap="deleteCategory" data-category="{{item}}">删除</text>
         </view>
       </view>
-      
+
       <!-- 添加分类按钮 -->
       <view class="add-category-btn" bindtap="showAddCategoryModal">
         <text class="add-icon">+</text>
@@ -52,6 +52,7 @@
           <view class="dish-info">
             <view class="dish-name">{{item.name}}</view>
             <view class="dish-desc">{{item.description || '暂无描述'}}</view>
+            <text class="miandan-tip" wx:if="{{item.canUseMiandan === true}}">可参与免单活动</text>
             <view class="dish-price">
               <text class="price-current">¥{{item.price}}</text>
               <text class="price-original" wx:if="{{item.originalPrice > 0}}">¥{{item.originalPrice}}</text>
@@ -84,19 +85,19 @@
       <view class="modal-content">
         <view class="form-item">
           <view class="form-label">分类名称</view>
-          <input 
-            class="form-input" 
-            placeholder="请输入分类名称" 
+          <input
+            class="form-input"
+            placeholder="请输入分类名称"
             value="{{currentCategory.name}}"
             bindinput="onCategoryNameInput"
           />
         </view>
         <view class="form-item">
           <view class="form-label">排序</view>
-          <input 
-            class="form-input" 
-            type="number" 
-            placeholder="数字越小越靠前" 
+          <input
+            class="form-input"
+            type="number"
+            placeholder="数字越小越靠前"
             value="{{currentCategory.sort}}"
             bindinput="onCategorySortInput"
           />
@@ -116,9 +117,9 @@
       <scroll-view class="modal-content" scroll-y>
         <view class="form-item">
           <view class="form-label">菜品名称<text class="required-mark">*</text></view>
-          <input 
-            class="form-input" 
-            placeholder="请输入菜品名称（最多10个字）" 
+          <input
+            class="form-input"
+            placeholder="请输入菜品名称（最多10个字）"
             maxlength="10"
             value="{{currentDish.name}}"
             bindinput="onDishNameInput"
@@ -133,29 +134,29 @@
         </view>
         <view class="form-item">
           <view class="form-label">售价<text class="required-mark">*</text></view>
-          <input 
-            class="form-input" 
-            type="digit" 
-            placeholder="请输入售价（0-10000）" 
+          <input
+            class="form-input"
+            type="digit"
+            placeholder="请输入售价（0-10000）"
             value="{{currentDish.price}}"
             bindinput="onDishPriceInput"
           />
         </view>
         <view class="form-item">
           <view class="form-label">原价<text class="required-mark">*</text></view>
-          <input 
-            class="form-input" 
-            type="digit" 
-            placeholder="请输入原价（不能小于售价，0-10000）" 
+          <input
+            class="form-input"
+            type="digit"
+            placeholder="请输入原价（不能小于售价，0-10000）"
             value="{{currentDish.originalPrice}}"
             bindinput="onDishOriginalPriceInput"
           />
         </view>
         <view class="form-item">
           <view class="form-label">描述</view>
-          <textarea 
-            class="form-textarea" 
-            placeholder="请输入菜品描述（最多10个字）" 
+          <textarea
+            class="form-textarea"
+            placeholder="请输入菜品描述（最多10个字）"
             maxlength="10"
             value="{{currentDish.description}}"
             bindinput="onDishDescriptionInput"
@@ -163,14 +164,22 @@
         </view>
         <view class="form-item">
           <view class="form-label">排序</view>
-          <input 
-            class="form-input" 
-            type="number" 
-            placeholder="数字越小越靠前" 
+          <input
+            class="form-input"
+            type="number"
+            placeholder="数字越小越靠前"
             value="{{currentDish.sort}}"
             bindinput="onDishSortInput"
           />
         </view>
+        <view class="form-item">
+          <view class="form-label">
+            可参与免单
+            <text class="label-tip">（用户可以用免单次数点这一份菜品）</text>
+          </view>
+          <switch checked="{{currentDish.canUseMiandan}}" bindchange="onCanUseMiandanChange" color="#e54d42"/>
+        </view>
+
         <!-- 标签管理 -->
         <view class="form-item">
           <view class="form-label">
@@ -214,9 +223,9 @@
       <scroll-view class="modal-content" scroll-y>
         <view class="form-item">
           <view class="form-label">标签名称</view>
-          <input 
-            class="form-input" 
-            placeholder="如：辣度、配料等" 
+          <input
+            class="form-input"
+            placeholder="如：辣度、配料等"
             value="{{currentTag.name}}"
             bindinput="onTagNameInput"
           />
@@ -224,13 +233,13 @@
         <view class="form-item">
           <view class="form-label">选择类型</view>
           <view class="type-selector">
-            <view 
+            <view
               class="type-option {{currentTag.type === 'single' ? 'active' : ''}}"
               bindtap="selectTagType"
               data-type="single">
               单选
             </view>
-            <view 
+            <view
               class="type-option {{currentTag.type === 'multiple' ? 'active' : ''}}"
               bindtap="selectTagType"
               data-type="multiple">
@@ -251,9 +260,9 @@
             </view>
           </view>
           <view class="add-option-row">
-            <input 
-              class="option-input" 
-              placeholder="输入选项内容" 
+            <input
+              class="option-input"
+              placeholder="输入选项内容"
               value="{{newOption}}"
               bindinput="onOptionInput"
             />

@@ -1,9 +1,0 @@
-{
-  "navigationBarTitleText": "张南火盆烧烤",
-  "navigationStyle": "custom",
-  "enablePullDownRefresh": true,
-  "usingComponents": {
-    "avatar-nickname-modal": "/components/avatarNicknameModal/avatarNicknameModal"
-  }
-}
-

@@ -1,6 +1,4 @@
-{
+﻿{
   "navigationBarTitleText": "菜品管理",
-  "usingComponents": {
-    "van-empty": "/vant/empty/index"
-  }
+  "usingComponents": {}
 }

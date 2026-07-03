@@ -469,9 +469,16 @@ async function createOrder(payload) {
       goods: priceResult.goods,
       totalPrice: priceResult.totalPrice,
       finalPrice: priceResult.finalPrice,
-      pay_status: true,
-      payTime: db.serverDate(),
+      pay_status: false,
+      payStatus: false,
+      payMethod: 'offline',
+      status: 'waiting_pay',
+      frontDeskConfirmed: false,
+      frontDeskRemark: '',
+      kitchenPrinted: false,
+      kitchenPrintStatus: 'pending',
       createTime: db.serverDate(),
+      updateTime: db.serverDate(),
       _openid: openid,
       userId: user._id,
       userCode: user.userCode || '',
@@ -680,7 +687,7 @@ async function getPhoneNumber(payload) {
 }
 
 function isSavedOrder(order) {
-  return order && (order.pay_status === false || order.savedOnly === true || order.isDraft === true)
+  return order && (order.savedOnly === true || order.isDraft === true || !!order.expiresAt)
 }
 
 function getTimeValue(value) {
@@ -825,7 +832,11 @@ async function cancelUserOrder(payload) {
     }
   }
 
-  if (Number(order.status) !== 0) {
+  const canCancel = (order.status === 'waiting_pay' || Number(order.status) === 0) &&
+    !order.frontDeskConfirmed &&
+    !order.kitchenPrinted
+
+  if (!canCancel) {
     return {
       success: false,
       code: 'ORDER_CANNOT_CANCEL',

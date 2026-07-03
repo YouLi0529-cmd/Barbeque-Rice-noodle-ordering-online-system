@@ -1,9 +1,17 @@
-﻿// packages/admin/pages/admin/user/user.js
+﻿// pages/admin/user/user.js
 const db = wx.cloud.database()
+const _ = db.command
+
 Page({
   data: {
     users: [],
     searchKeyword: '',
+    showBalanceModal: false,
+    showMiandanModal: false,
+    currentUser: null,
+    editBalance: 0,
+    editMiandanCount: 0,
+    isMember: false,
     // 分页相关
     userPage: 0,
     userPageSize: 20,
@@ -35,7 +43,7 @@ Page({
       const keyword = this.data.searchKeyword.trim()
       const pageSize = this.data.userPageSize
       const page = append ? this.data.userPage + 1 : 0
-      
+
       // 调用云函数获取用户列表（使用聚合查询）
       const res = await wx.cloud.callFunction({
         name: 'getUserList',
@@ -45,10 +53,10 @@ Page({
           pageSize: pageSize
         }
       })
-      
+
       if (res.result && res.result.success) {
         const { list, hasMore } = res.result.data
-        
+
         const newUsers = append ? this.data.users.concat(list) : list
 
         this.setData({
@@ -107,7 +115,165 @@ Page({
     })
   },
 
-  // 阻止冒泡
-  stopPropagation() {}
-})
+  // 显示编辑余额弹窗
+  showEditBalanceModal(e) {
+    const user = e.currentTarget.dataset.user
+    this.setData({
+      showBalanceModal: true,
+      currentUser: user,
+      editBalance: user.balance || 0
+    })
+  },
 
+  // 关闭余额弹窗
+  closeBalanceModal() {
+    this.setData({
+      showBalanceModal: false,
+      currentUser: null
+    })
+  },
+
+  // 显示编辑免单次数弹窗
+  async showEditMiandanModal(e) {
+    const user = e.currentTarget.dataset.user
+
+    // 获取用户的免单次数
+    let miandanCount = 0
+    try {
+      const freeBuyRes = await db.collection('freeBuy').where({
+        _openid: user._openid
+      }).get()
+
+      if (freeBuyRes.data && freeBuyRes.data.length > 0) {
+        miandanCount = freeBuyRes.data[0].count || 0
+      }
+    } catch (err) {
+      console.error('获取免单次数失败', err)
+    }
+
+    this.setData({
+      showMiandanModal: true,
+      currentUser: user,
+      editMiandanCount: miandanCount
+    })
+  },
+
+  // 关闭免单弹窗
+  closeMiandanModal() {
+    this.setData({
+      showMiandanModal: false,
+      currentUser: null
+    })
+  },
+
+  // 阻止冒泡
+  stopPropagation() {},
+
+  // 输入余额
+  onBalanceInput(e) {
+    this.setData({
+      editBalance: parseFloat(e.detail.value) || 0
+    })
+  },
+
+  // 输入免单次数
+  onMiandanCountInput(e) {
+    this.setData({
+      editMiandanCount: parseInt(e.detail.value) || 0
+    })
+  },
+
+  // 保存余额
+  async saveBalance() {
+    const { currentUser, editBalance } = this.data
+
+    if (editBalance < 0) {
+      wx.showToast({
+        title: '余额不能为负数',
+        icon: 'none'
+      })
+      return
+    }
+
+    try {
+      wx.showLoading({ title: '保存中...' })
+
+      await db.collection('user').doc(currentUser._id).update({
+        data: {
+          balance: editBalance
+        }
+      })
+
+      wx.hideLoading()
+      wx.showToast({
+        title: '保存成功',
+        icon: 'success'
+      })
+
+      this.closeBalanceModal()
+      this.loadUsers()
+    } catch (err) {
+      wx.hideLoading()
+      console.error('保存失败', err)
+      wx.showToast({
+        title: '保存失败',
+        icon: 'none'
+      })
+    }
+  },
+
+  // 保存免单次数
+  async saveMiandan() {
+    const { currentUser, editMiandanCount } = this.data
+
+    if (editMiandanCount < 0) {
+      wx.showToast({
+        title: '免单次数不能为负数',
+        icon: 'none'
+      })
+      return
+    }
+
+    try {
+      wx.showLoading({ title: '保存中...' })
+
+      // 查询是否已有免单记录
+      const freeBuyRes = await db.collection('freeBuy').where({
+        _openid: currentUser._openid
+      }).get()
+
+      if (freeBuyRes.data && freeBuyRes.data.length > 0) {
+        // 更新现有记录
+        await db.collection('freeBuy').doc(freeBuyRes.data[0]._id).update({
+          data: {
+            count: editMiandanCount
+          }
+        })
+      } else {
+        // 创建新记录
+        await db.collection('freeBuy').add({
+          data: {
+            _openid: currentUser._openid,
+            count: editMiandanCount
+          }
+        })
+      }
+
+      wx.hideLoading()
+      wx.showToast({
+        title: '保存成功',
+        icon: 'success'
+      })
+
+      this.closeMiandanModal()
+      this.loadUsers()
+    } catch (err) {
+      wx.hideLoading()
+      console.error('保存失败', err)
+      wx.showToast({
+        title: '保存失败',
+        icon: 'none'
+      })
+    }
+  }
+})

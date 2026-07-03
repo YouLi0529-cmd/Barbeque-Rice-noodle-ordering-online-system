@@ -275,7 +275,7 @@ Page({
   },
 
   isSavedOrder(order) {
-    return order && (order.pay_status === false || order.savedOnly === true || order.isDraft === true)
+    return order && (order.savedOnly === true || order.isDraft === true || !!order.expiresAt)
   },
 
   isExpiredSavedOrder(order) {
@@ -473,8 +473,12 @@ Page({
   // 取消订单
   cancelOrder(e) {
     const order = e.currentTarget.dataset.order
-    
-    if (order.status !== 0) {
+
+    const canCancel = (order.status === 'waiting_pay' || Number(order.status) === 0) &&
+      !order.frontDeskConfirmed &&
+      !order.kitchenPrinted
+
+    if (!canCancel) {
       wx.showToast({ title: '该订单无法取消', icon: 'none' })
       return
     }

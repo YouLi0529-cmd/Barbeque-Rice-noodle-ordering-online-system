@@ -159,7 +159,7 @@ Page({
   },
 
   isSavedOrder(order) {
-    return order && (order.pay_status === false || order.savedOnly === true || order.isDraft === true)
+    return order && (order.savedOnly === true || order.isDraft === true || !!order.expiresAt)
   },
 
   isExpiredSavedOrder(order) {

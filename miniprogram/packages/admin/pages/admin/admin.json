@@ -1,7 +1,4 @@
-{
+﻿{
   "navigationBarTitleText": "管理员后台",
-  "usingComponents": {
-    "van-grid": "/vant/grid/index",
-    "van-grid-item": "/vant/grid-item/index"
-  }
+  "usingComponents": {}
 }

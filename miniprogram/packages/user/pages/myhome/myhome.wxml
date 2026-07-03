@@ -51,37 +51,11 @@
     </van-grid>
   </view> -->
 
-  <!-- 管理员入口触发区域（隐藏在右下角） -->
   <view class="profile-menu">
     <view class="profile-menu-item" hover-class="menu-hover" bindtap="goAbout">
       <view class="menu-icon">›</view>
       <view class="menu-title">关于</view>
       <view class="menu-arrow">›</view>
-    </view>
-  </view>
-
-  <view class="admin-trigger" bindtap="onAdminTrigger"></view>
-
-  <!-- 密码输入弹窗 -->
-  <view class="modal-mask" wx:if="{{showPasswordModal}}" catchtap="noop">
-    <view class="modal-dialog" catchtap="stopPropagation">
-      <view class="modal-title">{{isFirstTime ? '设置管理员密码' : '管理员登录'}}</view>
-      <view class="modal-content">
-        <input 
-          class="password-input" 
-          type="password" 
-          placeholder="{{isFirstTime ? '请设置管理员密码（至少6位）' : '请输入管理员密码'}}" 
-          value="{{adminPassword}}"
-          bindinput="onPasswordInput"
-        />
-        <view class="password-hint" wx:if="{{isFirstTime}}">
-          首次设置，请设置一个安全的密码
-        </view>
-      </view>
-      <view class="modal-footer">
-        <view class="modal-btn cancel" bindtap="closePasswordModal">取消</view>
-        <view class="modal-btn confirm" bindtap="verifyPassword">{{isFirstTime ? '设置' : '登录'}}</view>
-      </view>
     </view>
   </view>
 

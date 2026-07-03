@@ -1,0 +1,117 @@
+﻿/* pages/admin/outdoor/outdoor.wxss */
+.admin-list-page {
+  min-height: 100vh;
+  padding-bottom: 40rpx;
+  background: #FFF7EC;
+}
+
+.top-bar {
+  padding: 52rpx 30rpx 38rpx;
+  color: #FFF7EC;
+  border-radius: 0 0 36rpx 36rpx;
+}
+
+.top-title {
+  font-size: 44rpx;
+  font-weight: 900;
+}
+
+.top-desc {
+  margin-top: 10rpx;
+  color: rgba(255, 247, 236, 0.78);
+  font-size: 25rpx;
+}
+
+.toolbar {
+  margin: 24rpx;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.refresh-btn {
+  padding: 14rpx 26rpx;
+  border-radius: 999rpx;
+  color: #C9341C;
+  background: #FFF2DD;
+  font-size: 25rpx;
+  font-weight: 800;
+}
+
+.order-card {
+  margin: 0 24rpx 22rpx;
+  padding: 26rpx;
+  border-radius: 26rpx;
+  background: #FFF2DD;
+  box-shadow: 0 12rpx 28rpx rgba(58, 36, 24, 0.08);
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.order-title {
+  color: #1E1714;
+  font-size: 31rpx;
+  font-weight: 900;
+}
+
+.order-meta {
+  margin-top: 8rpx;
+  color: rgba(58, 36, 24, 0.62);
+  font-size: 24rpx;
+}
+
+.goods-list {
+  margin-top: 20rpx;
+  padding: 18rpx;
+  border-radius: 20rpx;
+  background: #FFF7EC;
+}
+
+.goods-row,
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18rpx;
+  color: #3A2418;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.goods-row + .goods-row,
+.info-row {
+  margin-top: 10rpx;
+}
+
+.goods-name {
+  flex: 1;
+}
+
+.goods-count,
+.info-row text:last-child {
+  color: #C9341C;
+  font-weight: 900;
+}
+
+.actions {
+  margin-top: 22rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+
+.action-btn {
+  padding: 14rpx 22rpx;
+  border-radius: 999rpx;
+  color: #3A2418;
+  background: #FFF7EC;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.action-btn.primary {
+  color: #fff;
+  background: linear-gradient(135deg, #F26A2E 0%, #C9341C 100%);
+}

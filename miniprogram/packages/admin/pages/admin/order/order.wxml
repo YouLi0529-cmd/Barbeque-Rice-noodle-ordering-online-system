@@ -1,89 +1,190 @@
-﻿<!--packages/admin/pages/admin/order/order.wxml-->
-<view class="page">
-  <!-- 筛选栏 -->
-  <view class="filter-bar">
-    <van-tabs active="{{orderType}}" bind:change="onChange" color="#e54d42" swipeable="{{false}}">
-      <van-tab title="点餐订单" />
-    </van-tabs>
-    <view class="refresh-bar">
-      <view class="refresh-btn" bindtap="refreshOrders">刷新</view>
-      <text class="refresh-tip">每 10 秒自动刷新</text>
+﻿<!-- pages/admin/order/order.wxml -->
+<view class="order-admin-page">
+  <view class="top-bar fire-gradient">
+    <view class="top-title">订单管理</view>
+    <view class="top-desc">前台确认点单、发送厨房、线下收款分开处理</view>
+  </view>
+
+  <view class="summary-row">
+    <view class="summary-item urgent">
+      <text class="summary-num">{{summary.frontdesk}}</text>
+      <text class="summary-label">待确认</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-num">{{summary.unpaid}}</text>
+      <text class="summary-label">未付款</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-num">{{summary.kitchen}}</text>
+      <text class="summary-label">厨房中</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-num">{{summary.ready}}</text>
+      <text class="summary-label">待交付</text>
     </view>
   </view>
 
-  <!-- 订单列表 -->
-  <view class="order-list">
-    <view class="order-item" wx:for="{{orders}}" wx:key="_id">
-      <!-- 订单头部 -->
-      <view class="order-header">
-        <view class="order-user-info" wx:if="{{item.userAvatar}}">
-          <image class="user-avatar" src="{{item.userAvatar || '/images/my.png'}}" mode="aspectFill"></image>
-          <view class="user-info-text">
-            <view class="user-name">{{item.userNickName || '未设置昵称'}}</view>
-            <view class="user-phone" wx:if="{{item.userPhone}}">{{item.userPhone}}</view>
-          </view>
-        </view>
-        <view class="order-type">
-          <text wx:if="{{item.orderType === 'dineIn'}}">🍽️ 堂食订单</text>
-          <text wx:elif="{{item.orderType === 'takeOut'}}">📦 打包订单</text>
-          <text wx:else>🍽️ 点餐订单</text>
+  <view class="filter-panel">
+    <scroll-view class="filter-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="filter-row">
+        <view
+          class="filter-chip {{activeFilter === item.value ? 'active' : ''}}"
+          wx:for="{{filters}}"
+          wx:key="value"
+          bindtap="onFilterChange"
+          data-value="{{item.value}}">
+          {{item.label}}
         </view>
       </view>
+    </scroll-view>
+    <view class="refresh-line">
+      <view class="refresh-btn" bindtap="refreshOrders">刷新</view>
+      <text>每 8 秒自动刷新 {{lastRefreshText}}</text>
+    </view>
+  </view>
 
-      <!-- 点餐订单内容 -->
-      <view class="order-content">
-        <view class="goods-list">
-          <view class="goods-item" wx:for="{{item.goods}}" wx:for-item="goods" wx:key="goodsId">
-            <image class="goods-image" src="{{goods.dishImage}}" mode="aspectFill"></image>
-            <view class="goods-info">
-              <view class="goods-name">{{goods.dishName}}</view>
-              <!-- 显示标签 -->
-              <view class="goods-tags" wx:if="{{goods.tags && goods.tags.length > 0}}">
-                <!-- <text class="tag-text" wx:for="{{goods.tags}}" wx:key="index" wx:for-item="tagVal">
-                  {{tagVal}}
-                </text> -->
-                <van-tag type="danger" wx:for="{{goods.tags}}" wx:key="index" wx:for-item="tagVal">{{tagVal}}</van-tag>
+  <view
+    class="order-card {{item.isUrgent ? 'urgent-card' : ''}}"
+    wx:for="{{orders}}"
+    wx:key="_id"
+    bindtap="openOrderDetail"
+    data-index="{{index}}">
+    <view class="card-head">
+      <view class="head-main">
+        <view class="order-kind">{{item.orderKindText}}</view>
+        <view class="order-time">{{item.createTimeText}}</view>
+      </view>
+      <view class="status-tag {{item.statusClass}}">{{item.statusText}}</view>
+    </view>
+
+    <view class="goods-list">
+      <view class="goods-row" wx:for="{{item.goods}}" wx:for-item="goods" wx:key="dishId">
+        <text class="goods-name">{{goods.dishName || goods.goodsName}}</text>
+        <text class="goods-count">x{{goods.count}}</text>
+      </view>
+    </view>
+
+    <view class="remark-box" wx:if="{{item.frontDeskRemarkText}}">
+      <text class="remark-label">前台备注</text>
+      <text class="remark-text">{{item.frontDeskRemarkText}}</text>
+    </view>
+
+    <view class="remark-box edit-box" wx:if="{{item.menuEditText}}">
+      <text class="remark-label">菜单状态</text>
+      <text class="remark-text">{{item.menuEditText}}</text>
+    </view>
+
+    <view class="meta-grid">
+      <view class="meta-item">
+        <text class="meta-label">金额</text>
+        <text class="meta-value">￥{{item.finalPriceText}}</text>
+      </view>
+      <view class="meta-item {{item.payText === '未付款' ? 'meta-warning' : ''}}">
+        <text class="meta-label">付款</text>
+        <text class="meta-value">{{item.payText}}</text>
+      </view>
+      <view class="meta-item {{item.printText === '打印失败' ? 'meta-warning' : ''}}">
+        <text class="meta-label">厨房</text>
+        <text class="meta-value">{{item.printText}}</text>
+      </view>
+    </view>
+
+    <view class="actions">
+      <view
+        class="action-btn {{action.type}}"
+        wx:for="{{item.actions}}"
+        wx:for-item="action"
+        wx:key="label"
+        catchtap="onActionTap"
+        data-index="{{index}}"
+        data-action="{{action.action}}"
+        data-status="{{action.status}}"
+        data-label="{{action.label}}">
+        {{action.label}}
+      </view>
+    </view>
+  </view>
+
+  <van-empty wx:if="{{orders.length === 0}}" description="暂无订单数据" />
+
+  <view class="modal-mask" wx:if="{{showRemarkModal}}" catchtap="closeRemarkModal">
+    <view class="remark-dialog" catchtap="stopPropagation">
+      <view class="modal-title">前台备注</view>
+      <textarea
+        class="remark-input"
+        maxlength="120"
+        placeholder="例如：少辣、先上肉、等人齐再烤"
+        value="{{frontDeskRemark}}"
+        bindinput="onRemarkInput"></textarea>
+      <view class="modal-footer">
+        <view class="modal-btn cancel" bindtap="closeRemarkModal">取消</view>
+        <view class="modal-btn confirm" bindtap="saveRemark">保存</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="modal-mask" wx:if="{{showEditOrderModal}}" catchtap="closeEditOrderModal">
+    <view class="edit-order-dialog" catchtap="stopPropagation">
+      <view class="modal-title">修改点菜单</view>
+
+      <scroll-view class="edit-order-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+        <view class="edit-block">
+          <view class="edit-block-title">当前订单</view>
+          <view class="edit-goods-row" wx:for="{{editGoods}}" wx:key="editKey">
+            <view class="edit-goods-main">
+              <view class="edit-goods-name">{{item.dishName}}</view>
+              <view class="edit-goods-price">￥{{item.price}} / 小计 ￥{{item.subtotal}}</view>
+            </view>
+            <view class="qty-control">
+              <view class="qty-btn" catchtap="decreaseEditGoods" data-index="{{index}}">-</view>
+              <view class="qty-num">{{item.count}}</view>
+              <view class="qty-btn" catchtap="increaseEditGoods" data-index="{{index}}">+</view>
+            </view>
+            <view class="remove-btn" catchtap="removeEditGoods" data-index="{{index}}">删</view>
+          </view>
+        </view>
+
+        <view class="edit-block">
+          <view class="edit-block-title">添加菜品</view>
+          <input
+            class="dish-search-input"
+            placeholder="搜索菜品"
+            value="{{dishSearchKeyword}}"
+            bindinput="onDishSearchInput" />
+          <view class="dish-picker-list">
+            <view
+              class="dish-picker-item"
+              wx:for="{{filteredDishes}}"
+              wx:key="_id"
+              catchtap="addDishToEditOrder"
+              data-index="{{index}}">
+              <view>
+                <view class="dish-picker-name">{{item.name}}</view>
+                <view class="dish-picker-price">￥{{item.priceText}}</view>
               </view>
-              <view class="goods-detail">
-                <text class="goods-price">¥{{goods.price}}</text>
-                <text class="goods-count">x{{goods.count}}</text>
-              </view>
+              <view class="dish-add-btn">添加</view>
             </view>
           </view>
         </view>
-        
-      </view>
 
-      <!-- 订单底部 -->
-      <view class="order-footer">
-        <view class="order-info">
-          <view class="order-time">
-            {{item.createTimeText}}
-          </view>
-          <view class="order-table-code" wx:if="{{item.tableNumber}}">
-            桌码：{{item.tableNumber}}
-          </view>
-          <!-- 打印状态 -->
-          <view class="order-print-status">
-            <text class="print-status-text {{item.printStatus === 2 ? 'printed' : item.printStatus === 3 ? 'failed' : item.printStatus === 4 ? 'cancelled' : 'not-printed'}}">
-              {{item.printStatus === 2 ? '✅ 已打印小票' : item.printStatus === 3 ? '❌ 打印失败' : item.printStatus === 4 ? '🚫 打印已取消' : '⏳ 未打印小票'}}
-            </text>
-          </view>
+        <view class="edit-block">
+          <view class="edit-block-title">修改原因</view>
+          <textarea
+            class="edit-reason-input"
+            maxlength="80"
+            placeholder="可选，例如：顾客临时加菜、前台改数量"
+            value="{{editReason}}"
+            bindinput="onEditReasonInput"></textarea>
         </view>
-        <view class="order-actions">
-          <view class="order-price">
-            <text class="price-label">实付：</text>
-            <text class="price-num">¥{{item.finalPrice}}</text>
-          </view>
-          <view class="action-btns">
-            <!-- <view class="action-btn delete" bindtap="deleteOrder" data-order="{{item}}" catchtap="stopPropagation">删除</view> -->
-          </view>
+      </scroll-view>
+
+      <view class="edit-total-bar">
+        <view>
+          <text class="total-label">新金额</text>
+          <text class="total-value">￥{{editTotalPriceText}}</text>
         </view>
+        <view class="save-menu-btn" bindtap="saveOrderGoods">保存菜单</view>
       </view>
     </view>
-
-    <van-empty wx:if="{{orders.length === 0}}" description="暂无订单数据" />
   </view>
-
 </view>
-

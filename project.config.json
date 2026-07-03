@@ -38,7 +38,7 @@
     "ignoreUploadUnusedFiles": true,
     "compileWorklet": false,
     "localPlugins": false,
-    "condition": false,
+    "condition": true,
     "swc": false,
     "disableSWC": true
   },
@@ -57,7 +57,13 @@
       "list": []
     },
     "miniprogram": {
-      "list": []
+      "list": [
+        {
+          "id": -1,
+          "name": "商户后台入口",
+          "pathName": "packages/admin/pages/admin/admin"
+        }
+      ]
     }
   },
   "compileType": "miniprogram",

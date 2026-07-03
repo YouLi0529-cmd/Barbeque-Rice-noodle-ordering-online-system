@@ -1,4 +1,4 @@
-﻿<!--packages/admin/pages/admin/printer/printer.wxml-->
+﻿<!--pages/admin/printer/printer.wxml-->
 <view class="page">
   <!-- 打印机信息卡片 -->
   <view class="printer-card" wx:if="{{printerInfo}}">
@@ -47,30 +47,30 @@
   <!-- 设置区域 -->
   <view class="settings-section" wx:if="{{printerInfo}}">
     <view class="section-title">打印设置</view>
-    
+
     <!-- 打印浓度 -->
     <view class="setting-item">
       <view class="setting-label">打印浓度</view>
       <view class="setting-options">
-        <view 
+        <view
           class="option-btn {{printerInfo.density === 4 ? 'active' : ''}}"
           bindtap="setDensity"
           data-value="4">
           较淡
         </view>
-        <view 
+        <view
           class="option-btn {{printerInfo.density === 5 ? 'active' : ''}}"
           bindtap="setDensity"
           data-value="5">
           普通
         </view>
-        <view 
+        <view
           class="option-btn {{printerInfo.density === 6 || !printerInfo.density ? 'active' : ''}}"
           bindtap="setDensity"
           data-value="6">
           较浓
         </view>
-        <view 
+        <view
           class="option-btn {{printerInfo.density === 7 ? 'active' : ''}}"
           bindtap="setDensity"
           data-value="7">
@@ -83,19 +83,19 @@
     <view class="setting-item">
       <view class="setting-label">打印速度</view>
       <view class="setting-options">
-        <view 
+        <view
           class="option-btn {{printerInfo.printSpeed === 1 ? 'active' : ''}}"
           bindtap="setPrintSpeed"
           data-value="1">
           慢
         </view>
-        <view 
+        <view
           class="option-btn {{printerInfo.printSpeed === 2 ? 'active' : ''}}"
           bindtap="setPrintSpeed"
           data-value="2">
           中
         </view>
-        <view 
+        <view
           class="option-btn {{printerInfo.printSpeed === 3 ? 'active' : ''}}"
           bindtap="setPrintSpeed"
           data-value="3">
@@ -108,37 +108,37 @@
     <view class="setting-item">
       <view class="setting-label">音量</view>
       <view class="setting-options">
-        <view 
+        <view
           class="option-btn {{printerInfo.volume === 0 ? 'active' : ''}}"
           bindtap="setVolume"
           data-value="0">
           静音
         </view>
-        <view 
+        <view
           class="option-btn {{printerInfo.volume === 1 ? 'active' : ''}}"
           bindtap="setVolume"
           data-value="1">
           1
         </view>
-        <view 
+        <view
           class="option-btn {{printerInfo.volume === 2 ? 'active' : ''}}"
           bindtap="setVolume"
           data-value="2">
           2
         </view>
-        <view 
+        <view
           class="option-btn {{printerInfo.volume === 3 ? 'active' : ''}}"
           bindtap="setVolume"
           data-value="3">
           3
         </view>
-        <view 
+        <view
           class="option-btn {{printerInfo.volume === 4 ? 'active' : ''}}"
           bindtap="setVolume"
           data-value="4">
           4
         </view>
-        <view 
+        <view
           class="option-btn {{printerInfo.volume === 5 ? 'active' : ''}}"
           bindtap="setVolume"
           data-value="5">
@@ -155,27 +155,27 @@
       <view class="modal-content">
         <view class="form-item">
           <view class="form-label">设备编号 (SN)</view>
-          <input 
-            class="form-input" 
-            placeholder="请输入打印机编号" 
+          <input
+            class="form-input"
+            placeholder="请输入打印机编号"
             value="{{bindForm.sn}}"
             bindinput="onSnInput"
           />
         </view>
         <view class="form-item">
           <view class="form-label">绑定码 (Key)</view>
-          <input 
-            class="form-input" 
-            placeholder="请输入设备绑定码" 
+          <input
+            class="form-input"
+            placeholder="请输入设备绑定码"
             value="{{bindForm.key}}"
             bindinput="onKeyInput"
           />
         </view>
         <view class="form-item">
           <view class="form-label">设备名称</view>
-          <input 
-            class="form-input" 
-            placeholder="请输入设备名称（可选）" 
+          <input
+            class="form-input"
+            placeholder="请输入设备名称（可选）"
             value="{{bindForm.name}}"
             bindinput="onNameInput"
           />
@@ -188,4 +188,3 @@
     </view>
   </view>
 </view>
-

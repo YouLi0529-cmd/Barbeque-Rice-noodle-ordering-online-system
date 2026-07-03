@@ -1,4 +1,4 @@
-﻿// packages/admin/pages/admin/shopInfo/shopInfo.js
+﻿// pages/admin/shopInfo/shopInfo.js
 const db = wx.cloud.database()
 
 Page({
@@ -18,11 +18,11 @@ Page({
   async loadShopInfo() {
     try {
       wx.showLoading({ title: '加载中...' })
-      
+
       const res = await db.collection('shopInfo').limit(1).get()
 
       wx.hideLoading()
-      
+
       if (res.data && res.data.length > 0) {
         this.setData({
           shopInfo: res.data[0]
@@ -87,7 +87,7 @@ Page({
             createTime: new Date()
           }
         })
-        
+
         this.setData({
           'shopInfo._id': addRes._id
         })
@@ -108,4 +108,3 @@ Page({
     }
   }
 })
-

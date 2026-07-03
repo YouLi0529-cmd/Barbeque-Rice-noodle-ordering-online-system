@@ -1,0 +1,30 @@
+﻿<!--pages/admin/queue/queue.wxml-->
+<view class="admin-list-page">
+  <view class="top-bar fire-gradient">
+    <view class="top-title">排队管理</view>
+    <view class="top-desc">查看 waiting / called / skipped 队列</view>
+  </view>
+
+  <view class="toolbar">
+    <view class="refresh-btn" bindtap="loadList">刷新</view>
+  </view>
+
+  <view class="queue-card" wx:for="{{list}}" wx:key="_id">
+    <view class="card-head">
+      <view>
+        <view class="queue-no">{{item.queue_no}}</view>
+        <view class="queue-meta">{{item.people_count}}人 · {{item.createTimeText}}</view>
+      </view>
+      <view class="status-tag">{{item.statusText}}</view>
+    </view>
+    <view class="customer-line">{{item.nickname || '未填昵称'}} {{item.phone}}</view>
+    <view class="actions">
+      <view class="action-btn primary" bindtap="operate" data-action="call" data-id="{{item._id}}">叫号</view>
+      <view class="action-btn" bindtap="operate" data-action="skip" data-id="{{item._id}}">过号</view>
+      <view class="action-btn" bindtap="operate" data-action="seat" data-id="{{item._id}}">入座</view>
+      <view class="action-btn danger" bindtap="operate" data-action="cancel" data-id="{{item._id}}">取消</view>
+    </view>
+  </view>
+
+  <van-empty wx:if="{{list.length === 0}}" description="暂无排队记录" />
+</view>

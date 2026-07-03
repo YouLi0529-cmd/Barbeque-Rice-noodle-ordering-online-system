@@ -1,4 +1,4 @@
-// 浜戝嚱鏁板叆鍙ｆ枃浠?
+// 云函数入口文件
 const cloud = require('wx-server-sdk')
 const TcbRouter = require('tcb-router')
 const axios = require('axios')
@@ -10,16 +10,16 @@ cloud.init({
 
 const db = cloud.database()
 const baseUrl = 'https://iot-device.trenditiot.com'
-//璁块棶https://open.trenditiot.com 娉ㄥ唽鐧诲綍锛屽緱鍒癮ppid鍜宎ppsecret
-const appid = '濉啓浣犵殑appid' // 濉啓浣犵殑appid
-const appsecret = '濉啓浣犵殑appsecret' // 濉啓浣犵殑appsecret
+//访问https://open.trenditiot.com 注册登录，得到appid和appsecret
+const appid = '填写你的appid' // 填写你的appid
+const appsecret = '填写你的appsecret' // 填写你的appsecret
 
-// 鐢熸垚闅忔満瀛楃涓?
+// 生成随机字符串
 function getNonceStr() {
   return Math.random().toString(36).substr(2, 15) + Date.now().toString(36)
 }
 
-// 鐢熸垚绛惧悕
+// 生成签名
 function getSign(uid, stime, appid, body) {
   const requestBody = JSON.stringify(body)
   const strToSign = `${uid}${appid}${stime}${appsecret}${requestBody}`
@@ -29,7 +29,7 @@ function getSign(uid, stime, appid, body) {
   return signature
 }
 
-// HTTP璇锋眰灏佽
+// HTTP请求封装
 async function request(options) {
   try {
     const response = await axios({
@@ -43,40 +43,40 @@ async function request(options) {
     return response.data
   } catch (error) {
     if (error.response) {
-      // 鏈嶅姟鍣ㄨ繑鍥炰簡閿欒鐘舵€佺爜
+      // 服务器返回了错误状态码
       throw {
         code: error.response.status,
         message: error.response.data?.message || error.message,
         data: error.response.data
       }
     } else if (error.request) {
-      // 璇锋眰宸插彂閫佷絾娌℃湁鏀跺埌鍝嶅簲
+      // 请求已发送但没有收到响应
       throw {
         code: -1,
-        message: '缃戠粶璇锋眰澶辫触锛岃妫€鏌ョ綉缁滆繛鎺?
+        message: '网络请求失败，请检查网络连接'
       }
     } else {
-      // 璇锋眰閰嶇疆鍑洪敊
+      // 请求配置出错
       throw {
         code: -1,
-        message: error.message || '璇锋眰澶辫触'
+        message: error.message || '请求失败'
       }
     }
   }
 }
 
-// 浜戝嚱鏁板叆鍙ｅ嚱鏁?
+// 云函数入口函数
 exports.main = async (event, context) => {
   const app = new TcbRouter({ event })
 
-  // 鍏ㄥ眬涓棿浠?
+  // 全局中间件
   app.use(async (ctx, next) => {
     // ctx.data = {}
     ctx.event = event
     await next()
   })
 
-  // 缁戝畾鎵撳嵃鏈?
+  // 绑定打印机
   app.router('addPrinter', async (ctx, next) => {
     const { sn, key, name } = ctx.event
     const uid = getNonceStr()
@@ -84,7 +84,7 @@ exports.main = async (event, context) => {
     const body = [{
       sn: sn,
       key: key,
-      name: name || `鎵撳嵃鏈?{sn}`
+      name: name || `打印机${sn}`
     }]
 
     try {
@@ -102,17 +102,17 @@ exports.main = async (event, context) => {
       })
       ctx.body = { success: true, data: result }
     } catch (error) {
-      console.error('缁戝畾鎵撳嵃鏈哄け璐?, error)
+      console.error('绑定打印机失败', error)
       ctx.body = {
         success: false,
-        error: error.message || '缁戝畾澶辫触',
+        error: error.message || '绑定失败',
         code: error.code,
         data: error.data
       }
     }
   })
 
-  // 瑙ｇ粦鎵撳嵃鏈?
+  // 解绑打印机
   app.router('delPrinter', async (ctx, next) => {
     const { sn } = ctx.event
     const uid = getNonceStr()
@@ -134,17 +134,17 @@ exports.main = async (event, context) => {
       })
       ctx.body = { success: true, data: result }
     } catch (error) {
-      console.error('瑙ｇ粦鎵撳嵃鏈哄け璐?, error)
+      console.error('解绑打印机失败', error)
       ctx.body = {
         success: false,
-        error: error.message || '瑙ｇ粦澶辫触',
+        error: error.message || '解绑失败',
         code: error.code,
         data: error.data
       }
     }
   })
 
-  // 璁剧疆鎵撳嵃娴撳害
+  // 设置打印浓度
   app.router('setDensity', async (ctx, next) => {
     const { sn, density } = ctx.event
     const uid = getNonceStr()
@@ -166,17 +166,17 @@ exports.main = async (event, context) => {
       })
       ctx.body = { success: true, data: result }
     } catch (error) {
-      console.error('璁剧疆鎵撳嵃娴撳害澶辫触', error)
+      console.error('设置打印浓度失败', error)
       ctx.body = {
         success: false,
-        error: error.message || '璁剧疆澶辫触',
+        error: error.message || '设置失败',
         code: error.code,
         data: error.data
       }
     }
   })
 
-  // 璁剧疆鎵撳嵃閫熷害
+  // 设置打印速度
   app.router('setPrintSpeed', async (ctx, next) => {
     const { sn, printSpeed } = ctx.event
     const uid = getNonceStr()
@@ -198,17 +198,17 @@ exports.main = async (event, context) => {
       })
       ctx.body = { success: true, data: result }
     } catch (error) {
-      console.error('璁剧疆鎵撳嵃閫熷害澶辫触', error)
+      console.error('设置打印速度失败', error)
       ctx.body = {
         success: false,
-        error: error.message || '璁剧疆澶辫触',
+        error: error.message || '设置失败',
         code: error.code,
         data: error.data
       }
     }
   })
 
-  // 璁剧疆闊抽噺
+  // 设置音量
   app.router('setVolume', async (ctx, next) => {
     const { sn, volume } = ctx.event
     const uid = getNonceStr()
@@ -230,17 +230,17 @@ exports.main = async (event, context) => {
       })
       ctx.body = { success: true, data: result }
     } catch (error) {
-      console.error('璁剧疆闊抽噺澶辫触', error)
+      console.error('设置音量失败', error)
       ctx.body = {
         success: false,
-        error: error.message || '璁剧疆澶辫触',
+        error: error.message || '设置失败',
         code: error.code,
         data: error.data
       }
     }
   })
 
-  // 鏌ヨ鎵撳嵃鏈虹姸鎬?
+  // 查询打印机状态
   app.router('getDeviceStatus', async (ctx, next) => {
     const { sn } = ctx.event
     const uid = getNonceStr()
@@ -262,17 +262,17 @@ exports.main = async (event, context) => {
       })
       ctx.body = { success: true, data: result }
     } catch (error) {
-      console.error('鏌ヨ鎵撳嵃鏈虹姸鎬佸け璐?, error)
+      console.error('查询打印机状态失败', error)
       ctx.body = {
         success: false,
-        error: error.message || '鏌ヨ澶辫触',
+        error: error.message || '查询失败',
         code: error.code,
         data: error.data
       }
     }
   })
 
-  // 鎵撳嵃灏忕エ
+  // 打印小票
   app.router('printNote', async (ctx, next) => {
     const { $url, ...printData } = ctx.event
     const uid = getNonceStr()
@@ -293,17 +293,17 @@ exports.main = async (event, context) => {
       })
       ctx.body = { success: true, data: result }
     } catch (error) {
-      console.error('鎵撳嵃灏忕エ澶辫触', error)
+      console.error('打印小票失败', error)
       ctx.body = {
         success: false,
-        error: error.message || '鎵撳嵃澶辫触',
+        error: error.message || '打印失败',
         code: error.code,
         data: error.data
       }
     }
   })
 
-  // 娓呯┖鎵撳嵃闃熷垪
+  // 清空打印队列
   app.router('cleanWaitingQueue', async (ctx, next) => {
     const { sn } = ctx.event
     const uid = getNonceStr()
@@ -325,10 +325,10 @@ exports.main = async (event, context) => {
       })
       ctx.body = { success: true, data: result }
     } catch (error) {
-      console.error('娓呯┖鎵撳嵃闃熷垪澶辫触', error)
+      console.error('清空打印队列失败', error)
       ctx.body = {
         success: false,
-        error: error.message || '娓呯┖澶辫触',
+        error: error.message || '清空失败',
         code: error.code,
         data: error.data
       }

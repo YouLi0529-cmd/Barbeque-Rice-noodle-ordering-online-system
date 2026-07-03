@@ -11,7 +11,7 @@ exports.main = async (event, context) => {
   try {
     // 璋冪敤鐢熸垚灏忕▼搴忕爜鐨勬帴鍙?
     const result = await cloud.openapi.wxacode.getUnlimited({
-      page: page || 'pages/index/index',
+      page: page || 'packages/order/pages/index/index',
       scene: scene || '',
       width: 280
     })

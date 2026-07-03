@@ -1,11 +1,11 @@
-﻿<!--packages/admin/pages/admin/notice/notice.wxml-->
+﻿<!--pages/admin/notice/notice.wxml-->
 <view class="page">
   <!-- 添加按钮 -->
   <view class="add-btn" bindtap="showAddModal" wx:if="{{notices.length === 0}}">
     <text class="add-icon">+</text>
     <text>添加公告</text>
   </view>
-  
+
   <!-- 提示信息 -->
   <view class="tip-bar" wx:if="{{notices.length > 0}}">
     <text class="tip-icon">ℹ️</text>
@@ -42,9 +42,9 @@
       <view class="modal-content">
         <view class="form-item">
           <view class="form-label">公告内容</view>
-          <textarea 
-            class="form-textarea" 
-            placeholder="请输入公告内容，如：首次充值68，免单一次。充值更有优惠，充得越多送得越多" 
+          <textarea
+            class="form-textarea"
+            placeholder="请输入公告内容，如：首次充值68，免单一次。充值更有优惠，充得越多送得越多"
             value="{{currentNotice.content}}"
             bindinput="onContentInput"
             maxlength="200"
@@ -58,4 +58,3 @@
     </view>
   </view>
 </view>
-

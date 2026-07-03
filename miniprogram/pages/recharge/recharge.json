@@ -1,7 +1,0 @@
-{
-  "navigationBarTitleText": "会员充值",
-  "usingComponents": {
-    "avatar-nickname-modal": "/components/avatarNicknameModal/avatarNicknameModal",
-    "van-empty": "/vant/empty/index"
-  }
-}

@@ -1,4 +1,4 @@
-﻿// packages/admin/pages/admin/printer/printer.js
+﻿// pages/admin/printer/printer.js
 const db = wx.cloud.database()
 
 Page({
@@ -317,7 +317,7 @@ Page({
         // 使用UTC方法获取转换后的时间
         return `${beijingTime.getUTCFullYear()}-${pad(beijingTime.getUTCMonth() + 1)}-${pad(beijingTime.getUTCDate())} ${pad(beijingTime.getUTCHours())}:${pad(beijingTime.getUTCMinutes())}`
       }
-      
+
       // 计算字符串的显示宽度（中文字符占2个宽度，英文数字占1个宽度）
       const getStringWidth = (str) => {
         if (!str) return 0
@@ -333,18 +333,18 @@ Page({
         }
         return width
       }
-      
+
       // 生成指定宽度的空格字符串
       const generateSpaces = (count) => {
         return ' '.repeat(count)
       }
-      
+
       // 转义HTML特殊字符
       const escapeHtml = (str) => {
         if (!str) return ''
         return String(str).replace(/</g, '&lt;').replace(/>/g, '&gt;')
       }
-      
+
       // 隐藏电话号码中间4位
       const hidePhoneNumber = (phone) => {
         if (!phone) return ''
@@ -356,10 +356,10 @@ Page({
         // 如果不是11位，返回原值
         return phoneStr
       }
-      
+
       const date = new Date()
       const testOrderId = 'TEST_' + Date.now()
-      
+
       // 测试订单数据
       const testOrder = {
         _id: testOrderId,
@@ -381,29 +381,29 @@ Page({
         totalPrice: 68.00,
         finalPrice: 68.00,
         useMiandan: false,
-        payWithBalance: false,
+        payMethod: 'offline',
         userPhone: '13800000000'
       }
-      
+
       // 生成打印内容
       const orderTypeText = testOrder.orderType === 'dineIn' ? '堂食' : '打包'
-      
+
       let content = `<C><font# bolder=1 height=2 width=2>${orderTypeText}订单</font#></C><BR>`
       content += `<C><font# bolder=1 height=2 width=2>${escapeHtml(shopInfo?.name || '餐饮店')}</font#></C><BR>`
       content += `<BR>`
-      
+
       // 订单编号和时间
       content += `<C>********************************</C><BR>`
       content += `<LEFT>订单编号: ${escapeHtml(testOrder._id)}</LEFT><BR>`
       content += `<LEFT>下单时间: ${formatDate(date)}</LEFT><BR>`
-      
+
       // 桌码号（加粗显示）
       if (testOrder.tableNumber) {
         content += `<C><font# bolder=1 height=2 width=2>桌码: ${escapeHtml(testOrder.tableNumber)}</font#></C><BR>`
       }
-      
+
       content += `<C>--------------商品--------------</C><BR>`
-      
+
       // 商品列表（使用自动计算空格对齐）
       if (testOrder.goods && testOrder.goods.length > 0) {
         testOrder.goods.forEach(item => {
@@ -417,7 +417,7 @@ Page({
           const spacesNeeded = totalWidth - dishNameWidth - rightPartWidth
           const spaces = spacesNeeded > 0 ? generateSpaces(spacesNeeded) : ' '
           content += `<LEFT><font# bolder=0 height=2 width=1>${dishName}${spaces}${rightPart}</font#></LEFT><BR>`
-          
+
           // 打印标签（如果有）
           if (item.tags && Array.isArray(item.tags) && item.tags.length > 0) {
             const tagsText = item.tags.map(tag => escapeHtml(tag)).join(' ')
@@ -425,37 +425,37 @@ Page({
           }
         })
       }
-      
+
       // 价格信息
       const finalPrice = (testOrder.finalPrice || 0).toFixed(2)
-      
+
       // 添加分隔线隔开菜品
       content += `<C>--------------------------------</C><BR>`
-      
+
       // 实付价格，居右显示
       content += `<RIGHT><font# bolder=0 height=2 width=1>实付  ￥${finalPrice}</font#></RIGHT><BR>`
-      
+
       // 显示支付方式
       let payMethodText = ''
       if (testOrder.useMiandan) {
         payMethodText = '免单支付'
-      } else if (testOrder.payWithBalance !== undefined) {
-        payMethodText = testOrder.payWithBalance ? '余额支付' : '微信支付'
+      } else if (testOrder.payMethod === 'offline') {
+        payMethodText = '线下付款'
       } else {
-        payMethodText = '微信支付'
+        payMethodText = '未付款'
       }
       if (payMethodText) {
         content += `<LEFT>支付方式: ${payMethodText}</LEFT><BR>`
       }
-      
+
       content += `<C>--------------------------------</C><BR>`
-      
+
       // 用户信息
       if (testOrder.userPhone) {
         const hiddenPhone = hidePhoneNumber(testOrder.userPhone)
         content += `<LEFT><font# bolder=1 height=1 width=1>客户电话: ${escapeHtml(hiddenPhone)}</font#></LEFT><BR>`
       }
-      
+
       content += `<C>**************<font# bolder=1 height=2 width=1>完</font#><font# bolder=0 height=1 width=1>**************</font#></C><BR>`
 
       // 调用打印接口
@@ -464,7 +464,7 @@ Page({
         data: {
           $url: 'printNote',
           sn: printerInfo.sn,
-          voice: '16', 
+          voice: '16',
           voicePlayTimes: 1,
           voicePlayInterval: 3,
           content: content,
@@ -653,4 +653,3 @@ Page({
     }
   }
 })
-

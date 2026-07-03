@@ -1,7 +1,7 @@
 // 云函数入口文件
 const cloud = require('wx-server-sdk')
 
-cloud.init({ env: 'cloud1-d9gapt5hcfe195b65' })
+cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
 const db = cloud.database()
 
@@ -37,6 +37,7 @@ function formatDate(time) {
 
 function getOrderTypeText(order) {
   if (order.orderType === 'dineIn') return '堂食'
+  if (order.orderType === 'camping' || order.orderScene === 'camping') return '露营'
   if (order.orderType === 'outdoor') return '户外烧烤'
   if (order.orderType === 'takeOut') return '打包'
   return '点餐'
@@ -209,6 +210,76 @@ async function saveFrontDeskRemark(event) {
   return ok({ _id: event.id, frontDeskRemark }, '前台备注已保存')
 }
 
+function normalizeOrderGoods(goods = []) {
+  return goods
+    .map(item => {
+      const price = Number(item.price || 0)
+      const count = Math.max(1, parseInt(item.count || 1, 10))
+      return {
+        dishId: item.dishId || item._id || '',
+        dishName: item.dishName || item.goodsName || item.name || '未命名菜品',
+        dishImage: item.dishImage || item.image || '',
+        price,
+        count,
+        tags: Array.isArray(item.tags) ? item.tags : [],
+        subtotal: (price * count).toFixed(2),
+        canUseMiandan: !!item.canUseMiandan
+      }
+    })
+    .filter(item => item.dishId && item.count > 0)
+}
+
+async function updateOrderGoods(event) {
+  if (!event.id) return fail('缺少订单ID')
+  const order = await getOrder(event.id)
+
+  if (order.frontDeskConfirmed || order.kitchenPrinted) {
+    return fail('订单已发送厨房，如需改菜请先走加菜单或重打流程')
+  }
+
+  if (order.status && ['pending_prepare', 'preparing', 'served', 'ready_pickup', 'picked_up', 'completed'].indexOf(order.status) !== -1) {
+    return fail('订单已进入厨房流程，暂不能直接修改点菜单')
+  }
+
+  const goods = normalizeOrderGoods(event.goods || [])
+  if (!goods.length) return fail('订单至少保留一项菜品')
+
+  const totalPrice = Number(goods.reduce((sum, item) => sum + item.price * item.count, 0).toFixed(2))
+  const oldGoods = normalizeOrderGoods(order.goods || [])
+  const oldTotalPrice = Number(order.totalPrice || order.finalPrice || 0)
+  const oldLogs = Array.isArray(order.orderEditLogs) ? order.orderEditLogs : []
+
+  const editLog = {
+    action: 'update_goods',
+    oldGoods,
+    newGoods: goods,
+    oldTotalPrice,
+    newTotalPrice: totalPrice,
+    reason: String(event.reason || '').trim(),
+    createTime: new Date()
+  }
+
+  await db.collection('order').doc(event.id).update({
+    data: {
+      goods,
+      totalPrice,
+      finalPrice: totalPrice,
+      useMiandan: false,
+      menuEdited: true,
+      menuEditTime: db.serverDate(),
+      orderEditLogs: oldLogs.concat(editLog),
+      updateTime: db.serverDate()
+    }
+  })
+
+  return ok({
+    _id: event.id,
+    goods,
+    totalPrice,
+    finalPrice: totalPrice
+  }, '点菜单已更新')
+}
+
 async function sendToKitchen(event) {
   try {
     const order = await getOrder(event.id)
@@ -314,6 +385,7 @@ exports.main = async (event) => {
     if (action === 'updateStatus') return await updateStatus(event)
     if (action === 'confirmOfflinePaid') return await confirmOfflinePaid(event)
     if (action === 'saveFrontDeskRemark') return await saveFrontDeskRemark(event)
+    if (action === 'updateOrderGoods') return await updateOrderGoods(event)
     if (action === 'sendToKitchen') return await sendToKitchen(event)
     if (action === 'reprintKitchenOrder') return await reprintKitchenOrder(event)
     if (action === 'cancelOrder') return await cancelOrder(event)

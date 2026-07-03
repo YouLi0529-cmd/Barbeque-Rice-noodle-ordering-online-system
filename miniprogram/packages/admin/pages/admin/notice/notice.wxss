@@ -1,4 +1,4 @@
-/* pages/admin/notice/notice.wxss */
+﻿/* pages/admin/notice/notice.wxss */
 .page {
   min-height: 100vh;
   background: #f5f5f5;
@@ -201,4 +201,3 @@
   color: #667eea;
   font-weight: bold;
 }
-
