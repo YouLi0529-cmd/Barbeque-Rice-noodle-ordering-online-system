@@ -19,6 +19,24 @@ App({
       return
     }
 
+    this.globalData = {
+      openid: '',
+      openidReady: false,
+      openidPromise: null,
+      userInfo: null,
+      userInfoReady: false,
+      userInfoPromise: null,
+      serviceUnavailable: true
+    }
+    console.error('tenant api is not configured')
+    wx.showToast({
+      title: '服务暂不可用',
+      icon: 'none'
+    })
+    this.overridePage()
+    this.checkForUpdate()
+    return
+
     if (!wx.cloud) {
       console.error('请使用 2.2.3 或以上的基础库以使用云能力')
     } else {
@@ -32,10 +50,6 @@ App({
         userInfoPromise: null // 用于存储获取用户信息的Promise对象
       }
 
-      wx.cloud.init({
-        env: 'cloud1-d9gapt5hcfe195b65',
-        traceUser: true,
-      })
       
       // 启动时立即获取openid
       this.getOpenidPromise();
@@ -113,6 +127,8 @@ App({
           resolve(openid)
           return
         }
+
+        throw new Error('TENANT_API_DISABLED')
 
         const db = wx.cloud.database();
         let openid = wx.getStorageSync('openid');

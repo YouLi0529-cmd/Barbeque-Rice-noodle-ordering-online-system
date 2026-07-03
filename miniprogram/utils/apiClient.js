@@ -4,7 +4,7 @@ const AUTH_EXPIRES_AT_KEY = 'tenantAuthExpiresAt'
 
 // Fill this with the HTTP trigger URL of cloudfunctions/tenantApi after deployment.
 // Example: https://xxxx.service.tcloudbase.com/tenantApi
-const API_BASE_URL = ''
+const API_BASE_URL = 'https://zhrcloud-d1gsjuhij11024f72-1449718669.ap-shanghai.app.tcloudbase.com/tenantApi'
 
 function getBaseUrl() {
   return wx.getStorageSync('tenantApiBaseUrl') || API_BASE_URL
