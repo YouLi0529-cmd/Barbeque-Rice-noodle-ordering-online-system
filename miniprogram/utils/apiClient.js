@@ -1,6 +1,7 @@
 const TENANT_ID = 'zhangnan'
 const AUTH_TOKEN_KEY = 'tenantAuthToken'
 const AUTH_EXPIRES_AT_KEY = 'tenantAuthExpiresAt'
+const ADMIN_AUTH_TOKEN_KEY = 'adminAuthToken'
 
 // Fill this with the HTTP trigger URL of cloudfunctions/tenantApi after deployment.
 // Example: https://xxxx.service.tcloudbase.com/tenantApi
@@ -27,6 +28,10 @@ function getAuthToken() {
   return wx.getStorageSync(AUTH_TOKEN_KEY) || ''
 }
 
+function getAdminAuthToken() {
+  return wx.getStorageSync(ADMIN_AUTH_TOKEN_KEY) || ''
+}
+
 function setAuth(data = {}) {
   if (data.token) {
     wx.setStorageSync(AUTH_TOKEN_KEY, data.token)
@@ -48,12 +53,14 @@ function call(action, data = {}) {
 
   return new Promise((resolve, reject) => {
     const token = getAuthToken()
+    const adminToken = getAdminAuthToken()
     wx.request({
       url: getBaseUrl(),
       method: 'POST',
       data: {
         tenantId: TENANT_ID,
         authToken: token,
+        adminAuthToken: adminToken,
         ...data,
         action
       },
@@ -108,9 +115,11 @@ module.exports = {
   TENANT_ID,
   API_BASE_URL,
   AUTH_TOKEN_KEY,
+  ADMIN_AUTH_TOKEN_KEY,
   getBaseUrl,
   isEnabled,
   getAuthToken,
+  getAdminAuthToken,
   setAuth,
   clearAuth,
   call,

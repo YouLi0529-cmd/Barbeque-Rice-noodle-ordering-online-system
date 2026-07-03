@@ -1,4 +1,4 @@
-﻿/* pages/admin/admin.wxss */
+/* pages/admin/admin.wxss */
 .admin-page {
   position: relative;
   min-height: 100vh;

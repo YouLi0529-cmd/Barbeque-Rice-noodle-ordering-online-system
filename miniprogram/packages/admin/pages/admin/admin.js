@@ -1,10 +1,54 @@
-﻿// packages/admin/pages/admin/admin.js
-const db = wx.cloud.database()
+// packages/admin/pages/admin/admin.js
+const apiClient = require('../../../../utils/apiClient')
 
 const ADMIN_ROOT = '/packages/admin/pages/admin'
+const ADMIN_TEXT = {
+  heroTitle: '\u5f20\u5357\u70e4\u8089\u540e\u53f0',
+  coreSection: '\u6838\u5fc3\u4e1a\u52a1',
+  orderTitle: '\u8ba2\u5355\u7ba1\u7406',
+  orderDesc: '\u67e5\u770b\u548c\u5904\u7406\u8ba2\u5355',
+  dishTitle: '\u83dc\u54c1\u7ba1\u7406',
+  dishDesc: '\u5206\u7c7b\u3001\u83dc\u54c1\u3001\u4e0a\u4e0b\u67b6',
+  queueTitle: '\u6392\u961f\u7ba1\u7406',
+  queueDesc: '\u53eb\u53f7\u3001\u8fc7\u53f7\u3001\u5165\u5ea7',
+  reservationTitle: '\u9884\u7ea6\u7ba1\u7406',
+  reservationDesc: '\u786e\u8ba4\u9884\u7ea6\u548c\u5230\u5e97\u8bb0\u5f55',
+  outdoorTitle: '\u6237\u5916\u8ba2\u5355',
+  outdoorDesc: '\u9732\u8425\u8ba2\u5355\u5904\u7406',
+  grillTitle: '\u70e4\u67b6\u7ba1\u7406',
+  grillDesc: '\u65b0\u589e\u3001\u542f\u7528\u3001\u505c\u7528',
+  settingsSection: '\u5e97\u94fa\u8bbe\u7f6e',
+  userTitle: '\u4f1a\u5458\u7ba1\u7406',
+  userDesc: '\u7528\u6237\u8d44\u6599\u548c\u6d88\u8d39\u8bb0\u5f55',
+  noticeTitle: '\u516c\u544a\u7ba1\u7406',
+  noticeDesc: '\u9996\u9875\u901a\u77e5\u5185\u5bb9',
+  tableCodeTitle: '\u684c\u7801\u7ba1\u7406',
+  tableCodeDesc: '\u5802\u98df\u684c\u7801\u751f\u6210',
+  shopInfoTitle: '\u5e97\u94fa\u8bbe\u7f6e',
+  shopInfoDesc: '\u57fa\u7840\u8d44\u6599\u7ef4\u62a4',
+  printerTitle: '\u6253\u5370\u673a\u7ba1\u7406',
+  printerDesc: '\u5c0f\u7968\u6253\u5370\u914d\u7f6e',
+  rechargeTitle: '\u5145\u503c\u9009\u9879',
+  rechargeDesc: '\u6682\u65f6\u4fdd\u7559',
+  changePassword: '\u4fee\u6539\u5bc6\u7801',
+  back: '\u8fd4\u56de',
+  setupAdminPassword: '\u8bbe\u7f6e\u7ba1\u7406\u5458\u5bc6\u7801',
+  adminLogin: '\u7ba1\u7406\u5458\u767b\u5f55',
+  setupPasswordPlaceholder: '\u8bf7\u8bbe\u7f6e\u7ba1\u7406\u5458\u5bc6\u7801\uff08\u81f3\u5c116\u4f4d\uff09',
+  loginPasswordPlaceholder: '\u8bf7\u8f93\u5165\u7ba1\u7406\u5458\u5bc6\u7801',
+  firstPasswordHint: '\u9996\u6b21\u8fdb\u5165\u540e\u53f0\uff0c\u8bf7\u5148\u8bbe\u7f6e\u7ba1\u7406\u5458\u5bc6\u7801\u3002',
+  cancel: '\u53d6\u6d88',
+  setup: '\u8bbe\u7f6e',
+  login: '\u767b\u5f55',
+  oldPasswordPlaceholder: '\u8bf7\u8f93\u5165\u539f\u5bc6\u7801',
+  newPasswordPlaceholder: '\u8bf7\u8f93\u5165\u65b0\u5bc6\u7801\uff08\u81f3\u5c116\u4f4d\uff09',
+  confirmPasswordPlaceholder: '\u8bf7\u518d\u6b21\u8f93\u5165\u65b0\u5bc6\u7801',
+  confirm: '\u786e\u8ba4'
+}
 
 Page({
   data: {
+    ui: ADMIN_TEXT,
     authChecked: false,
     isAuthorized: false,
     showAuthModal: false,
@@ -16,7 +60,7 @@ Page({
     confirmPassword: ''
   },
 
-  async onLoad(options) {
+  async onLoad(options = {}) {
     await this.prepareAdminAuth()
 
     if (options.changePassword === 'true' && this.data.isAuthorized) {
@@ -26,9 +70,9 @@ Page({
 
   async prepareAdminAuth() {
     try {
-      wx.showLoading({ title: '验证中...' })
-      const res = await db.collection('admin').limit(1).get()
-      const hasAdmin = res.data && res.data.length > 0
+      wx.showLoading({ title: '\u9a8c\u8bc1\u4e2d...' })
+      const res = await apiClient.call('admin.status')
+      const hasAdmin = !!(res.data && res.data.hasAdmin)
 
       wx.hideLoading()
       this.setData({
@@ -40,13 +84,17 @@ Page({
       })
     } catch (err) {
       wx.hideLoading()
-      console.error('检查管理员失败', err)
+      console.error('admin status failed', err)
       this.setData({
         authChecked: true,
         isAuthorized: false,
         showAuthModal: true,
-        isFirstTime: true,
+        isFirstTime: false,
         adminPassword: ''
+      })
+      wx.showToast({
+        title: '\u670d\u52a1\u8fde\u63a5\u5931\u8d25',
+        icon: 'none'
       })
     }
   },
@@ -56,60 +104,37 @@ Page({
   },
 
   closeAuthModal() {
-    const pages = getCurrentPages()
     this.setData({
       showAuthModal: false,
       adminPassword: ''
     })
-
-    if (pages.length > 1) {
-      wx.navigateBack()
-      return
-    }
-
-    wx.reLaunch({
-      url: '/pages/covertest/covertest'
-    })
+    this.goBack()
   },
 
   async confirmAdminAuth() {
-    const password = this.data.adminPassword.trim()
+    const password = String(this.data.adminPassword || '').trim()
+
     if (!password) {
-      wx.showToast({ title: '请输入密码', icon: 'none' })
+      wx.showToast({ title: '\u8bf7\u8f93\u5165\u5bc6\u7801', icon: 'none' })
       return
     }
+
     if (password.length < 6) {
-      wx.showToast({ title: '密码长度不能少于6位', icon: 'none' })
+      wx.showToast({ title: '\u5bc6\u7801\u4e0d\u80fd\u5c11\u4e8e6\u4f4d', icon: 'none' })
       return
     }
 
     try {
-      wx.showLoading({ title: this.data.isFirstTime ? '设置中...' : '登录中...' })
-      const res = await db.collection('admin').limit(1).get()
-      const admin = res.data && res.data[0]
+      wx.showLoading({
+        title: this.data.isFirstTime ? '\u8bbe\u7f6e\u4e2d...' : '\u767b\u5f55\u4e2d...'
+      })
 
-      if (this.data.isFirstTime) {
-        if (admin) {
-          wx.hideLoading()
-          this.setData({
-            isFirstTime: false,
-            adminPassword: ''
-          })
-          wx.showToast({ title: '管理员已存在，请登录', icon: 'none' })
-          return
-        }
+      const authRes = this.data.isFirstTime
+        ? await apiClient.call('admin.setPassword', { password })
+        : await apiClient.call('admin.login', { password })
 
-        await db.collection('admin').add({
-          data: {
-            password,
-            createTime: new Date(),
-            updateTime: new Date()
-          }
-        })
-      } else if (!admin || admin.password !== password) {
-        wx.hideLoading()
-        wx.showToast({ title: admin ? '密码错误' : '管理员未设置', icon: 'none' })
-        return
+      if (authRes.data && authRes.data.adminAuthToken) {
+        wx.setStorageSync(apiClient.ADMIN_AUTH_TOKEN_KEY, authRes.data.adminAuthToken)
       }
 
       wx.hideLoading()
@@ -118,99 +143,65 @@ Page({
         showAuthModal: false,
         adminPassword: ''
       })
-      wx.showToast({ title: '登录成功', icon: 'success' })
+      wx.showToast({ title: '\u767b\u5f55\u6210\u529f', icon: 'success' })
     } catch (err) {
       wx.hideLoading()
-      console.error('管理员验证失败', err)
-      wx.showToast({ title: '操作失败，请重试', icon: 'none' })
+      console.error('admin auth failed', err)
+      wx.showToast({
+        title: err.message || '\u64cd\u4f5c\u5931\u8d25',
+        icon: 'none'
+      })
     }
   },
 
-  // 菜品管理
   goToDish() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/dish/dish`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/dish/dish` })
   },
 
-  // 用户管理
   goToUser() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/user/user`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/user/user` })
   },
 
-  // 订单管理
   goToOrder() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/order/order`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/order/order` })
   },
 
-  // 排队管理
   goToQueue() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/queue/queue`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/queue/queue` })
   },
 
-  // 预约管理
   goToReservation() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/reservation/reservation`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/reservation/reservation` })
   },
 
-  // 户外订单
   goToOutdoor() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/outdoor/outdoor`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/outdoor/outdoor` })
   },
 
-  // 烤架管理
   goToGrill() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/grill/grill`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/grill/grill` })
   },
 
-  // 充值选项管理
   goToRechargeOptions() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/rechargeOptions/rechargeOptions`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/rechargeOptions/rechargeOptions` })
   },
 
-  // 公告管理
   goToNotice() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/notice/notice`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/notice/notice` })
   },
 
-  // 桌码管理
   goToTableCode() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/tableCode/tableCode`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/tableCode/tableCode` })
   },
 
-  // 打印机管理
   goToPrinter() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/printer/printer`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/printer/printer` })
   },
 
-  // 店铺设置
   goToShopInfo() {
-    wx.navigateTo({
-      url: `${ADMIN_ROOT}/shopInfo/shopInfo`
-    })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/shopInfo/shopInfo` })
   },
 
-  // 显示修改密码弹窗
   showChangePassword() {
     if (!this.data.isAuthorized) {
       this.setData({ showAuthModal: true })
@@ -225,126 +216,72 @@ Page({
     })
   },
 
-  // 关闭密码弹窗
   closePasswordModal() {
     this.setData({
-      showPasswordModal: false
+      showPasswordModal: false,
+      oldPassword: '',
+      newPassword: '',
+      confirmPassword: ''
     })
   },
 
-  // 阻止冒泡
   stopPropagation() {},
 
-  // 输入旧密码
   onOldPasswordInput(e) {
-    this.setData({
-      oldPassword: e.detail.value
-    })
+    this.setData({ oldPassword: e.detail.value })
   },
 
-  // 输入新密码
   onNewPasswordInput(e) {
-    this.setData({
-      newPassword: e.detail.value
-    })
+    this.setData({ newPassword: e.detail.value })
   },
 
-  // 输入确认密码
   onConfirmPasswordInput(e) {
-    this.setData({
-      confirmPassword: e.detail.value
-    })
+    this.setData({ confirmPassword: e.detail.value })
   },
 
-  // 确认修改密码
   async confirmChangePassword() {
-    const { oldPassword, newPassword, confirmPassword } = this.data
+    const oldPassword = String(this.data.oldPassword || '').trim()
+    const newPassword = String(this.data.newPassword || '').trim()
+    const confirmPassword = String(this.data.confirmPassword || '').trim()
 
     if (!oldPassword) {
-      wx.showToast({
-        title: '请输入原密码',
-        icon: 'none'
-      })
-      return
-    }
-
-    if (!newPassword) {
-      wx.showToast({
-        title: '请输入新密码',
-        icon: 'none'
-      })
+      wx.showToast({ title: '\u8bf7\u8f93\u5165\u539f\u5bc6\u7801', icon: 'none' })
       return
     }
 
     if (newPassword.length < 6) {
-      wx.showToast({
-        title: '新密码长度不能少于6位',
-        icon: 'none'
-      })
+      wx.showToast({ title: '\u65b0\u5bc6\u7801\u4e0d\u80fd\u5c11\u4e8e6\u4f4d', icon: 'none' })
       return
     }
 
     if (newPassword !== confirmPassword) {
-      wx.showToast({
-        title: '两次密码输入不一致',
-        icon: 'none'
-      })
+      wx.showToast({ title: '\u4e24\u6b21\u5bc6\u7801\u4e0d\u4e00\u81f4', icon: 'none' })
       return
     }
 
     try {
-      wx.showLoading({ title: '修改中...' })
-
-      // 查询管理员信息
-      const res = await db.collection('admin').get()
-
-      if (res.data.length === 0) {
-        wx.hideLoading()
-        wx.showToast({
-          title: '管理员不存在',
-          icon: 'none'
-        })
-        return
-      }
-
-      const admin = res.data[0]
-
-      // 验证旧密码
-      if (admin.password !== oldPassword) {
-        wx.hideLoading()
-        wx.showToast({
-          title: '原密码错误',
-          icon: 'none'
-        })
-        return
-      }
-
-      // 更新密码
-      await db.collection('admin').doc(admin._id).update({
-        data: {
-          password: newPassword,
-          updateTime: new Date()
-        }
+      wx.showLoading({ title: '\u4fee\u6539\u4e2d...' })
+      const authRes = await apiClient.call('admin.changePassword', {
+        oldPassword,
+        newPassword
       })
+      if (authRes.data && authRes.data.adminAuthToken) {
+        wx.setStorageSync(apiClient.ADMIN_AUTH_TOKEN_KEY, authRes.data.adminAuthToken)
+      }
 
       wx.hideLoading()
-      wx.showToast({
-        title: '密码修改成功',
-        icon: 'success'
-      })
-
+      wx.showToast({ title: '\u5bc6\u7801\u5df2\u4fee\u6539', icon: 'success' })
       this.closePasswordModal()
     } catch (err) {
       wx.hideLoading()
-      console.error('修改密码失败', err)
+      console.error('change admin password failed', err)
       wx.showToast({
-        title: '修改失败，请重试',
+        title: err.message || '\u4fee\u6539\u5931\u8d25',
         icon: 'none'
       })
     }
   },
 
-  // 返回上一页
   goBack() {
     const pages = getCurrentPages()
     if (pages.length > 1) {

@@ -177,11 +177,18 @@ async function ensureCoreCollections() {
       ensureCollection('order'),
       ensureCollection('dishCategory'),
       ensureCollection('dish'),
+      ensureCollection('admin'),
       ensureCollection('shopInfo'),
       ensureCollection('notice'),
       ensureCollection('orderDraft'),
       ensureCollection('tableOrderSession'),
-      ensureCollection('tableCartItem')
+      ensureCollection('tableCartItem'),
+      ensureCollection('queue'),
+      ensureCollection('reservation'),
+      ensureCollection('outdoorGrill'),
+      ensureCollection('printer'),
+      ensureCollection('tableCode'),
+      ensureCollection('rechargeOptions')
     ])
   }
   return ensureCoreCollectionsPromise
@@ -1358,6 +1365,625 @@ async function listNotices() {
   }
 }
 
+function normalizeAdminCategory(payload) {
+  const category = payload.category || payload
+  const menuType = getMenuType(category.menuType || payload.menuType)
+
+  return {
+    _id: String(category._id || category.categoryId || '').trim(),
+    name: String(category.name || '').trim(),
+    menuType,
+    sort: Number(category.sort || 0),
+    status: category.status === 0 ? 0 : 1
+  }
+}
+
+async function adminListCategories(payload) {
+  const menuType = getMenuType(payload.menuType)
+  const res = await db.collection('dishCategory')
+    .where({
+      menuType: getMenuTypeWhere(menuType)
+    })
+    .orderBy('sort', 'asc')
+    .limit(100)
+    .get()
+
+  return {
+    success: true,
+    data: (res.data || []).map(item => ({
+      ...item,
+      menuType: item.menuType || menuType
+    }))
+  }
+}
+
+async function adminSaveCategory(payload) {
+  const category = normalizeAdminCategory(payload)
+  if (!category.name) {
+    return {
+      success: false,
+      code: 'CATEGORY_NAME_REQUIRED',
+      message: 'category name required'
+    }
+  }
+
+  const data = {
+    name: category.name,
+    menuType: category.menuType,
+    sort: category.sort,
+    status: category.status,
+    updateTime: db.serverDate()
+  }
+
+  if (category._id) {
+    await db.collection('dishCategory').doc(category._id).update({ data })
+    await db.collection('dish')
+      .where({ categoryId: category._id })
+      .update({
+        data: {
+          categoryName: category.name,
+          menuType: category.menuType,
+          updateTime: db.serverDate()
+        }
+      })
+
+    return {
+      success: true,
+      data: {
+        _id: category._id
+      }
+    }
+  }
+
+  const addRes = await db.collection('dishCategory').add({
+    data: {
+      ...data,
+      createTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true,
+    data: {
+      _id: addRes._id
+    }
+  }
+}
+
+async function adminDeleteCategory(payload) {
+  const categoryId = String(payload.categoryId || payload._id || '').trim()
+  if (!categoryId) {
+    return {
+      success: false,
+      code: 'CATEGORY_ID_REQUIRED',
+      message: 'category id required'
+    }
+  }
+
+  await db.collection('dishCategory').doc(categoryId).remove()
+  await db.collection('dish')
+    .where({ categoryId })
+    .update({
+      data: {
+        status: 0,
+        updateTime: db.serverDate()
+      }
+    })
+
+  return {
+    success: true
+  }
+}
+
+async function adminListDishes(payload) {
+  const menuType = getMenuType(payload.menuType)
+  const categoryId = String(payload.categoryId || '').trim()
+  if (!categoryId) {
+    return {
+      success: true,
+      data: []
+    }
+  }
+
+  const limit = getLimit(payload, 100, 100)
+  const res = await db.collection('dish')
+    .where({
+      categoryId,
+      menuType: getMenuTypeWhere(menuType)
+    })
+    .orderBy('sort', 'asc')
+    .limit(limit)
+    .get()
+
+  return {
+    success: true,
+    data: res.data || []
+  }
+}
+
+function normalizeAdminDish(payload) {
+  const dish = payload.dish || payload
+  const menuType = getMenuType(dish.menuType || payload.menuType)
+
+  return {
+    ...dish,
+    _id: String(dish._id || dish.dishId || '').trim(),
+    name: String(dish.name || '').trim(),
+    categoryId: String(dish.categoryId || payload.categoryId || '').trim(),
+    categoryName: String(dish.categoryName || '').trim(),
+    menuType,
+    price: roundMoney(dish.price || 0),
+    originalPrice: roundMoney(dish.originalPrice || 0),
+    description: String(dish.description || '').trim(),
+    image: String(dish.image || '').trim(),
+    unit: String(dish.unit || '份').trim() || '份',
+    status: dish.status === 0 ? 0 : 1,
+    sort: Number(dish.sort || 0),
+    needPopup: dish.needPopup === true
+  }
+}
+
+async function adminSaveDish(payload) {
+  const dish = normalizeAdminDish(payload)
+  if (!dish.name) {
+    return {
+      success: false,
+      code: 'DISH_NAME_REQUIRED',
+      message: 'dish name required'
+    }
+  }
+
+  if (!dish.categoryId) {
+    return {
+      success: false,
+      code: 'CATEGORY_ID_REQUIRED',
+      message: 'category id required'
+    }
+  }
+
+  let categoryName = dish.categoryName
+  if (!categoryName) {
+    const categoryRes = await db.collection('dishCategory').doc(dish.categoryId).get()
+    categoryName = categoryRes.data && categoryRes.data.name || ''
+  }
+
+  const data = {
+    name: dish.name,
+    price: dish.price,
+    originalPrice: dish.originalPrice,
+    description: dish.description,
+    image: dish.image,
+    categoryId: dish.categoryId,
+    categoryName,
+    menuType: dish.menuType,
+    unit: dish.unit,
+    status: dish.status,
+    sort: dish.sort,
+    needPopup: dish.needPopup,
+    tags: Array.isArray(dish.tags) ? dish.tags : [],
+    options: Array.isArray(dish.options) ? dish.options : [],
+    updateTime: db.serverDate()
+  }
+
+  if (dish._id) {
+    await db.collection('dish').doc(dish._id).update({ data })
+    return {
+      success: true,
+      data: {
+        _id: dish._id
+      }
+    }
+  }
+
+  const addRes = await db.collection('dish').add({
+    data: {
+      ...data,
+      createTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true,
+    data: {
+      _id: addRes._id
+    }
+  }
+}
+
+async function adminDeleteDish(payload) {
+  const dishId = String(payload.dishId || payload._id || '').trim()
+  if (!dishId) {
+    return {
+      success: false,
+      code: 'DISH_ID_REQUIRED',
+      message: 'dish id required'
+    }
+  }
+
+  await db.collection('dish').doc(dishId).remove()
+  return {
+    success: true
+  }
+}
+
+async function adminSetDishStatus(payload) {
+  const dishId = String(payload.dishId || payload._id || '').trim()
+  if (!dishId) {
+    return {
+      success: false,
+      code: 'DISH_ID_REQUIRED',
+      message: 'dish id required'
+    }
+  }
+
+  await db.collection('dish').doc(dishId).update({
+    data: {
+      status: payload.status === 0 ? 0 : 1,
+      updateTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true
+  }
+}
+
+const ADMIN_COLLECTIONS = {
+  notice: {
+    orderBy: 'sort',
+    order: 'asc',
+    searchFields: ['content']
+  },
+  shopInfo: {
+    orderBy: 'createTime',
+    order: 'desc',
+    searchFields: ['name', 'description']
+  },
+  user: {
+    orderBy: 'createTime',
+    order: 'desc',
+    searchFields: ['nickName', 'nickname', 'phone', 'userCode']
+  },
+  order: {
+    orderBy: 'createTime',
+    order: 'desc',
+    searchFields: ['orderNo', 'tableNumber', 'orderType', 'status']
+  },
+  queue: {
+    orderBy: 'createTime',
+    order: 'desc',
+    searchFields: ['name', 'phone', 'queueNo', 'status']
+  },
+  reservation: {
+    orderBy: 'createTime',
+    order: 'desc',
+    searchFields: ['name', 'phone', 'status']
+  },
+  outdoorGrill: {
+    orderBy: 'sort',
+    order: 'asc',
+    searchFields: ['name', 'status']
+  },
+  printer: {
+    orderBy: 'createTime',
+    order: 'desc',
+    searchFields: ['name', 'sn', 'status']
+  },
+  tableCode: {
+    orderBy: 'sort',
+    order: 'asc',
+    searchFields: ['tableNumber', 'name', 'scene']
+  },
+  rechargeOptions: {
+    orderBy: 'amount',
+    order: 'asc',
+    searchFields: ['description']
+  }
+}
+
+function getAdminCollectionConfig(collection) {
+  const key = String(collection || '').trim()
+  const config = ADMIN_COLLECTIONS[key]
+  if (!config) {
+    throw new Error('admin collection not allowed')
+  }
+  return {
+    key,
+    ...config
+  }
+}
+
+function cleanAdminData(data = {}) {
+  const cleaned = {}
+  Object.keys(data || {}).forEach(key => {
+    if (!key || key === '_id' || key === '_openid') return
+    if (key.indexOf('$') >= 0 || key.indexOf('.') >= 0) return
+    const value = data[key]
+    if (value === undefined) return
+    cleaned[key] = value
+  })
+  return cleaned
+}
+
+function getAdminListWhere(config, payload) {
+  const keyword = String(payload.keyword || '').trim()
+  const filters = payload.filters && typeof payload.filters === 'object'
+    ? cleanAdminData(payload.filters)
+    : {}
+
+  if (keyword) {
+    const matcher = db.RegExp({
+      regexp: keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+      options: 'i'
+    })
+    const searchFields = config.searchFields || []
+    if (searchFields.length > 0) {
+      return _.and([
+        filters,
+        _.or(searchFields.map(field => ({ [field]: matcher })))
+      ])
+    }
+  }
+
+  return filters
+}
+
+async function adminCollectionList(payload) {
+  const config = getAdminCollectionConfig(payload.collection)
+  const limit = getLimit(payload, 50, 100)
+  const page = getPage(payload)
+  const orderBy = String(payload.orderBy || config.orderBy || 'createTime')
+  const order = payload.order === 'asc' ? 'asc' : (config.order || 'desc')
+  const where = getAdminListWhere(config, payload)
+
+  const res = await db.collection(config.key)
+    .where(where)
+    .orderBy(orderBy, order)
+    .skip(page * limit)
+    .limit(limit)
+    .get()
+
+  return {
+    success: true,
+    data: res.data || [],
+    page,
+    limit,
+    hasMore: (res.data || []).length === limit
+  }
+}
+
+async function adminCollectionSave(payload) {
+  const config = getAdminCollectionConfig(payload.collection)
+  const item = payload.item || payload.data || {}
+  const id = String(item._id || payload.id || '').trim()
+  const data = {
+    ...cleanAdminData(item),
+    updateTime: db.serverDate()
+  }
+
+  if (id) {
+    await db.collection(config.key).doc(id).update({ data })
+    return {
+      success: true,
+      data: {
+        _id: id
+      }
+    }
+  }
+
+  const addRes = await db.collection(config.key).add({
+    data: {
+      ...data,
+      createTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true,
+    data: {
+      _id: addRes._id
+    }
+  }
+}
+
+async function adminCollectionUpdate(payload) {
+  const config = getAdminCollectionConfig(payload.collection)
+  const id = String(payload.id || payload._id || '').trim()
+  if (!id) {
+    return {
+      success: false,
+      code: 'ADMIN_DOC_ID_REQUIRED',
+      message: 'document id required'
+    }
+  }
+
+  await db.collection(config.key).doc(id).update({
+    data: {
+      ...cleanAdminData(payload.data || {}),
+      updateTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true
+  }
+}
+
+async function adminCollectionDelete(payload) {
+  const config = getAdminCollectionConfig(payload.collection)
+  const id = String(payload.id || payload._id || '').trim()
+  if (!id) {
+    return {
+      success: false,
+      code: 'ADMIN_DOC_ID_REQUIRED',
+      message: 'document id required'
+    }
+  }
+
+  await db.collection(config.key).doc(id).remove()
+  return {
+    success: true
+  }
+}
+
+function buildAdminAuthToken(admin) {
+  const secret = process.env.ADMIN_TOKEN_SECRET || process.env.WECHAT_SECRET || 'tenant-admin-token'
+  return hashToken(`${admin && admin._id || ''}:${admin && admin.password || ''}:${secret}`)
+}
+
+async function requireAdminAuth(payload) {
+  const token = String(payload.adminAuthToken || '').trim()
+  const res = await db.collection('admin').limit(1).get()
+  const admin = res.data && res.data[0]
+
+  if (!admin) {
+    return {
+      success: false,
+      code: 'ADMIN_NOT_FOUND',
+      message: 'admin not found'
+    }
+  }
+
+  if (!token || token !== buildAdminAuthToken(admin)) {
+    return {
+      success: false,
+      code: 'ADMIN_AUTH_REQUIRED',
+      message: 'admin auth required'
+    }
+  }
+
+  return {
+    success: true,
+    admin
+  }
+}
+
+async function getAdminStatus() {
+  const res = await db.collection('admin').limit(1).get()
+  return {
+    success: true,
+    data: {
+      hasAdmin: !!(res.data && res.data.length > 0)
+    }
+  }
+}
+
+async function setAdminPassword(payload) {
+  const password = String(payload.password || '').trim()
+  if (password.length < 6) {
+    return {
+      success: false,
+      code: 'INVALID_ADMIN_PASSWORD',
+      message: 'password must be at least 6 characters'
+    }
+  }
+
+  const res = await db.collection('admin').limit(1).get()
+  if (res.data && res.data.length > 0) {
+    return {
+      success: false,
+      code: 'ADMIN_ALREADY_EXISTS',
+      message: 'admin already exists'
+    }
+  }
+
+  const addRes = await db.collection('admin').add({
+    data: {
+      password,
+      createTime: db.serverDate(),
+      updateTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true,
+    data: {
+      adminAuthToken: buildAdminAuthToken({
+        _id: addRes._id,
+        password
+      })
+    }
+  }
+}
+
+async function loginAdmin(payload) {
+  const password = String(payload.password || '').trim()
+  const res = await db.collection('admin').limit(1).get()
+  const admin = res.data && res.data[0]
+
+  if (!admin) {
+    return {
+      success: false,
+      code: 'ADMIN_NOT_FOUND',
+      message: 'admin not found'
+    }
+  }
+
+  if (admin.password !== password) {
+    return {
+      success: false,
+      code: 'ADMIN_PASSWORD_INVALID',
+      message: 'invalid admin password'
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      adminAuthToken: buildAdminAuthToken(admin)
+    }
+  }
+}
+
+async function changeAdminPassword(payload) {
+  const oldPassword = String(payload.oldPassword || '').trim()
+  const newPassword = String(payload.newPassword || '').trim()
+
+  if (newPassword.length < 6) {
+    return {
+      success: false,
+      code: 'INVALID_ADMIN_PASSWORD',
+      message: 'password must be at least 6 characters'
+    }
+  }
+
+  const res = await db.collection('admin').limit(1).get()
+  const admin = res.data && res.data[0]
+
+  if (!admin) {
+    return {
+      success: false,
+      code: 'ADMIN_NOT_FOUND',
+      message: 'admin not found'
+    }
+  }
+
+  if (admin.password !== oldPassword) {
+    return {
+      success: false,
+      code: 'ADMIN_PASSWORD_INVALID',
+      message: 'invalid admin password'
+    }
+  }
+
+  await db.collection('admin').doc(admin._id).update({
+    data: {
+      password: newPassword,
+      updateTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true,
+    data: {
+      adminAuthToken: buildAdminAuthToken({
+        ...admin,
+        password: newPassword
+      })
+    }
+  }
+}
+
 async function handleAction(action, payload) {
   if (action === 'license.check') {
     const tenantId = getTenantId(payload)
@@ -1386,6 +2012,31 @@ async function handleAction(action, payload) {
   if (action === 'menu.sync') return syncMenu(payload)
   if (action === 'shop.info') return getShopInfo(payload)
   if (action === 'notice.list') return listNotices(payload)
+  if (action === 'admin.status') return getAdminStatus(payload)
+  if (action === 'admin.setPassword') return setAdminPassword(payload)
+  if (action === 'admin.login') return loginAdmin(payload)
+  if (action === 'admin.changePassword') return changeAdminPassword(payload)
+
+  if (
+    action.indexOf('admin.category.') === 0 ||
+    action.indexOf('admin.dish.') === 0 ||
+    action.indexOf('admin.collection.') === 0
+  ) {
+    const adminAuth = await requireAdminAuth(payload)
+    if (!adminAuth.success) return adminAuth
+  }
+
+  if (action === 'admin.category.list') return adminListCategories(payload)
+  if (action === 'admin.category.save') return adminSaveCategory(payload)
+  if (action === 'admin.category.delete') return adminDeleteCategory(payload)
+  if (action === 'admin.dish.list') return adminListDishes(payload)
+  if (action === 'admin.dish.save') return adminSaveDish(payload)
+  if (action === 'admin.dish.delete') return adminDeleteDish(payload)
+  if (action === 'admin.dish.status') return adminSetDishStatus(payload)
+  if (action === 'admin.collection.list') return adminCollectionList(payload)
+  if (action === 'admin.collection.save') return adminCollectionSave(payload)
+  if (action === 'admin.collection.update') return adminCollectionUpdate(payload)
+  if (action === 'admin.collection.delete') return adminCollectionDelete(payload)
   if (action === 'auth.login') return loginByWechatCode(payload)
   if (action === 'user.me') return getCurrentUser(payload)
   if (action === 'user.completeProfile') return completeUserProfile(payload)

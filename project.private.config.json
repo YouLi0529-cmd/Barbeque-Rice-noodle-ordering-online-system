@@ -22,44 +22,37 @@
     "miniprogram": {
       "list": [
         {
-          "name": "pages/index/index",
+          "name": "\u5546\u6237\u540e\u53f0\u5165\u53e3",
+          "pathName": "packages/admin/pages/admin/admin",
+          "query": "",
+          "scene": null,
+          "launchMode": "default"
+        },
+        {
+          "name": "\u7528\u6237\u7aef\u9996\u9875",
+          "pathName": "pages/covertest/covertest",
+          "query": "",
+          "scene": null,
+          "launchMode": "default"
+        },
+        {
+          "name": "\u5802\u98df\u626b\u7801\u70b9\u5355",
           "pathName": "packages/order/pages/index/index",
           "query": "scene=01",
           "scene": null,
           "launchMode": "default"
         },
         {
-          "name": "pages/index/index",
-          "pathName": "pages/index/index",
-          "query": "scene=01",
-          "launchMode": "default",
-          "scene": null
+          "name": "\u9732\u8425\u70b9\u5355",
+          "pathName": "packages/camping/pages/campingorderfood/campingorderfood",
+          "query": "",
+          "scene": null,
+          "launchMode": "default"
         },
         {
-          "name": "pages/index/index",
-          "pathName": "pages/index/index",
-          "query": "scence=01",
-          "launchMode": "default",
-          "scene": null
-        },
-        {
-          "name": "pages/index/index",
-          "pathName": "pages/index/index",
-          "query": "scene=01",
-          "launchMode": "default",
-          "scene": null
-        },
-        {
-          "name": "pages/index/index",
-          "pathName": "pages/index/index",
-          "query": "scence=table1",
-          "launchMode": "default",
-          "scene": null
-        },
-        {
-          "name": "pages/myhome/myhome",
-          "pathName": "pages/myhome/myhome",
-          "query": "scene=table001",
+          "name": "\u7528\u6237\u8ba2\u5355",
+          "pathName": "packages/user/pages/myorder/myorder",
+          "query": "",
           "launchMode": "default",
           "scene": null
         }

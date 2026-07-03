@@ -1,281 +1,284 @@
-﻿/* pages/admin/user/user.wxss */
-.page {
+.admin-simple-page {
   min-height: 100vh;
-  background: #f5f5f5;
-  padding: 20rpx;
-  padding-bottom: 40rpx;
+  background: #FFF7EC;
+  color: #3A2418;
+  box-sizing: border-box;
 }
 
-/* 搜索栏 */
-.search-bar {
+.admin-simple-header {
+  padding: 28rpx 24rpx 22rpx;
+  background: #1E1714;
+  color: #FFF7EC;
+}
+
+.admin-simple-title {
+  font-size: 38rpx;
+  font-weight: 900;
+}
+
+.admin-simple-actions {
   display: flex;
-  margin-bottom: 20rpx;
-  gap: 15rpx;
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+
+.header-btn {
+  min-width: 128rpx;
+  height: 58rpx;
+  line-height: 58rpx;
+  text-align: center;
+  border-radius: 999rpx;
+  color: rgba(255, 247, 236, 0.86);
+  background: rgba(255, 247, 236, 0.12);
+  font-size: 25rpx;
+  font-weight: 900;
+}
+
+.header-btn.primary {
+  color: #3A2418;
+  background: #F1C46B;
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  padding: 20rpx 24rpx 0;
 }
 
 .search-input {
   flex: 1;
   height: 70rpx;
-  background: white;
-  border-radius: 10rpx;
-  padding: 0 20rpx;
-  font-size: 28rpx;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  background: #FFFFFF;
+  font-size: 25rpx;
+  box-sizing: border-box;
 }
 
 .search-btn,
 .clear-btn {
-  padding: 0 30rpx;
   height: 70rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10rpx;
-  font-size: 28rpx;
-  color: white;
+  line-height: 70rpx;
+  text-align: center;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  font-weight: 900;
 }
 
 .search-btn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  width: 110rpx;
+  color: #3A2418;
+  background: #F1C46B;
 }
 
 .clear-btn {
-  background: #999;
+  width: 70rpx;
+  color: rgba(58, 36, 24, 0.58);
+  background: #FFF1DC;
 }
 
-/* 用户列表 */
-.user-list {
-  background: white;
-  border-radius: 20rpx;
-  overflow: hidden;
-}
-
-.user-item {
-  padding: 30rpx;
-  display: flex;
-  align-items: center;
-  border-bottom: 2rpx solid #f5f5f5;
-}
-
-.user-item:last-child {
-  border-bottom: none;
-}
-
-.user-avatar {
-  width: 100rpx;
-  height: 100rpx;
-  border-radius: 50%;
-  overflow: hidden;
-  margin-right: 20rpx;
-  flex-shrink: 0;
-}
-
-.user-avatar image {
-  width: 100%;
-  height: 100%;
-}
-
-.default-avatar {
-  width: 100%;
-  height: 100%;
-  background: #f5f5f5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 48rpx;
-}
-
-.user-info {
-  flex: 1;
-}
-
-.user-name {
-  font-size: 32rpx;
-  color: #333;
-  font-weight: bold;
-  margin-bottom: 10rpx;
-  display: flex;
-  align-items: center;
-}
-
-.member-badge {
-  font-size: 28rpx;
-  margin-left: 10rpx;
-}
-
-.user-detail {
-  font-size: 24rpx;
-  color: #999;
-  margin-bottom: 5rpx;
-}
-
-.user-detail:last-child {
-  margin-bottom: 0;
-}
-
-.user-arrow {
-  font-size: 28rpx;
-  color: #999;
-}
-
-.user-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 10rpx;
-  margin-left: 20rpx;
-}
-
-.action-btn {
-  padding: 8rpx 20rpx;
-  border-radius: 8rpx;
-  font-size: 24rpx;
-  white-space: nowrap;
-  text-align: center;
-}
-
-.balance-btn {
-  background: #667eea;
-  color: white;
-}
-
-.miandan-btn {
-  background: #e54d42;
-  color: white;
-}
-
-.empty-tip {
-  padding: 100rpx 0;
-  text-align: center;
-  color: #999;
-  font-size: 28rpx;
-}
-
-/* 弹窗样式 */
-.modal-mask {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-}
-
-.modal-dialog {
-  width: 600rpx;
-  background: white;
-  border-radius: 20rpx;
-  overflow: hidden;
-}
-
-.modal-title {
-  padding: 40rpx 30rpx 20rpx;
-  text-align: center;
-  font-size: 36rpx;
-  font-weight: bold;
-  color: #333;
-}
-
-.modal-content {
-  padding: 20rpx 30rpx 40rpx;
-}
-
-.user-preview {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 30rpx;
-  padding-bottom: 30rpx;
-  border-bottom: 2rpx solid #f5f5f5;
-}
-
-.preview-avatar {
-  width: 120rpx;
-  height: 120rpx;
-  border-radius: 50%;
-  overflow: hidden;
-  margin-bottom: 20rpx;
-}
-
-.preview-avatar image {
-  width: 100%;
-  height: 100%;
-}
-
-.preview-name {
-  font-size: 32rpx;
-  color: #333;
-  font-weight: bold;
-}
-
-.form-item {
-  margin-bottom: 30rpx;
-}
-
-.form-item:last-child {
-  margin-bottom: 0;
-}
-
-.form-label {
-  font-size: 28rpx;
-  color: #666;
-  margin-bottom: 15rpx;
-}
-
-.form-input {
-  width: 100%;
-  height: 80rpx;
-  border: 2rpx solid #e5e5e5;
-  border-radius: 10rpx;
-  padding: 0 20rpx;
-  font-size: 28rpx;
+.admin-list {
+  height: calc(100vh - 190rpx);
+  padding: 22rpx 24rpx 38rpx;
   box-sizing: border-box;
 }
 
-.balance-edit {
+.admin-card {
+  margin-bottom: 18rpx;
+  padding: 24rpx;
+  border-radius: 18rpx;
+  background: #FFFFFF;
+  box-shadow: 0 10rpx 26rpx rgba(58, 36, 24, 0.08);
+}
+
+.card-head {
   display: flex;
-  gap: 15rpx;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18rpx;
 }
 
-.balance-edit .form-input {
+.card-title {
   flex: 1;
+  min-width: 0;
+  color: #2C1A12;
+  font-size: 30rpx;
+  font-weight: 900;
+  line-height: 1.35;
+  word-break: break-all;
 }
 
-.recharge-btn {
-  padding: 0 30rpx;
-  height: 80rpx;
+.card-status {
+  max-width: 180rpx;
+  padding: 6rpx 14rpx;
+  border-radius: 999rpx;
+  color: #9A642A;
+  background: #FFF1DC;
+  font-size: 21rpx;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-subtitle {
+  margin-top: 8rpx;
+  color: rgba(58, 36, 24, 0.56);
+  font-size: 24rpx;
+}
+
+.line-row {
+  display: flex;
+  gap: 18rpx;
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
+.line-label {
+  width: 150rpx;
+  flex-shrink: 0;
+  color: rgba(58, 36, 24, 0.5);
+}
+
+.line-value {
+  flex: 1;
+  color: rgba(58, 36, 24, 0.82);
+  word-break: break-all;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 20rpx;
+}
+
+.mini-btn {
+  min-width: 112rpx;
+  height: 52rpx;
+  line-height: 52rpx;
+  text-align: center;
+  border-radius: 999rpx;
+  color: #9A642A;
+  background: #FFF1DC;
+  font-size: 23rpx;
+  font-weight: 900;
+}
+
+.mini-btn.danger {
+  color: #C04B36;
+}
+
+.empty-text {
+  padding: 120rpx 20rpx;
+  color: rgba(58, 36, 24, 0.46);
+  text-align: center;
+  font-size: 26rpx;
+}
+
+.modal-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #67c23a;
-  color: white;
-  border-radius: 10rpx;
+  padding: 40rpx;
+  background: rgba(0, 0, 0, 0.45);
+  box-sizing: border-box;
+}
+
+.modal-dialog {
+  width: 100%;
+  max-height: 88vh;
+  overflow: hidden;
+  border-radius: 24rpx;
+  background: #FFF7EC;
+}
+
+.modal-title {
+  padding: 28rpx 30rpx 18rpx;
+  color: #2C1A12;
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
+.modal-content {
+  max-height: 62vh;
+  padding: 0 30rpx 22rpx;
+  box-sizing: border-box;
+}
+
+.form-item {
+  margin-top: 20rpx;
+}
+
+.form-label {
+  margin-bottom: 10rpx;
+  color: rgba(58, 36, 24, 0.72);
+  font-size: 24rpx;
+  font-weight: 900;
+}
+
+.form-input,
+.form-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 14rpx;
+  background: #FFFFFF;
+  color: #2C1A12;
   font-size: 26rpx;
-  white-space: nowrap;
+}
+
+.form-input {
+  height: 72rpx;
+  padding: 0 20rpx;
+}
+
+.form-textarea {
+  min-height: 140rpx;
+  padding: 18rpx 20rpx;
+}
+
+.switch-row {
+  height: 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18rpx;
+  border-radius: 14rpx;
+  background: #FFFFFF;
+  box-sizing: border-box;
 }
 
 .modal-footer {
   display: flex;
-  border-top: 2rpx solid #e5e5e5;
+  gap: 18rpx;
+  padding: 22rpx 30rpx 30rpx;
+  border-top: 1rpx solid rgba(58, 36, 24, 0.08);
 }
 
 .modal-btn {
   flex: 1;
-  height: 100rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32rpx;
+  height: 78rpx;
+  line-height: 78rpx;
+  text-align: center;
+  border-radius: 999rpx;
+  font-size: 27rpx;
+  font-weight: 900;
 }
 
 .modal-btn.cancel {
-  color: #999;
-  border-right: 2rpx solid #e5e5e5;
+  color: #7A6659;
+  background: #FFFFFF;
 }
 
 .modal-btn.confirm {
-  color: #667eea;
-  font-weight: bold;
+  color: #3A2418;
+  background: #F1C46B;
 }

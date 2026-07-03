@@ -1,189 +1,58 @@
-﻿<!-- pages/admin/order/order.wxml -->
-<view class="order-admin-page">
-  <view class="top-bar fire-gradient">
-    <view class="top-title">订单管理</view>
-    <view class="top-desc">前台确认点单、发送厨房、线下收款分开处理</view>
-  </view>
-
-  <view class="summary-row">
-    <view class="summary-item urgent">
-      <text class="summary-num">{{summary.frontdesk}}</text>
-      <text class="summary-label">待确认</text>
-    </view>
-    <view class="summary-item">
-      <text class="summary-num">{{summary.unpaid}}</text>
-      <text class="summary-label">未付款</text>
-    </view>
-    <view class="summary-item">
-      <text class="summary-num">{{summary.kitchen}}</text>
-      <text class="summary-label">厨房中</text>
-    </view>
-    <view class="summary-item">
-      <text class="summary-num">{{summary.ready}}</text>
-      <text class="summary-label">待交付</text>
+<!-- admin simple collection page -->
+<view class="admin-simple-page">
+  <view class="admin-simple-header">
+    <view class="admin-simple-title">{{ui.title}}</view>
+    <view class="admin-simple-actions">
+      <view class="header-btn" bindtap="loadList">{{ui.refresh}}</view>
+      <view class="header-btn primary" wx:if="{{canAdd}}" bindtap="showAddModal">{{ui.add}}</view>
     </view>
   </view>
 
-  <view class="filter-panel">
-    <scroll-view class="filter-scroll" scroll-x enhanced show-scrollbar="{{false}}">
-      <view class="filter-row">
-        <view
-          class="filter-chip {{activeFilter === item.value ? 'active' : ''}}"
-          wx:for="{{filters}}"
-          wx:key="value"
-          bindtap="onFilterChange"
-          data-value="{{item.value}}">
-          {{item.label}}
-        </view>
-      </view>
-    </scroll-view>
-    <view class="refresh-line">
-      <view class="refresh-btn" bindtap="refreshOrders">刷新</view>
-      <text>每 8 秒自动刷新 {{lastRefreshText}}</text>
-    </view>
+  <view class="search-row" wx:if="{{allowSearch}}">
+    <input class="search-input" placeholder="{{ui.searchPlaceholder}}" value="{{keyword}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="doSearch" />
+    <view class="search-btn" bindtap="doSearch">{{ui.searchPlaceholder}}</view>
+    <view class="clear-btn" bindtap="clearSearch">x</view>
   </view>
 
-  <view
-    class="order-card {{item.isUrgent ? 'urgent-card' : ''}}"
-    wx:for="{{orders}}"
-    wx:key="_id"
-    bindtap="openOrderDetail"
-    data-index="{{index}}">
-    <view class="card-head">
-      <view class="head-main">
-        <view class="order-kind">{{item.orderKindText}}</view>
-        <view class="order-time">{{item.createTimeText}}</view>
+  <scroll-view class="admin-list" scroll-y>
+    <view class="admin-card" wx:for="{{list}}" wx:key="_id">
+      <view class="card-head">
+        <view class="card-title">{{item._displayTitle}}</view>
+        <view class="card-status" wx:if="{{item._displayStatus}}">{{item._displayStatus}}</view>
       </view>
-      <view class="status-tag {{item.statusClass}}">{{item.statusText}}</view>
-    </view>
-
-    <view class="goods-list">
-      <view class="goods-row" wx:for="{{item.goods}}" wx:for-item="goods" wx:key="dishId">
-        <text class="goods-name">{{goods.dishName || goods.goodsName}}</text>
-        <text class="goods-count">x{{goods.count}}</text>
+      <view class="card-subtitle" wx:if="{{item._displaySubtitle}}">{{item._displaySubtitle}}</view>
+      <view class="line-row" wx:for="{{item._displayLines}}" wx:for-item="line" wx:key="key">
+        <text class="line-label">{{line.label}}</text>
+        <text class="line-value">{{line.value}}</text>
+      </view>
+      <view class="card-actions">
+        <view class="mini-btn" wx:if="{{canEdit}}" bindtap="showEditModal" data-item="{{item}}">{{ui.edit}}</view>
+        <view class="mini-btn" wx:for="{{item._actions}}" wx:for-item="act" wx:for-index="actIndex" wx:key="label" bindtap="runAction" data-id="{{item._id}}" data-index="{{actIndex}}">{{act.label}}</view>
+        <view class="mini-btn danger" wx:if="{{canDelete}}" bindtap="deleteItem" data-item="{{item}}">{{ui.delete}}</view>
       </view>
     </view>
 
-    <view class="remark-box" wx:if="{{item.frontDeskRemarkText}}">
-      <text class="remark-label">前台备注</text>
-      <text class="remark-text">{{item.frontDeskRemarkText}}</text>
-    </view>
+    <view class="empty-text" wx:if="{{!loading && list.length === 0}}">{{ui.empty}}</view>
+    <view class="empty-text" wx:if="{{loading}}">{{ui.loading}}</view>
+  </scroll-view>
 
-    <view class="remark-box edit-box" wx:if="{{item.menuEditText}}">
-      <text class="remark-label">菜单状态</text>
-      <text class="remark-text">{{item.menuEditText}}</text>
-    </view>
-
-    <view class="meta-grid">
-      <view class="meta-item">
-        <text class="meta-label">金额</text>
-        <text class="meta-value">￥{{item.finalPriceText}}</text>
-      </view>
-      <view class="meta-item {{item.payText === '未付款' ? 'meta-warning' : ''}}">
-        <text class="meta-label">付款</text>
-        <text class="meta-value">{{item.payText}}</text>
-      </view>
-      <view class="meta-item {{item.printText === '打印失败' ? 'meta-warning' : ''}}">
-        <text class="meta-label">厨房</text>
-        <text class="meta-value">{{item.printText}}</text>
-      </view>
-    </view>
-
-    <view class="actions">
-      <view
-        class="action-btn {{action.type}}"
-        wx:for="{{item.actions}}"
-        wx:for-item="action"
-        wx:key="label"
-        catchtap="onActionTap"
-        data-index="{{index}}"
-        data-action="{{action.action}}"
-        data-status="{{action.status}}"
-        data-label="{{action.label}}">
-        {{action.label}}
-      </view>
-    </view>
-  </view>
-
-  <van-empty wx:if="{{orders.length === 0}}" description="暂无订单数据" />
-
-  <view class="modal-mask" wx:if="{{showRemarkModal}}" catchtap="closeRemarkModal">
-    <view class="remark-dialog" catchtap="stopPropagation">
-      <view class="modal-title">前台备注</view>
-      <textarea
-        class="remark-input"
-        maxlength="120"
-        placeholder="例如：少辣、先上肉、等人齐再烤"
-        value="{{frontDeskRemark}}"
-        bindinput="onRemarkInput"></textarea>
-      <view class="modal-footer">
-        <view class="modal-btn cancel" bindtap="closeRemarkModal">取消</view>
-        <view class="modal-btn confirm" bindtap="saveRemark">保存</view>
-      </view>
-    </view>
-  </view>
-
-  <view class="modal-mask" wx:if="{{showEditOrderModal}}" catchtap="closeEditOrderModal">
-    <view class="edit-order-dialog" catchtap="stopPropagation">
-      <view class="modal-title">修改点菜单</view>
-
-      <scroll-view class="edit-order-scroll" scroll-y enhanced show-scrollbar="{{false}}">
-        <view class="edit-block">
-          <view class="edit-block-title">当前订单</view>
-          <view class="edit-goods-row" wx:for="{{editGoods}}" wx:key="editKey">
-            <view class="edit-goods-main">
-              <view class="edit-goods-name">{{item.dishName}}</view>
-              <view class="edit-goods-price">￥{{item.price}} / 小计 ￥{{item.subtotal}}</view>
-            </view>
-            <view class="qty-control">
-              <view class="qty-btn" catchtap="decreaseEditGoods" data-index="{{index}}">-</view>
-              <view class="qty-num">{{item.count}}</view>
-              <view class="qty-btn" catchtap="increaseEditGoods" data-index="{{index}}">+</view>
-            </view>
-            <view class="remove-btn" catchtap="removeEditGoods" data-index="{{index}}">删</view>
+  <view class="modal-mask" wx:if="{{showModal}}" catchtap="closeModal">
+    <view class="modal-dialog" catchtap="stopPropagation">
+      <view class="modal-title">{{editMode ? ui.edit : ui.add}}</view>
+      <scroll-view class="modal-content" scroll-y>
+        <view class="form-item" wx:for="{{formFields}}" wx:key="key">
+          <view class="form-label">{{item.label}}</view>
+          <textarea wx:if="{{item.type === 'textarea'}}" class="form-textarea" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
+          <view wx:elif="{{item.type === 'switch'}}" class="switch-row">
+            <text>{{item.value ? ui.yes : ui.no}}</text>
+            <switch checked="{{item.value}}" data-key="{{item.key}}" bindchange="onFieldSwitch" color="#C99A4A" />
           </view>
-        </view>
-
-        <view class="edit-block">
-          <view class="edit-block-title">添加菜品</view>
-          <input
-            class="dish-search-input"
-            placeholder="搜索菜品"
-            value="{{dishSearchKeyword}}"
-            bindinput="onDishSearchInput" />
-          <view class="dish-picker-list">
-            <view
-              class="dish-picker-item"
-              wx:for="{{filteredDishes}}"
-              wx:key="_id"
-              catchtap="addDishToEditOrder"
-              data-index="{{index}}">
-              <view>
-                <view class="dish-picker-name">{{item.name}}</view>
-                <view class="dish-picker-price">￥{{item.priceText}}</view>
-              </view>
-              <view class="dish-add-btn">添加</view>
-            </view>
-          </view>
-        </view>
-
-        <view class="edit-block">
-          <view class="edit-block-title">修改原因</view>
-          <textarea
-            class="edit-reason-input"
-            maxlength="80"
-            placeholder="可选，例如：顾客临时加菜、前台改数量"
-            value="{{editReason}}"
-            bindinput="onEditReasonInput"></textarea>
+          <input wx:else class="form-input" type="{{item.type === 'number' ? 'digit' : 'text'}}" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
         </view>
       </scroll-view>
-
-      <view class="edit-total-bar">
-        <view>
-          <text class="total-label">新金额</text>
-          <text class="total-value">￥{{editTotalPriceText}}</text>
-        </view>
-        <view class="save-menu-btn" bindtap="saveOrderGoods">保存菜单</view>
+      <view class="modal-footer">
+        <view class="modal-btn cancel" bindtap="closeModal">{{ui.cancel}}</view>
+        <view class="modal-btn confirm" bindtap="saveItem">{{ui.save}}</view>
       </view>
     </view>
   </view>

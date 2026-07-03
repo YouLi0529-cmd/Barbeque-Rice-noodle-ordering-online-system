@@ -1,106 +1,58 @@
-﻿<!--pages/admin/user/user.wxml-->
-<view class="page">
-  <!-- 搜索栏 -->
-  <view class="search-bar">
-    <input
-      class="search-input"
-      placeholder="搜索用户昵称或手机号"
-      value="{{searchKeyword}}"
-      bindinput="onSearchInput"
-      bindconfirm="doSearch"
-    />
-    <view class="search-btn" bindtap="doSearch">搜索</view>
-    <view class="clear-btn" wx:if="{{searchKeyword}}" bindtap="clearSearch">清空</view>
-  </view>
-
-  <!-- 用户列表 -->
-  <view class="user-list">
-    <view class="user-item" wx:for="{{users}}" wx:key="_id">
-      <view class="user-avatar">
-        <image wx:if="{{item.avatarUrl}}" src="{{item.avatarUrl}}" mode="aspectFill"></image>
-        <view wx:else class="default-avatar">👤</view>
-      </view>
-      <view class="user-info">
-        <view class="user-name">
-          {{item.nickName || '未知昵称'}}
-        </view>
-        <view class="user-detail">
-          <text>📱 {{item.phoneNumber || '未绑定号码'}}</text>
-        </view>
-        <view class="user-detail">
-          <text>💰 余额: ¥{{item.balance || 0}}</text>
-        </view>
-        <view class="user-detail" wx:if="{{item.miandanCount !== undefined}}">
-          <text>🎁 免单次数: {{item.miandanCount || 0}}次</text>
-        </view>
-      </view>
-      <view class="user-actions">
-        <view class="action-btn balance-btn" catchtap="showEditBalanceModal" data-user="{{item}}">修改余额</view>
-        <view class="action-btn miandan-btn" catchtap="showEditMiandanModal" data-user="{{item}}">修改免单</view>
-      </view>
-    </view>
-
-    <van-empty wx:if="{{users.length === 0}}" description="暂无用户数据" />
-  </view>
-
-  <!-- 编辑余额弹窗 -->
-  <view class="modal-mask" wx:if="{{showBalanceModal}}" catchtap="closeBalanceModal">
-    <view class="modal-dialog" catchtap="stopPropagation">
-      <view class="modal-title">修改会员余额</view>
-      <view class="modal-content">
-        <view class="user-preview">
-          <view class="preview-avatar">
-            <image wx:if="{{currentUser.avatarUrl}}" src="{{currentUser.avatarUrl}}" mode="aspectFill"></image>
-            <view wx:else class="default-avatar">👤</view>
-          </view>
-          <view class="preview-name">{{currentUser.nickName || '未设置'}}</view>
-        </view>
-
-        <view class="form-item">
-          <view class="form-label">账户余额</view>
-          <input
-            class="form-input"
-            type="digit"
-            placeholder="请输入余额"
-            value="{{editBalance}}"
-            bindinput="onBalanceInput"
-          />
-        </view>
-      </view>
-      <view class="modal-footer">
-        <view class="modal-btn cancel" bindtap="closeBalanceModal">取消</view>
-        <view class="modal-btn confirm" bindtap="saveBalance">保存</view>
-      </view>
+<!-- admin simple collection page -->
+<view class="admin-simple-page">
+  <view class="admin-simple-header">
+    <view class="admin-simple-title">{{ui.title}}</view>
+    <view class="admin-simple-actions">
+      <view class="header-btn" bindtap="loadList">{{ui.refresh}}</view>
+      <view class="header-btn primary" wx:if="{{canAdd}}" bindtap="showAddModal">{{ui.add}}</view>
     </view>
   </view>
 
-  <!-- 编辑免单次数弹窗 -->
-  <view class="modal-mask" wx:if="{{showMiandanModal}}" catchtap="closeMiandanModal">
-    <view class="modal-dialog" catchtap="stopPropagation">
-      <view class="modal-title">修改免单次数</view>
-      <view class="modal-content">
-        <view class="user-preview">
-          <view class="preview-avatar">
-            <image wx:if="{{currentUser.avatarUrl}}" src="{{currentUser.avatarUrl}}" mode="aspectFill"></image>
-            <view wx:else class="default-avatar">👤</view>
-          </view>
-          <view class="preview-name">{{currentUser.nickName || '未设置'}}</view>
-        </view>
+  <view class="search-row" wx:if="{{allowSearch}}">
+    <input class="search-input" placeholder="{{ui.searchPlaceholder}}" value="{{keyword}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="doSearch" />
+    <view class="search-btn" bindtap="doSearch">{{ui.searchPlaceholder}}</view>
+    <view class="clear-btn" bindtap="clearSearch">x</view>
+  </view>
 
-        <view class="form-item">
-          <view class="form-label">免单次数</view>
-          <input
-            class="form-input"
-            type="number"
-            placeholder="请输入免单次数"
-            value="{{editMiandanCount}}"
-            bindinput="onMiandanCountInput"
-          />
-        </view>
+  <scroll-view class="admin-list" scroll-y>
+    <view class="admin-card" wx:for="{{list}}" wx:key="_id">
+      <view class="card-head">
+        <view class="card-title">{{item._displayTitle}}</view>
+        <view class="card-status" wx:if="{{item._displayStatus}}">{{item._displayStatus}}</view>
       </view>
+      <view class="card-subtitle" wx:if="{{item._displaySubtitle}}">{{item._displaySubtitle}}</view>
+      <view class="line-row" wx:for="{{item._displayLines}}" wx:for-item="line" wx:key="key">
+        <text class="line-label">{{line.label}}</text>
+        <text class="line-value">{{line.value}}</text>
+      </view>
+      <view class="card-actions">
+        <view class="mini-btn" wx:if="{{canEdit}}" bindtap="showEditModal" data-item="{{item}}">{{ui.edit}}</view>
+        <view class="mini-btn" wx:for="{{item._actions}}" wx:for-item="act" wx:for-index="actIndex" wx:key="label" bindtap="runAction" data-id="{{item._id}}" data-index="{{actIndex}}">{{act.label}}</view>
+        <view class="mini-btn danger" wx:if="{{canDelete}}" bindtap="deleteItem" data-item="{{item}}">{{ui.delete}}</view>
+      </view>
+    </view>
+
+    <view class="empty-text" wx:if="{{!loading && list.length === 0}}">{{ui.empty}}</view>
+    <view class="empty-text" wx:if="{{loading}}">{{ui.loading}}</view>
+  </scroll-view>
+
+  <view class="modal-mask" wx:if="{{showModal}}" catchtap="closeModal">
+    <view class="modal-dialog" catchtap="stopPropagation">
+      <view class="modal-title">{{editMode ? ui.edit : ui.add}}</view>
+      <scroll-view class="modal-content" scroll-y>
+        <view class="form-item" wx:for="{{formFields}}" wx:key="key">
+          <view class="form-label">{{item.label}}</view>
+          <textarea wx:if="{{item.type === 'textarea'}}" class="form-textarea" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
+          <view wx:elif="{{item.type === 'switch'}}" class="switch-row">
+            <text>{{item.value ? ui.yes : ui.no}}</text>
+            <switch checked="{{item.value}}" data-key="{{item.key}}" bindchange="onFieldSwitch" color="#C99A4A" />
+          </view>
+          <input wx:else class="form-input" type="{{item.type === 'number' ? 'digit' : 'text'}}" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
+        </view>
+      </scroll-view>
       <view class="modal-footer">
-        <view class="modal-btn cancel" bindtap="closeMiandanModal">取消</view>
-        <view class="modal-btn confirm" bindtap="saveMiandan">保存</view>
+        <view class="modal-btn cancel" bindtap="closeModal">{{ui.cancel}}</view>
+        <view class="modal-btn confirm" bindtap="saveItem">{{ui.save}}</view>
       </view>
     </view>
   </view>

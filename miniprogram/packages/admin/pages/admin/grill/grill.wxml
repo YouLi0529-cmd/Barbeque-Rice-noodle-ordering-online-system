@@ -1,26 +1,59 @@
-﻿<!--pages/admin/grill/grill.wxml-->
-<view class="admin-list-page">
-  <view class="top-bar fire-gradient">
-    <view class="top-title">烤架管理</view>
-    <view class="top-desc">管理 outdoorGrill 集合</view>
-  </view>
-
-  <view class="create-card">
-    <view class="field-label">新增烤架</view>
-    <view class="create-row">
-      <input class="name-input" placeholder="例如 A1烤架" value="{{newGrillName}}" bindinput="onNameInput" />
-      <view class="create-btn" bindtap="addGrill">新增</view>
+<!-- admin simple collection page -->
+<view class="admin-simple-page">
+  <view class="admin-simple-header">
+    <view class="admin-simple-title">{{ui.title}}</view>
+    <view class="admin-simple-actions">
+      <view class="header-btn" bindtap="loadList">{{ui.refresh}}</view>
+      <view class="header-btn primary" wx:if="{{canAdd}}" bindtap="showAddModal">{{ui.add}}</view>
     </view>
-    <view class="default-btn" bindtap="createDefaults">创建默认 A1/A2/A3/B1/B2</view>
   </view>
 
-  <view class="grill-card" wx:for="{{list}}" wx:key="_id">
-    <view>
-      <view class="grill-name">{{item.name}}</view>
-      <view class="grill-meta">点位 {{item.outdoorPointId || 'main'}} · {{item.statusText}}</view>
+  <view class="search-row" wx:if="{{allowSearch}}">
+    <input class="search-input" placeholder="{{ui.searchPlaceholder}}" value="{{keyword}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="doSearch" />
+    <view class="search-btn" bindtap="doSearch">{{ui.searchPlaceholder}}</view>
+    <view class="clear-btn" bindtap="clearSearch">x</view>
+  </view>
+
+  <scroll-view class="admin-list" scroll-y>
+    <view class="admin-card" wx:for="{{list}}" wx:key="_id">
+      <view class="card-head">
+        <view class="card-title">{{item._displayTitle}}</view>
+        <view class="card-status" wx:if="{{item._displayStatus}}">{{item._displayStatus}}</view>
+      </view>
+      <view class="card-subtitle" wx:if="{{item._displaySubtitle}}">{{item._displaySubtitle}}</view>
+      <view class="line-row" wx:for="{{item._displayLines}}" wx:for-item="line" wx:key="key">
+        <text class="line-label">{{line.label}}</text>
+        <text class="line-value">{{line.value}}</text>
+      </view>
+      <view class="card-actions">
+        <view class="mini-btn" wx:if="{{canEdit}}" bindtap="showEditModal" data-item="{{item}}">{{ui.edit}}</view>
+        <view class="mini-btn" wx:for="{{item._actions}}" wx:for-item="act" wx:for-index="actIndex" wx:key="label" bindtap="runAction" data-id="{{item._id}}" data-index="{{actIndex}}">{{act.label}}</view>
+        <view class="mini-btn danger" wx:if="{{canDelete}}" bindtap="deleteItem" data-item="{{item}}">{{ui.delete}}</view>
+      </view>
     </view>
-    <view class="toggle-btn" bindtap="toggleStatus" data-id="{{item._id}}" data-status="{{item.nextStatus}}">{{item.nextText}}</view>
-  </view>
 
-  <van-empty wx:if="{{list.length === 0}}" description="暂无烤架，建议先创建默认烤架" />
+    <view class="empty-text" wx:if="{{!loading && list.length === 0}}">{{ui.empty}}</view>
+    <view class="empty-text" wx:if="{{loading}}">{{ui.loading}}</view>
+  </scroll-view>
+
+  <view class="modal-mask" wx:if="{{showModal}}" catchtap="closeModal">
+    <view class="modal-dialog" catchtap="stopPropagation">
+      <view class="modal-title">{{editMode ? ui.edit : ui.add}}</view>
+      <scroll-view class="modal-content" scroll-y>
+        <view class="form-item" wx:for="{{formFields}}" wx:key="key">
+          <view class="form-label">{{item.label}}</view>
+          <textarea wx:if="{{item.type === 'textarea'}}" class="form-textarea" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
+          <view wx:elif="{{item.type === 'switch'}}" class="switch-row">
+            <text>{{item.value ? ui.yes : ui.no}}</text>
+            <switch checked="{{item.value}}" data-key="{{item.key}}" bindchange="onFieldSwitch" color="#C99A4A" />
+          </view>
+          <input wx:else class="form-input" type="{{item.type === 'number' ? 'digit' : 'text'}}" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
+        </view>
+      </scroll-view>
+      <view class="modal-footer">
+        <view class="modal-btn cancel" bindtap="closeModal">{{ui.cancel}}</view>
+        <view class="modal-btn confirm" bindtap="saveItem">{{ui.save}}</view>
+      </view>
+    </view>
+  </view>
 </view>

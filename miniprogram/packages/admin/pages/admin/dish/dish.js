@@ -1,858 +1,395 @@
-﻿// pages/admin/dish/dish.js
-const db = wx.cloud.database()
+// packages/admin/pages/admin/dish/dish.js
+const apiClient = require('../../../../../utils/apiClient')
+
+const UI = {
+  pageTitle: '\u83dc\u54c1\u7ba1\u7406',
+  dineIn: '\u5802\u98df',
+  camping: '\u9732\u8425',
+  addCategory: '\u6dfb\u52a0\u5206\u7c7b',
+  editCategory: '\u7f16\u8f91\u5206\u7c7b',
+  addDish: '\u6dfb\u52a0\u83dc\u54c1',
+  editDish: '\u7f16\u8f91\u83dc\u54c1',
+  selectCategory: '\u8bf7\u9009\u62e9\u5206\u7c7b',
+  emptyDish: '\u6682\u65e0\u83dc\u54c1',
+  noImage: '\u6682\u65e0\u56fe\u7247',
+  online: '\u5df2\u4e0a\u67b6',
+  offline: '\u5df2\u4e0b\u67b6',
+  setOnline: '\u4e0a\u67b6',
+  setOffline: '\u4e0b\u67b6',
+  edit: '\u7f16\u8f91',
+  delete: '\u5220\u9664',
+  cancel: '\u53d6\u6d88',
+  save: '\u4fdd\u5b58',
+  confirm: '\u786e\u8ba4',
+  categoryName: '\u5206\u7c7b\u540d\u79f0',
+  dishName: '\u83dc\u54c1\u540d\u79f0',
+  price: '\u552e\u4ef7',
+  originalPrice: '\u539f\u4ef7',
+  unit: '\u5355\u4f4d',
+  description: '\u63cf\u8ff0',
+  image: '\u56fe\u7247\u5730\u5740',
+  sort: '\u6392\u5e8f',
+  status: '\u4e0a\u67b6\u72b6\u6001',
+  needPopup: '\u9700\u8981\u89c4\u683c\u5f39\u7a97',
+  inputCategoryName: '\u8bf7\u8f93\u5165\u5206\u7c7b\u540d\u79f0',
+  inputDishName: '\u8bf7\u8f93\u5165\u83dc\u54c1\u540d\u79f0',
+  inputPrice: '\u8bf7\u8f93\u5165\u4ef7\u683c',
+  inputUnit: '\u4f8b\u5982\uff1a\u4efd',
+  inputDescription: '\u8bf7\u8f93\u5165\u63cf\u8ff0',
+  inputImage: '\u53ef\u586b\u5199\u56fe\u7247 URL \u6216 fileID',
+  inputSort: '\u6570\u5b57\u8d8a\u5c0f\u8d8a\u9760\u524d',
+  loading: '\u52a0\u8f7d\u4e2d...',
+  saving: '\u4fdd\u5b58\u4e2d...',
+  deleting: '\u5220\u9664\u4e2d...',
+  saved: '\u4fdd\u5b58\u6210\u529f',
+  deleted: '\u5220\u9664\u6210\u529f',
+  failed: '\u64cd\u4f5c\u5931\u8d25',
+  confirmDelete: '\u786e\u8ba4\u5220\u9664',
+  confirmDeleteCategory: '\u786e\u5b9a\u5220\u9664\u8fd9\u4e2a\u5206\u7c7b\u5417\uff1f\u5176\u4e0b\u83dc\u54c1\u4f1a\u88ab\u4e0b\u67b6\u3002',
+  confirmDeleteDish: '\u786e\u5b9a\u5220\u9664\u8fd9\u4e2a\u83dc\u54c1\u5417\uff1f',
+  categoryRequired: '\u8bf7\u8f93\u5165\u5206\u7c7b\u540d\u79f0',
+  dishRequired: '\u8bf7\u8f93\u5165\u83dc\u54c1\u540d\u79f0',
+  priceRequired: '\u8bf7\u8f93\u5165\u6b63\u786e\u552e\u4ef7',
+  currency: '\uffe5',
+  slash: '/',
+  defaultUnit: '\u4efd',
+  imageTip: '\u56fe\u7247\u4e0a\u4f20\u5df2\u4ece\u65e7\u4e91\u73af\u5883\u79fb\u9664\uff0c\u6682\u65f6\u8bf7\u586b\u5199\u56fe\u7247\u5730\u5740\u3002'
+}
+
+const DEFAULT_CATEGORY = {
+  _id: '',
+  name: '',
+  sort: 0,
+  status: 1
+}
+
+const DEFAULT_DISH = {
+  _id: '',
+  name: '',
+  price: '',
+  originalPrice: '',
+  description: '',
+  categoryId: '',
+  categoryName: '',
+  image: '',
+  unit: '\u4efd',
+  status: 1,
+  sort: 0,
+  needPopup: false,
+  tags: [],
+  options: []
+}
+
+function showToast(title, icon = 'none') {
+  wx.showToast({ title, icon })
+}
+
+function toNumber(value, fallback = 0) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : fallback
+}
 
 Page({
   data: {
-    // 分类相关
+    ui: UI,
+    menuTypes: [
+      { label: UI.dineIn, value: 'dineIn' },
+      { label: UI.camping, value: 'camping' }
+    ],
+    currentMenuType: 'dineIn',
     categories: [],
-    currentCategoryId: '', // 当前选中的分类ID
+    currentCategoryId: '',
+    dishes: [],
+    loadingCategories: false,
+    loadingDishes: false,
     showCategoryModal: false,
     editCategoryMode: false,
-    currentCategory: {
-      _id: '',
-      name: '',
-      sort: 0
-    },
-
-    // 菜品相关
-    dishes: [],
+    currentCategory: { ...DEFAULT_CATEGORY },
     showDishModal: false,
     editDishMode: false,
-      currentDish: {
-        _id: '',
-        name: '',
-        price: '',
-        originalPrice: '',
-        description: '',
-        categoryId: '',
-        categoryName: '',
-        image: '',
-        status: 1, // 1: 上架, 0: 下架
-        sort: 0,
-        tags: [], // 标签数组
-        canUseMiandan: false // 是否可以参与免单
-      },
-
-    // 标签编辑
-    showTagModal: false,
-    editingTagIndex: -1, // -1表示新增，>=0表示编辑
-    currentTag: {
-      name: '',
-      type: 'single', // single: 单选, multiple: 多选
-      required: true, // 是否必选
-      options: []
-    },
-    newOption: '', // 临时输入的选项
-    // 菜品分页
-    dishPage: 0,
-    dishPageSize: 20,
-    dishHasMore: true,
-    loadingDishes: false
+    currentDish: { ...DEFAULT_DISH }
   },
 
   onLoad() {
     this.loadCategories()
-    this.loadDishes()
   },
 
-  onShow() {
-    this.loadCategories()
-    this.loadDishes()
+  async changeMenuType(e) {
+    const menuType = e.currentTarget.dataset.type
+    if (!menuType || menuType === this.data.currentMenuType) return
+
+    this.setData({
+      currentMenuType: menuType,
+      currentCategoryId: '',
+      categories: [],
+      dishes: []
+    })
+    await this.loadCategories()
   },
 
-  // ==================== 分类管理 ====================
-
-  // 加载分类列表
   async loadCategories() {
+    this.setData({ loadingCategories: true })
     try {
-      const res = await wx.cloud.callFunction({
-        name: 'getCategory'
+      const res = await apiClient.call('admin.category.list', {
+        menuType: this.data.currentMenuType
       })
-      const result = res.result || {}
-      const categories = result.success ? (result.data || []) : []
+      const categories = res.data || []
+      const exists = categories.some(item => item._id === this.data.currentCategoryId)
+      const currentCategoryId = exists
+        ? this.data.currentCategoryId
+        : (categories[0] ? categories[0]._id : '')
 
-      // 如果有分类且没有选中分类，默认选中第一个
-      if (categories.length > 0 && !this.data.currentCategoryId) {
-        this.setData({
-          categories: categories,
-          currentCategoryId: categories[0]._id
-        }, () => {
-          this.loadDishes()
-        })
-      } else {
-        this.setData({
-          categories: categories
-        }, () => {
-          if (this.data.currentCategoryId) {
-            this.loadDishes()
-          }
-        })
-      }
+      this.setData({
+        categories,
+        currentCategoryId,
+        loadingCategories: false
+      })
+      await this.loadDishes()
     } catch (err) {
-      console.error('加载分类失败', err)
+      console.error('load categories failed', err)
+      this.setData({ loadingCategories: false })
+      showToast(err.message || UI.failed)
     }
   },
 
-  // 切换分类
+  async loadDishes() {
+    if (!this.data.currentCategoryId) {
+      this.setData({ dishes: [] })
+      return
+    }
+
+    this.setData({ loadingDishes: true })
+    try {
+      const res = await apiClient.call('admin.dish.list', {
+        menuType: this.data.currentMenuType,
+        categoryId: this.data.currentCategoryId,
+        limit: 100
+      })
+      this.setData({
+        dishes: res.data || [],
+        loadingDishes: false
+      })
+    } catch (err) {
+      console.error('load dishes failed', err)
+      this.setData({ loadingDishes: false })
+      showToast(err.message || UI.failed)
+    }
+  },
+
   switchCategory(e) {
     const categoryId = e.currentTarget.dataset.id
-    this.setData({
-      currentCategoryId: categoryId
-    }, () => {
+    this.setData({ currentCategoryId: categoryId }, () => {
       this.loadDishes()
     })
   },
 
-  // 显示添加分类弹窗
   showAddCategoryModal() {
     this.setData({
       showCategoryModal: true,
       editCategoryMode: false,
       currentCategory: {
-        _id: '',
-        name: '',
+        ...DEFAULT_CATEGORY,
         sort: this.data.categories.length
       }
     })
   },
 
-  // 显示编辑分类弹窗
   showEditCategoryModal(e) {
     const category = e.currentTarget.dataset.category
     this.setData({
       showCategoryModal: true,
       editCategoryMode: true,
-      currentCategory: { ...category }
+      currentCategory: { ...DEFAULT_CATEGORY, ...category }
     })
   },
 
-  // 关闭分类弹窗
   closeCategoryModal() {
-    this.setData({
-      showCategoryModal: false
-    })
+    this.setData({ showCategoryModal: false })
   },
 
-  // 输入分类名称
   onCategoryNameInput(e) {
-    this.setData({
-      'currentCategory.name': e.detail.value
-    })
+    this.setData({ 'currentCategory.name': e.detail.value })
   },
 
-  // 输入分类排序
   onCategorySortInput(e) {
-    this.setData({
-      'currentCategory.sort': parseInt(e.detail.value) || 0
-    })
+    this.setData({ 'currentCategory.sort': e.detail.value })
   },
 
-
-  // 保存分类
   async saveCategory() {
-    const { editCategoryMode, currentCategory } = this.data
+    const category = {
+      ...this.data.currentCategory,
+      menuType: this.data.currentMenuType,
+      sort: toNumber(this.data.currentCategory.sort)
+    }
 
-    if (!currentCategory.name.trim()) {
-      wx.showToast({
-        title: '请输入分类名称',
-        icon: 'none'
-      })
+    if (!String(category.name || '').trim()) {
+      showToast(UI.categoryRequired)
       return
     }
 
     try {
-      wx.showLoading({ title: '保存中...' })
-
-      if (editCategoryMode) {
-        // 编辑
-        const { _id, _openid,...updateData } = currentCategory
-        await db.collection('dishCategory').doc(_id).update({
-          data: updateData
-        })
-      } else {
-        // 添加
-        const addRes =         await db.collection('dishCategory').add({
-          data: {
-            name: currentCategory.name,
-            sort: currentCategory.sort,
-            createTime: new Date()
-          }
-        })
-
-        // 添加后自动选中新分类
-        this.setData({
-          currentCategoryId: addRes._id
-        })
-      }
-
+      wx.showLoading({ title: UI.saving })
+      const res = await apiClient.call('admin.category.save', { category })
       wx.hideLoading()
-      wx.showToast({
-        title: '保存成功',
-        icon: 'success'
+      this.setData({
+        showCategoryModal: false,
+        currentCategoryId: res.data && res.data._id ? res.data._id : this.data.currentCategoryId
       })
-
-      this.closeCategoryModal()
-      this.loadCategories()
+      showToast(UI.saved, 'success')
+      await this.loadCategories()
     } catch (err) {
       wx.hideLoading()
-      console.error('保存失败', err)
-      wx.showToast({
-        title: '保存失败',
-        icon: 'none'
-      })
+      console.error('save category failed', err)
+      showToast(err.message || UI.failed)
     }
   },
 
-  // 删除分类
   deleteCategory(e) {
     const category = e.currentTarget.dataset.category
-
     wx.showModal({
-      title: '确认删除',
-      content: `确定要删除分类"${category.name}"吗？`,
-      success: async (res) => {
-        if (res.confirm) {
-          try {
-            wx.showLoading({ title: '删除中...' })
-
-            await db.collection('dishCategory').doc(category._id).remove()
-
-            wx.hideLoading()
-            wx.showToast({
-              title: '删除成功',
-              icon: 'success'
-            })
-
-            // 如果删除的是当前选中的分类，清空选中状态
-            if (this.data.currentCategoryId === category._id) {
-              this.setData({
-                currentCategoryId: '',
-                dishes: []
-              })
-            }
-
-            this.loadCategories()
-          } catch (err) {
-            wx.hideLoading()
-            console.error('删除失败', err)
-            wx.showToast({
-              title: '删除失败',
-              icon: 'none'
-            })
-          }
+      title: UI.confirmDelete,
+      content: UI.confirmDeleteCategory,
+      success: async res => {
+        if (!res.confirm) return
+        try {
+          wx.showLoading({ title: UI.deleting })
+          await apiClient.call('admin.category.delete', { categoryId: category._id })
+          wx.hideLoading()
+          showToast(UI.deleted, 'success')
+          this.setData({ currentCategoryId: '' })
+          await this.loadCategories()
+        } catch (err) {
+          wx.hideLoading()
+          console.error('delete category failed', err)
+          showToast(err.message || UI.failed)
         }
       }
     })
   },
 
-  // ==================== 菜品管理 ====================
-
-  // 加载菜品
-  async loadDishes(append = false) {
-    if (!this.data.currentCategoryId) {
-      this.setData({
-        dishes: []
-      })
-      return
-    }
-
-    try {
-      if (this.data.loadingDishes) {
-        return
-      }
-      this.setData({ loadingDishes: true })
-
-      const pageSize = this.data.dishPageSize
-      const page = append ? this.data.dishPage + 1 : 0
-      const skip = page * pageSize
-
-      const res = await db.collection('dish')
-        .where({
-          categoryId: this.data.currentCategoryId
-        })
-        .orderBy('sort', 'asc')
-        .skip(skip)
-        .limit(pageSize)
-        .get()
-
-      const list = res.data || []
-      const newDishes = append ? this.data.dishes.concat(list) : list
-      const hasMore = list.length === pageSize
-
-      this.setData({
-        dishes: newDishes,
-        dishPage: page,
-        dishHasMore: hasMore
-      })
-    } catch (err) {
-      console.error('加载菜品失败', err)
-      wx.showToast({
-        title: '加载失败',
-        icon: 'none'
-      })
-    } finally {
-      this.setData({ loadingDishes: false })
-    }
-  },
-
-  // 显示添加菜品弹窗
   showAddDishModal() {
-    if (!this.data.currentCategoryId) {
-      wx.showToast({
-        title: '请先选择分类',
-        icon: 'none'
-      })
+    const currentCategory = this.data.categories.find(item => item._id === this.data.currentCategoryId)
+    if (!currentCategory) {
+      showToast(UI.selectCategory)
       return
     }
-
-    const currentCategory = this.data.categories.find(c => c._id === this.data.currentCategoryId)
 
     this.setData({
       showDishModal: true,
       editDishMode: false,
       currentDish: {
-        _id: '',
-        name: '',
-        price: '',
-        originalPrice: '',
-        description: '',
-        categoryId: this.data.currentCategoryId,
-        categoryName: currentCategory ? currentCategory.name : '',
-        image: '',
-        status: 1,
-        sort: this.data.dishes.length,
-        tags: [],
-        canUseMiandan: false // 是否可以参与免单
+        ...DEFAULT_DISH,
+        categoryId: currentCategory._id,
+        categoryName: currentCategory.name,
+        menuType: this.data.currentMenuType,
+        sort: this.data.dishes.length
       }
     })
   },
 
-  // 显示编辑菜品弹窗
   showEditDishModal(e) {
     const dish = e.currentTarget.dataset.dish
     this.setData({
       showDishModal: true,
       editDishMode: true,
-      currentDish: { ...dish }
+      currentDish: { ...DEFAULT_DISH, ...dish }
     })
   },
 
-  // 关闭菜品弹窗
   closeDishModal() {
-    this.setData({
-      showDishModal: false
-    })
+    this.setData({ showDishModal: false })
   },
 
-  // 切换菜品上下架状态
+  onDishInput(e) {
+    const field = e.currentTarget.dataset.field
+    if (!field) return
+    this.setData({ [`currentDish.${field}`]: e.detail.value })
+  },
+
+  onDishStatusChange(e) {
+    this.setData({ 'currentDish.status': e.detail.value ? 1 : 0 })
+  },
+
+  onDishNeedPopupChange(e) {
+    this.setData({ 'currentDish.needPopup': !!e.detail.value })
+  },
+
+  async saveDish() {
+    const dish = {
+      ...this.data.currentDish,
+      menuType: this.data.currentMenuType,
+      categoryId: this.data.currentCategoryId,
+      categoryName: this.getCurrentCategoryName(),
+      price: toNumber(this.data.currentDish.price, -1),
+      originalPrice: toNumber(this.data.currentDish.originalPrice),
+      sort: toNumber(this.data.currentDish.sort)
+    }
+
+    if (!String(dish.name || '').trim()) {
+      showToast(UI.dishRequired)
+      return
+    }
+
+    if (dish.price < 0) {
+      showToast(UI.priceRequired)
+      return
+    }
+
+    try {
+      wx.showLoading({ title: UI.saving })
+      await apiClient.call('admin.dish.save', { dish })
+      wx.hideLoading()
+      this.setData({ showDishModal: false })
+      showToast(UI.saved, 'success')
+      await this.loadDishes()
+    } catch (err) {
+      wx.hideLoading()
+      console.error('save dish failed', err)
+      showToast(err.message || UI.failed)
+    }
+  },
+
   async toggleDishStatus(e) {
     const dish = e.currentTarget.dataset.dish
-    const newStatus = dish.status === 1 ? 0 : 1
-
+    const status = dish.status === 1 ? 0 : 1
     try {
-      await db.collection('dish').doc(dish._id).update({
-        data: {
-          status: newStatus
-        }
+      await apiClient.call('admin.dish.status', {
+        dishId: dish._id,
+        status
       })
-
-      wx.showToast({
-        title: newStatus === 1 ? '已上架' : '已下架',
-        icon: 'success'
-      })
-
-      this.loadDishes()
+      await this.loadDishes()
     } catch (err) {
-      console.error('切换状态失败', err)
-      wx.showToast({
-        title: '操作失败',
-        icon: 'none'
-      })
+      console.error('toggle dish status failed', err)
+      showToast(err.message || UI.failed)
     }
   },
 
-  // 输入菜品名称
-  onDishNameInput(e) {
-    let value = e.detail.value
-    // 限制最多10个字
-    if (value.length > 10) {
-      value = value.substring(0, 10)
-      wx.showToast({
-        title: '名称最多10个字',
-        icon: 'none'
-      })
-    }
-    this.setData({
-      'currentDish.name': value
-    })
-  },
-
-  // 输入菜品价格
-  onDishPriceInput(e) {
-    let value = e.detail.value
-    if (isNaN(value)) {
-      value = ''
-    } else {
-      // 不能为负数，最高10000
-      if (value < 0) {
-        value = 0
-        wx.showToast({
-          title: '价格不能为负数',
-          icon: 'none'
-        })
-      } else if (value > 10000) {
-        value = 10000
-        wx.showToast({
-          title: '价格最高10000',
-          icon: 'none'
-        })
-      }
-    }
-    this.setData({
-      'currentDish.price': value
-    })
-  },
-
-  // 输入菜品原价
-  onDishOriginalPriceInput(e) {
-    let value = e.detail.value
-    if (isNaN(value)) {
-      value = ''
-    } else {
-      // 不能为负数，最高10000
-      if (value < 0) {
-        value = 0
-        wx.showToast({
-          title: '价格不能为负数',
-          icon: 'none'
-        })
-      } else if (value > 10000) {
-        value = 10000
-        wx.showToast({
-          title: '价格最高10000',
-          icon: 'none'
-        })
-      }
-    }
-    this.setData({
-      'currentDish.originalPrice': value
-    })
-  },
-
-  // 输入菜品描述
-  onDishDescriptionInput(e) {
-    let value = e.detail.value
-    // 限制最多10个字
-    if (value.length > 10) {
-      value = value.substring(0, 10)
-      wx.showToast({
-        title: '描述最多10个字',
-        icon: 'none'
-      })
-    }
-    this.setData({
-      'currentDish.description': value
-    })
-  },
-
-  // 输入菜品排序
-  onDishSortInput(e) {
-    this.setData({
-      'currentDish.sort': parseInt(e.detail.value) || 0
-    })
-  },
-
-  // 切换可参与免单
-  onCanUseMiandanChange(e) {
-    this.setData({
-      'currentDish.canUseMiandan': e.detail.value
-    })
-  },
-
-  // 选择菜品图片
-  async chooseDishImage() {
-    try {
-      const res = await wx.chooseImage({
-        count: 1,
-        sizeType: ['compressed'],
-        sourceType: ['album', 'camera']
-      })
-
-      const tempFilePath = res.tempFilePaths[0]
-
-      wx.showLoading({ title: '上传中...' })
-
-      const cloudPath = `dish/${Date.now()}_${Math.random().toString(36).substr(2)}.jpg`
-      const uploadRes = await wx.cloud.uploadFile({
-        cloudPath,
-        filePath: tempFilePath
-      })
-
-      wx.hideLoading()
-
-      this.setData({
-        'currentDish.image': uploadRes.fileID
-      })
-
-      wx.showToast({
-        title: '上传成功',
-        icon: 'success'
-      })
-    } catch (err) {
-      wx.hideLoading()
-      console.error('上传图片失败', err)
-      wx.showToast({
-        title: '上传失败',
-        icon: 'none'
-      })
-    }
-  },
-
-  // 保存菜品
-  async saveDish() {
-    const { editDishMode, currentDish } = this.data
-
-    // 验证必填项：图片
-    if (!currentDish.image || !currentDish.image.trim()) {
-      wx.showToast({
-        title: '请上传菜品图片',
-        icon: 'none'
-      })
-      return
-    }
-
-    // 验证必填项：名称
-    if (!currentDish.name || !currentDish.name.trim()) {
-      wx.showToast({
-        title: '请输入菜品名称',
-        icon: 'none'
-      })
-      return
-    }
-
-    // 验证名称字数（最多10个字）
-    if (currentDish.name.trim().length > 10) {
-      wx.showToast({
-        title: '菜品名称最多10个字',
-        icon: 'none'
-      })
-      return
-    }
-
-    // 验证描述字数（最多10个字）
-    if (currentDish.description && currentDish.description.trim().length > 10) {
-      wx.showToast({
-        title: '菜品描述最多10个字',
-        icon: 'none'
-      })
-      return
-    }
-
-    // 验证必填项：分类
-    if (!currentDish.categoryId) {
-      wx.showToast({
-        title: '请选择分类',
-        icon: 'none'
-      })
-      return
-    }
-
-    // 验证价格：不能为空、不能为负数、最高10000
-    const price = parseFloat(currentDish.price)
-    if (isNaN(price) || price === '' || price === null || price === undefined) {
-      wx.showToast({
-        title: '请输入售价',
-        icon: 'none'
-      })
-      return
-    }
-
-    if (price < 0) {
-      wx.showToast({
-        title: '售价不能为负数',
-        icon: 'none'
-      })
-      return
-    }
-
-    if (price > 10000) {
-      wx.showToast({
-        title: '售价最高10000',
-        icon: 'none'
-      })
-      return
-    }
-
-    // 验证必填项：原价
-    const originalPrice = parseFloat(currentDish.originalPrice)
-    if (isNaN(originalPrice) || originalPrice === '' || originalPrice === null || originalPrice === undefined) {
-      wx.showToast({
-        title: '请输入原价',
-        icon: 'none'
-      })
-      return
-    }
-
-    if (originalPrice < 0) {
-      wx.showToast({
-        title: '原价不能为负数',
-        icon: 'none'
-      })
-      return
-    }
-
-    if (originalPrice > 10000) {
-      wx.showToast({
-        title: '原价最高10000',
-        icon: 'none'
-      })
-      return
-    }
-
-    // 验证原价不能小于售价
-    if (originalPrice < price) {
-      wx.showToast({
-        title: '原价不能小于售价',
-        icon: 'none'
-      })
-      return
-    }
-
-    try {
-      wx.showLoading({ title: '保存中...' })
-      const { _id, _openid, ...updateData } = currentDish
-      // 确保价格和原价是数字类型
-      updateData.price = price
-      updateData.originalPrice = originalPrice
-
-      if (editDishMode) {
-        // 编辑（去掉 _id 和 _openid 等系统字段）
-
-        await db.collection('dish').doc(_id).update({
-          data: updateData
-        })
-      } else {
-        // 添加
-        await db.collection('dish').add({
-          data: {
-            ...updateData,
-            createTime: new Date()
-          }
-        })
-      }
-
-      wx.hideLoading()
-      wx.showToast({
-        title: '保存成功',
-        icon: 'success'
-      })
-
-      this.closeDishModal()
-      this.loadDishes()
-    } catch (err) {
-      wx.hideLoading()
-      console.error('保存失败', err)
-      wx.showToast({
-        title: '保存失败',
-        icon: 'none'
-      })
-    }
-  },
-
-  // 删除菜品
   deleteDish(e) {
     const dish = e.currentTarget.dataset.dish
-
     wx.showModal({
-      title: '确认删除',
-      content: `确定要删除菜品"${dish.name}"吗？`,
-      success: async (res) => {
-        if (res.confirm) {
-          try {
-            wx.showLoading({ title: '删除中...' })
-
-            await db.collection('dish').doc(dish._id).remove()
-
-            wx.hideLoading()
-            wx.showToast({
-              title: '删除成功',
-              icon: 'success'
-            })
-
-            this.loadDishes()
-          } catch (err) {
-            wx.hideLoading()
-            console.error('删除失败', err)
-            wx.showToast({
-              title: '删除失败',
-              icon: 'none'
-            })
-          }
+      title: UI.confirmDelete,
+      content: UI.confirmDeleteDish,
+      success: async res => {
+        if (!res.confirm) return
+        try {
+          wx.showLoading({ title: UI.deleting })
+          await apiClient.call('admin.dish.delete', { dishId: dish._id })
+          wx.hideLoading()
+          showToast(UI.deleted, 'success')
+          await this.loadDishes()
+        } catch (err) {
+          wx.hideLoading()
+          console.error('delete dish failed', err)
+          showToast(err.message || UI.failed)
         }
       }
     })
   },
 
-  // ==================== 标签管理 ====================
-
-  // 显示添加标签弹窗
-  showAddTagModal() {
-    this.setData({
-      showTagModal: true,
-      editingTagIndex: -1,
-      currentTag: {
-        name: '',
-        type: 'single',
-        required: true,
-        options: []
-      },
-      newOption: ''
-    })
+  getCurrentCategoryName() {
+    const category = this.data.categories.find(item => item._id === this.data.currentCategoryId)
+    return category ? category.name : ''
   },
 
-  // 显示编辑标签弹窗
-  showEditTagModal(e) {
-    const index = e.currentTarget.dataset.index
-    const tag = this.data.currentDish.tags[index]
-    this.setData({
-      showTagModal: true,
-      editingTagIndex: index,
-      currentTag: JSON.parse(JSON.stringify(tag)), // 深拷贝
-      newOption: ''
-    })
-  },
-
-  // 关闭标签弹窗
-  closeTagModal() {
-    this.setData({
-      showTagModal: false
-    })
-  },
-
-  // 输入标签名称
-  onTagNameInput(e) {
-    this.setData({
-      'currentTag.name': e.detail.value
-    })
-  },
-
-  // 选择标签类型
-  selectTagType(e) {
-    const type = e.currentTarget.dataset.type
-    this.setData({
-      'currentTag.type': type
-    })
-  },
-
-  // 切换是否必选
-  onTagRequiredChange(e) {
-    this.setData({
-      'currentTag.required': e.detail.value
-    })
-  },
-
-  // 输入新选项
-  onOptionInput(e) {
-    this.setData({
-      newOption: e.detail.value
-    })
-  },
-
-  // 添加选项
-  addOption() {
-    const { currentTag, newOption } = this.data
-    if (!newOption.trim()) {
-      wx.showToast({
-        title: '请输入选项内容',
-        icon: 'none'
-      })
-      return
-    }
-
-    if (currentTag.options.includes(newOption.trim())) {
-      wx.showToast({
-        title: '选项已存在',
-        icon: 'none'
-      })
-      return
-    }
-
-    currentTag.options.push(newOption.trim())
-    this.setData({
-      currentTag,
-      newOption: ''
-    })
-  },
-
-  // 删除选项
-  deleteOption(e) {
-    const index = e.currentTarget.dataset.index
-    const { currentTag } = this.data
-    currentTag.options.splice(index, 1)
-    this.setData({
-      currentTag
-    })
-  },
-
-  // 保存标签
-  saveTag() {
-    const { currentTag, editingTagIndex, currentDish } = this.data
-
-    if (!currentTag.name.trim()) {
-      wx.showToast({
-        title: '请输入标签名称',
-        icon: 'none'
-      })
-      return
-    }
-
-    if (currentTag.options.length === 0) {
-      wx.showToast({
-        title: '请至少添加一个选项',
-        icon: 'none'
-      })
-      return
-    }
-
-    if (editingTagIndex === -1) {
-      // 新增
-      currentDish.tags.push({
-        id: Date.now().toString(),
-        ...currentTag
-      })
-    } else {
-      // 编辑
-      currentDish.tags[editingTagIndex] = {
-        id: currentDish.tags[editingTagIndex].id,
-        ...currentTag
-      }
-    }
-
-    this.setData({
-      currentDish,
-      showTagModal: false
-    })
-  },
-
-  // 删除标签
-  deleteTag(e) {
-    const index = e.currentTarget.dataset.index
-    const { currentDish } = this.data
-
-    wx.showModal({
-      title: '确认删除',
-      content: '确定要删除这个标签吗？',
-      success: (res) => {
-        if (res.confirm) {
-          currentDish.tags.splice(index, 1)
-          this.setData({
-            currentDish
-          })
-        }
-      }
-    })
-  },
-
-  // 阻止冒泡
   stopPropagation() {}
 })

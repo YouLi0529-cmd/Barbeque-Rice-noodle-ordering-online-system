@@ -1,270 +1,284 @@
-﻿/* pages/admin/printer/printer.wxss */
-.page {
+.admin-simple-page {
   min-height: 100vh;
-  background: #f5f5f5;
-  padding: 20rpx;
-  padding-bottom: 40rpx;
+  background: #FFF7EC;
+  color: #3A2418;
+  box-sizing: border-box;
 }
 
-/* 打印机信息卡片 */
-.printer-card {
-  background: white;
-  border-radius: 20rpx;
-  padding: 30rpx;
-  margin-bottom: 20rpx;
-  box-shadow: 0 4rpx 20rpx rgba(0, 0, 0, 0.08);
+.admin-simple-header {
+  padding: 28rpx 24rpx 22rpx;
+  background: #1E1714;
+  color: #FFF7EC;
 }
 
-.card-header {
+.admin-simple-title {
+  font-size: 38rpx;
+  font-weight: 900;
+}
+
+.admin-simple-actions {
   display: flex;
-  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+
+.header-btn {
+  min-width: 128rpx;
+  height: 58rpx;
+  line-height: 58rpx;
+  text-align: center;
+  border-radius: 999rpx;
+  color: rgba(255, 247, 236, 0.86);
+  background: rgba(255, 247, 236, 0.12);
+  font-size: 25rpx;
+  font-weight: 900;
+}
+
+.header-btn.primary {
+  color: #3A2418;
+  background: #F1C46B;
+}
+
+.search-row {
+  display: flex;
   align-items: center;
-  margin-bottom: 30rpx;
-  padding-bottom: 20rpx;
-  border-bottom: 1rpx solid #f5f5f5;
+  gap: 14rpx;
+  padding: 20rpx 24rpx 0;
 }
 
-.printer-name {
-  font-size: 36rpx;
-  font-weight: bold;
-  color: #333;
+.search-input {
+  flex: 1;
+  height: 70rpx;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  background: #FFFFFF;
+  font-size: 25rpx;
+  box-sizing: border-box;
 }
 
-.printer-status {
-  padding: 8rpx 20rpx;
-  border-radius: 20rpx;
+.search-btn,
+.clear-btn {
+  height: 70rpx;
+  line-height: 70rpx;
+  text-align: center;
+  border-radius: 999rpx;
   font-size: 24rpx;
-  font-weight: 500;
+  font-weight: 900;
 }
 
-.printer-status.online {
-  background: rgba(7, 193, 96, 0.1);
-  color: #07c160;
+.search-btn {
+  width: 110rpx;
+  color: #3A2418;
+  background: #F1C46B;
 }
 
-.printer-status.offline {
-  background: rgba(153, 153, 153, 0.1);
-  color: #999;
+.clear-btn {
+  width: 70rpx;
+  color: rgba(58, 36, 24, 0.58);
+  background: #FFF1DC;
 }
 
-.card-content {
-  margin-bottom: 30rpx;
+.admin-list {
+  height: calc(100vh - 190rpx);
+  padding: 22rpx 24rpx 38rpx;
+  box-sizing: border-box;
 }
 
-.info-item {
+.admin-card {
+  margin-bottom: 18rpx;
+  padding: 24rpx;
+  border-radius: 18rpx;
+  background: #FFFFFF;
+  box-shadow: 0 10rpx 26rpx rgba(58, 36, 24, 0.08);
+}
+
+.card-head {
   display: flex;
-  align-items: center;
-  margin-bottom: 20rpx;
-  font-size: 28rpx;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18rpx;
 }
 
-.info-item:last-child {
-  margin-bottom: 0;
+.card-title {
+  flex: 1;
+  min-width: 0;
+  color: #2C1A12;
+  font-size: 30rpx;
+  font-weight: 900;
+  line-height: 1.35;
+  word-break: break-all;
 }
 
-.info-label {
-  color: #666;
-  min-width: 160rpx;
+.card-status {
+  max-width: 180rpx;
+  padding: 6rpx 14rpx;
+  border-radius: 999rpx;
+  color: #9A642A;
+  background: #FFF1DC;
+  font-size: 21rpx;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.info-value {
-  color: #333;
-  font-weight: 500;
+.card-subtitle {
+  margin-top: 8rpx;
+  color: rgba(58, 36, 24, 0.56);
+  font-size: 24rpx;
+}
+
+.line-row {
+  display: flex;
+  gap: 18rpx;
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
+.line-label {
+  width: 150rpx;
+  flex-shrink: 0;
+  color: rgba(58, 36, 24, 0.5);
+}
+
+.line-value {
+  flex: 1;
+  color: rgba(58, 36, 24, 0.82);
+  word-break: break-all;
 }
 
 .card-actions {
   display: flex;
-  gap: 20rpx;
-  padding-top: 20rpx;
-  border-top: 1rpx solid #f5f5f5;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 20rpx;
 }
 
-.action-btn {
-  flex: 1;
-  padding: 20rpx;
-  border-radius: 10rpx;
+.mini-btn {
+  min-width: 112rpx;
+  height: 52rpx;
+  line-height: 52rpx;
   text-align: center;
-  font-size: 28rpx;
-  font-weight: 500;
+  border-radius: 999rpx;
+  color: #9A642A;
+  background: #FFF1DC;
+  font-size: 23rpx;
+  font-weight: 900;
 }
 
-.action-btn.test {
-  background: linear-gradient(135deg, #07c160 0%, #39b54a 100%);
-  color: white;
-}
-
-.action-btn.query {
-  background: linear-gradient(135deg, #1989fa 0%, #2d8cf0 100%);
-  color: white;
-}
-
-.action-btn.delete {
-  background: rgba(245, 108, 108, 0.1);
-  color: #f56c6c;
-  border: 1rpx solid #f56c6c;
-}
-
-/* 空状态 */
-.empty-state {
-  background: white;
-  border-radius: 20rpx;
-  padding: 100rpx 40rpx;
-  text-align: center;
-  margin-bottom: 20rpx;
-}
-
-.empty-icon {
-  font-size: 120rpx;
-  margin-bottom: 30rpx;
+.mini-btn.danger {
+  color: #C04B36;
 }
 
 .empty-text {
-  font-size: 32rpx;
-  color: #999;
-  margin-bottom: 40rpx;
-}
-
-.bind-btn {
-  display: inline-block;
-  padding: 24rpx 60rpx;
-  background: linear-gradient(135deg, #ff9800 0%, #ff6d00 100%);
-  color: white;
-  border-radius: 50rpx;
-  font-size: 32rpx;
-  font-weight: bold;
-}
-
-/* 设置区域 */
-.settings-section {
-  background: white;
-  border-radius: 20rpx;
-  padding: 30rpx;
-}
-
-.section-title {
-  font-size: 32rpx;
-  font-weight: bold;
-  color: #333;
-  margin-bottom: 30rpx;
-  padding-bottom: 20rpx;
-  border-bottom: 1rpx solid #f5f5f5;
-}
-
-.setting-item {
-  margin-bottom: 40rpx;
-}
-
-.setting-item:last-child {
-  margin-bottom: 0;
-}
-
-.setting-label {
-  font-size: 28rpx;
-  color: #333;
-  margin-bottom: 20rpx;
-  font-weight: 500;
-}
-
-.setting-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 15rpx;
-}
-
-.option-btn {
-  padding: 16rpx 32rpx;
-  border: 2rpx solid #e5e5e5;
-  border-radius: 50rpx;
+  padding: 120rpx 20rpx;
+  color: rgba(58, 36, 24, 0.46);
+  text-align: center;
   font-size: 26rpx;
-  color: #666;
-  background: white;
-  transition: all 0.3s;
 }
 
-.option-btn.active {
-  background: linear-gradient(135deg, #ff9800 0%, #ff6d00 100%);
-  color: white;
-  border-color: transparent;
-}
-
-/* 弹窗样式 */
 .modal-mask {
   position: fixed;
-  top: 0;
   left: 0;
   right: 0;
+  top: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  padding: 40rpx;
+  background: rgba(0, 0, 0, 0.45);
+  box-sizing: border-box;
 }
 
 .modal-dialog {
-  width: 600rpx;
-  background: white;
-  border-radius: 20rpx;
+  width: 100%;
+  max-height: 88vh;
   overflow: hidden;
+  border-radius: 24rpx;
+  background: #FFF7EC;
 }
 
 .modal-title {
-  padding: 40rpx 30rpx 20rpx;
-  text-align: center;
-  font-size: 36rpx;
-  font-weight: bold;
-  color: #333;
+  padding: 28rpx 30rpx 18rpx;
+  color: #2C1A12;
+  font-size: 32rpx;
+  font-weight: 900;
 }
 
 .modal-content {
-  padding: 20rpx 30rpx 40rpx;
+  max-height: 62vh;
+  padding: 0 30rpx 22rpx;
+  box-sizing: border-box;
 }
 
 .form-item {
-  margin-bottom: 30rpx;
-}
-
-.form-item:last-child {
-  margin-bottom: 0;
+  margin-top: 20rpx;
 }
 
 .form-label {
-  font-size: 28rpx;
-  color: #333;
-  margin-bottom: 15rpx;
-  display: block;
+  margin-bottom: 10rpx;
+  color: rgba(58, 36, 24, 0.72);
+  font-size: 24rpx;
+  font-weight: 900;
+}
+
+.form-input,
+.form-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 14rpx;
+  background: #FFFFFF;
+  color: #2C1A12;
+  font-size: 26rpx;
 }
 
 .form-input {
-  width: 100%;
-  height: 80rpx;
-  border: 2rpx solid #e5e5e5;
-  border-radius: 10rpx;
+  height: 72rpx;
   padding: 0 20rpx;
-  font-size: 28rpx;
+}
+
+.form-textarea {
+  min-height: 140rpx;
+  padding: 18rpx 20rpx;
+}
+
+.switch-row {
+  height: 76rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18rpx;
+  border-radius: 14rpx;
+  background: #FFFFFF;
   box-sizing: border-box;
 }
 
 .modal-footer {
   display: flex;
-  border-top: 2rpx solid #e5e5e5;
+  gap: 18rpx;
+  padding: 22rpx 30rpx 30rpx;
+  border-top: 1rpx solid rgba(58, 36, 24, 0.08);
 }
 
 .modal-btn {
   flex: 1;
-  height: 100rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32rpx;
+  height: 78rpx;
+  line-height: 78rpx;
+  text-align: center;
+  border-radius: 999rpx;
+  font-size: 27rpx;
+  font-weight: 900;
 }
 
 .modal-btn.cancel {
-  color: #999;
-  border-right: 2rpx solid #e5e5e5;
+  color: #7A6659;
+  background: #FFFFFF;
 }
 
 .modal-btn.confirm {
-  color: #ff9800;
-  font-weight: bold;
+  color: #3A2418;
+  background: #F1C46B;
 }
