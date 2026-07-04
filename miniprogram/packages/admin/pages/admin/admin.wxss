@@ -25,6 +25,10 @@
   background: rgba(255, 247, 236, 0.15);
 }
 
+.admin-watermark {
+  display: none;
+}
+
 .admin-body {
   position: relative;
   z-index: 1;
@@ -230,4 +234,115 @@
 
 .modal-btn.confirm {
   color: #C9341C;
+}
+
+@media (orientation: landscape) {
+  page {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: #FFF7EC;
+  }
+
+  .admin-page {
+    width: 100vw;
+    height: 100vh;
+    min-height: 100vh;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
+  .admin-page-shade {
+    display: none;
+  }
+
+  .admin-hero {
+    display: none;
+  }
+
+  .admin-watermark {
+    position: fixed;
+    top: 22rpx;
+    right: 30rpx;
+    z-index: 5;
+    display: block;
+    padding: 8rpx 18rpx;
+    border-radius: 999rpx;
+    color: rgba(58, 36, 24, 0.34);
+    background: rgba(255, 242, 221, 0.72);
+    font-size: 22rpx;
+    font-weight: 900;
+    pointer-events: none;
+  }
+
+  .admin-body {
+    height: 100vh;
+    min-height: 0;
+    padding: 42rpx 34rpx 28rpx;
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+
+  .menu-section {
+    margin-bottom: 24rpx;
+  }
+
+  .section-title {
+    margin-bottom: 14rpx;
+    font-size: 27rpx;
+    font-weight: 900;
+  }
+
+  .admin-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16rpx;
+  }
+
+  .admin-menu-card {
+    min-height: 122rpx;
+    padding: 20rpx 22rpx;
+    border-radius: 18rpx;
+  }
+
+  .card-title {
+    font-size: 28rpx;
+    line-height: 1.2;
+  }
+
+  .card-desc {
+    margin-top: 8rpx;
+    font-size: 21rpx;
+    line-height: 1.34;
+  }
+
+  .bottom-actions {
+    margin-top: 18rpx;
+    max-width: 520rpx;
+  }
+
+  .ghost-action {
+    height: 66rpx;
+    line-height: 66rpx;
+    font-size: 24rpx;
+  }
+
+  .modal-dialog {
+    width: 560rpx;
+    max-width: 60vw;
+  }
+
+  .modal-title {
+    padding-top: 28rpx;
+    font-size: 30rpx;
+  }
+
+  .password-input {
+    height: 70rpx;
+    font-size: 25rpx;
+  }
+
+  .modal-btn {
+    height: 78rpx;
+    font-size: 27rpx;
+  }
 }

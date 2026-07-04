@@ -1,6 +1,7 @@
 <!-- packages/admin/pages/admin/admin.wxml -->
 <view class="admin-page">
   <view class="admin-page-shade"></view>
+  <view class="admin-watermark">{{ui.heroTitle}}</view>
 
   <view class="admin-hero">
     <view class="admin-hero-shade"></view>

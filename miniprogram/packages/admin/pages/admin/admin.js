@@ -5,8 +5,8 @@ const ADMIN_ROOT = '/packages/admin/pages/admin'
 const ADMIN_TEXT = {
   heroTitle: '\u5f20\u5357\u70e4\u8089\u540e\u53f0',
   coreSection: '\u6838\u5fc3\u4e1a\u52a1',
-  orderTitle: '\u8ba2\u5355\u7ba1\u7406',
-  orderDesc: '\u67e5\u770b\u548c\u5904\u7406\u8ba2\u5355',
+  orderTitle: '\u684c\u53f0\u7ba1\u7406',
+  orderDesc: '\u67e5\u770b\u684c\u53f0\u72b6\u6001\u548c\u5f53\u524d\u8d26\u5355',
   dishTitle: '\u83dc\u54c1\u7ba1\u7406',
   dishDesc: '\u5206\u7c7b\u3001\u83dc\u54c1\u3001\u4e0a\u4e0b\u67b6',
   queueTitle: '\u6392\u961f\u7ba1\u7406',
@@ -163,7 +163,7 @@ Page({
   },
 
   goToOrder() {
-    wx.navigateTo({ url: `${ADMIN_ROOT}/order/order` })
+    wx.navigateTo({ url: `${ADMIN_ROOT}/table/table` })
   },
 
   goToQueue() {

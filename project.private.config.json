@@ -22,35 +22,35 @@
     "miniprogram": {
       "list": [
         {
-          "name": "\u5546\u6237\u540e\u53f0\u5165\u53e3",
-          "pathName": "packages/admin/pages/admin/admin",
-          "query": "",
-          "scene": null,
-          "launchMode": "default"
-        },
-        {
-          "name": "\u7528\u6237\u7aef\u9996\u9875",
+          "name": "用户端首页",
           "pathName": "pages/covertest/covertest",
-          "query": "",
-          "scene": null,
-          "launchMode": "default"
-        },
-        {
-          "name": "\u5802\u98df\u626b\u7801\u70b9\u5355",
-          "pathName": "packages/order/pages/index/index",
           "query": "scene=01",
           "scene": null,
           "launchMode": "default"
         },
         {
-          "name": "\u9732\u8425\u70b9\u5355",
-          "pathName": "packages/camping/pages/campingorderfood/campingorderfood",
+          "name": "商户后台入口",
+          "pathName": "packages/admin/pages/admin/admin",
           "query": "",
-          "scene": null,
-          "launchMode": "default"
+          "launchMode": "default",
+          "scene": null
         },
         {
-          "name": "\u7528\u6237\u8ba2\u5355",
+          "name": "堂食扫码点单",
+          "pathName": "packages/order/pages/index/index",
+          "query": "scene=01",
+          "launchMode": "default",
+          "scene": null
+        },
+        {
+          "name": "露营点单",
+          "pathName": "packages/camping/pages/campingorderfood/campingorderfood",
+          "query": "",
+          "launchMode": "default",
+          "scene": null
+        },
+        {
+          "name": "用户订单",
           "pathName": "packages/user/pages/myorder/myorder",
           "query": "",
           "launchMode": "default",

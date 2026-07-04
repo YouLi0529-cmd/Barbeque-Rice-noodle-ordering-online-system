@@ -1,0 +1,135 @@
+<!-- packages/admin/pages/admin/tableDetail/tableDetail.wxml -->
+<view class="detail-page">
+  <view class="main-layout">
+    <view class="bill-shell">
+      <view class="order-panel">
+        <view class="bill-top">
+          <view class="bill-title-row">
+            <view class="panel-title">{{ui.pageTitle}}</view>
+            <view class="status-pill {{table.statusClass}}">{{table.statusText}}</view>
+          </view>
+          <view class="table-meta-row">
+            <text class="meta-strong">{{table.areaName}}{{table.tableNumber}}{{ui.tableUnit}}</text>
+            <text>{{ui.people}} {{table.peopleText}}</text>
+            <text class="modify-hint" bindtap="editPeople">{{ui.modifyPeople}}</text>
+            <text>{{ui.diningTime}} {{table.diningTimeText}}</text>
+            <text class="meta-price">{{ui.moneySymbol}}{{totalPriceText}}</text>
+          </view>
+        </view>
+
+        <view class="empty-bill" wx:if="{{loading}}">
+          <view class="empty-title">{{ui.loading}}</view>
+        </view>
+
+        <view class="empty-bill" wx:elif="{{!billGroups.length}}">
+          <view class="empty-title">{{ui.emptyBill}}</view>
+          <view class="empty-tip">{{ui.emptyTip}}</view>
+        </view>
+
+        <scroll-view class="bill-groups" scroll-y wx:else>
+          <view class="bill-group" wx:for="{{billGroups}}" wx:key="id">
+            <view class="bill-group-head">
+              <view>
+                <view class="bill-group-title">{{item.title}}</view>
+                <view class="bill-group-meta">{{item.statusText}}</view>
+              </view>
+              <view class="bill-group-price">{{ui.moneySymbol}}{{item.finalPriceText}}</view>
+            </view>
+
+            <view
+              class="dish-row {{selectedDishRowId === dish.rowId ? 'dish-row-active' : ''}}"
+              wx:for="{{item.goods}}"
+              wx:for-item="dish"
+              wx:key="rowId"
+              data-row-id="{{dish.rowId}}"
+              data-dish-name="{{dish.dishName}}"
+              data-group-id="{{item.id}}"
+              bindtap="selectDish"
+            >
+              <view class="dish-main">
+                <view class="dish-name">{{dish.dishName}}</view>
+                <view class="dish-tags" wx:if="{{dish.tagText}}">{{dish.tagText}}</view>
+              </view>
+              <view class="dish-count">x{{dish.count}}</view>
+              <view class="dish-price">{{ui.moneySymbol}}{{dish.subtotalText}}</view>
+            </view>
+          </view>
+        </scroll-view>
+
+        <view class="bill-total">
+          <view class="mini-back" bindtap="goBack">{{ui.back}}</view>
+          <view class="total-area">
+            <text>{{ui.total}}</text>
+            <text class="total-price">{{ui.moneySymbol}}{{totalPriceText}}</text>
+          </view>
+          <view class="mini-refresh" bindtap="loadDetail">{{ui.refresh}}</view>
+        </view>
+      </view>
+
+      <view class="dish-action-strip">
+        <view class="strip-title">{{ui.dishActions}}</view>
+        <view
+          class="operation-btn"
+          wx:for="{{dishActions}}"
+          wx:key="*this"
+          data-action="{{item}}"
+          bindtap="handleDishAction"
+        >
+          {{item}}
+        </view>
+      </view>
+    </view>
+
+    <view class="pay-panel">
+      <view class="panel-title">{{ui.payTitle}}</view>
+
+      <view class="pay-section">
+        <view class="pay-section-title">{{ui.discountTitle}}</view>
+        <view class="option-row">
+          <view
+            class="pay-option {{discountType === item.value ? 'pay-option-active' : ''}}"
+            wx:for="{{discountOptions}}"
+            wx:key="value"
+            data-value="{{item.value}}"
+            bindtap="selectDiscount"
+          >
+            {{item.label}}
+          </view>
+        </view>
+      </view>
+
+      <view class="pay-section">
+        <view class="pay-section-title">{{ui.paymentTitle}}</view>
+        <view class="option-row">
+          <view
+            class="pay-option {{paymentMethod === item.value ? 'pay-option-active' : ''}}"
+            wx:for="{{paymentOptions}}"
+            wx:key="value"
+            data-value="{{item.value}}"
+            bindtap="selectPayment"
+          >
+            {{item.label}}
+          </view>
+        </view>
+      </view>
+
+      <view class="summary-card">
+        <view class="summary-title">{{ui.billSummary}}</view>
+        <view class="summary-row">
+          <text>{{ui.priceTotal}}</text>
+          <text>{{ui.moneySymbol}}{{paySummary.totalText}}</text>
+        </view>
+        <view class="summary-row strong-row">
+          <text>{{ui.receivable}}</text>
+          <text>{{ui.moneySymbol}}{{paySummary.receivableText}}</text>
+        </view>
+        <view class="summary-row">
+          <text>{{paySummary.paymentLabel}}</text>
+          <text>{{ui.actualReceived}}{{ui.moneySymbol}}{{paySummary.receivedText}}</text>
+        </view>
+      </view>
+
+      <button class="checkout-btn" bindtap="finishCheckout">{{ui.finishCheckout}}</button>
+    </view>
+  </view>
+</view>

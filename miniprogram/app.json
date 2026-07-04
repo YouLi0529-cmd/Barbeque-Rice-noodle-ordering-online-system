@@ -29,6 +29,8 @@
       "root": "packages/admin",
       "pages": [
         "pages/admin/admin",
+        "pages/admin/table/table",
+        "pages/admin/tableDetail/tableDetail",
         "pages/admin/order/order",
         "pages/admin/queue/queue",
         "pages/admin/reservation/reservation",

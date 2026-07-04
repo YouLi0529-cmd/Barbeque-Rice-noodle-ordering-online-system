@@ -1,0 +1,54 @@
+<!-- packages/admin/pages/admin/table/table.wxml -->
+<view class="table-page">
+  <scroll-view class="table-board" scroll-y>
+    <view class="table-section" wx:for="{{tableSections}}" wx:for-item="section" wx:key="areaKey">
+      <view class="section-title">{{section.areaName}}</view>
+      <view class="table-section-body">
+        <view
+          class="table-card {{table.statusClass}}"
+          wx:for="{{section.tables}}"
+          wx:for-item="table"
+          wx:key="tableKey"
+          bindtap="openTable"
+          data-area-key="{{table.areaKey}}"
+          data-area="{{section.areaName}}"
+          data-table="{{table.tableNumber}}"
+          data-table-key="{{table.tableKey}}"
+          data-status="{{table.status}}"
+          data-price="{{table.totalPrice}}"
+          data-people="{{table.peopleCount}}"
+          data-max="{{table.maxPeople}}"
+          data-scanned="{{table.scannedAt}}">
+          <view class="table-card-head">
+            <view class="table-name">
+              <text class="table-number">{{table.tableNumber}}</text>
+              <text class="table-unit">{{ui.tableUnit}}</text>
+            </view>
+          </view>
+
+          <view class="price-line">
+            <text class="money-icon">{{ui.moneySymbol}}</text>
+            <text class="price-value">{{table.priceText}}</text>
+          </view>
+
+          <view class="compact-line people-line">
+            <view class="info-icon people-icon"></view>
+            <text class="line-value">{{table.peopleText}}</text>
+          </view>
+
+          <view class="compact-line time-line">
+            <view class="info-icon time-icon"></view>
+            <text class="line-value">{{table.diningTimeText}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </scroll-view>
+
+  <view class="legend-footer">
+    <view class="legend-item" wx:for="{{legends}}" wx:key="key">
+      <view class="legend-dot {{item.className}}"></view>
+      <text>{{item.text}}</text>
+    </view>
+  </view>
+</view>

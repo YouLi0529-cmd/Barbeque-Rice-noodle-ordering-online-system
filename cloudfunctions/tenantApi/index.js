@@ -863,6 +863,392 @@ async function cancelUserOrder(payload) {
   }
 }
 
+const ADMIN_TABLE_SECTIONS = [
+  {
+    areaKey: 'normal',
+    areaName: '普通',
+    maxPeople: 4,
+    count: 15
+  },
+  {
+    areaKey: 'vip',
+    areaName: 'VIP',
+    maxPeople: 8,
+    count: 5
+  },
+  {
+    areaKey: 'sky',
+    areaName: '天楼',
+    maxPeople: 4,
+    count: 13
+  }
+]
+
+function padTableNumber(value) {
+  const text = String(value || '').trim()
+  const match = text.match(/\d+/)
+  if (!match) return ''
+  return String(Number(match[0]) || 0).padStart(2, '0')
+}
+
+function createAdminTableSections() {
+  return ADMIN_TABLE_SECTIONS.map(section => ({
+    areaKey: section.areaKey,
+    areaName: section.areaName,
+    tables: Array.from({ length: section.count }, (_, index) => {
+      const tableNumber = String(index + 1).padStart(2, '0')
+      return {
+        tableKey: `${section.areaKey}-${tableNumber}`,
+        areaKey: section.areaKey,
+        areaName: section.areaName,
+        tableNumber,
+        status: 'empty',
+        totalPrice: 0,
+        peopleCount: 0,
+        maxPeople: section.maxPeople,
+        scannedAt: 0,
+        orderCount: 0,
+        itemCount: 0,
+        rootOrderIds: []
+      }
+    })
+  }))
+}
+
+function getAdminTableMap(sections) {
+  const map = {}
+  sections.forEach(section => {
+    ;(section.tables || []).forEach(table => {
+      map[table.tableKey] = table
+    })
+  })
+  return map
+}
+
+function parseAdminTableNumber(tableNumber) {
+  const raw = String(tableNumber || '').trim()
+  const upper = raw.toUpperCase()
+  const number = padTableNumber(raw)
+  if (!number) return null
+
+  let areaKey = 'normal'
+  if (/^(VIP|V)[-\s_]?\d+/i.test(raw)) {
+    areaKey = 'vip'
+  } else if (/^(T|SKY|TIAN|TL|天楼)[-\s_]?\d+/i.test(raw) || raw.indexOf('天楼') >= 0) {
+    areaKey = 'sky'
+  } else if (upper.indexOf('VIP') >= 0) {
+    areaKey = 'vip'
+  }
+
+  const section = ADMIN_TABLE_SECTIONS.find(item => item.areaKey === areaKey)
+  if (!section || Number(number) < 1 || Number(number) > section.count) {
+    return null
+  }
+
+  return {
+    areaKey,
+    tableNumber: number,
+    tableKey: `${areaKey}-${number}`
+  }
+}
+
+function getAdminTableNumberCandidates(areaKey, tableNumber) {
+  const number = padTableNumber(tableNumber)
+  if (!number) return []
+
+  const shortNumber = String(Number(number))
+  const base = [number, shortNumber]
+  if (areaKey === 'vip') {
+    return base.concat([
+      `VIP${number}`,
+      `VIP${shortNumber}`,
+      `VIP-${number}`,
+      `VIP ${number}`,
+      `V${number}`,
+      `V${shortNumber}`
+    ])
+  }
+  if (areaKey === 'sky') {
+    return base.concat([
+      `天楼${number}`,
+      `天楼${shortNumber}`,
+      `T${number}`,
+      `T${shortNumber}`,
+      `T-${number}`,
+      `SKY${number}`,
+      `SKY${shortNumber}`
+    ])
+  }
+  return base.concat([
+    `普通${number}`,
+    `普通${shortNumber}`,
+    `N${number}`,
+    `N${shortNumber}`
+  ])
+}
+
+function isAdminTableOrder(order) {
+  if (!order || order.type !== 'order') return false
+  if (order.deleted === true) return false
+  if (isExpiredSavedOrder(order)) return false
+  if (order.orderScene === 'camping' || order.orderType === 'camping') return false
+  if (!order.tableNumber) return false
+
+  const status = String(order.status || '')
+  if (status === 'cancelled' || status === '3') return false
+  return true
+}
+
+function isAdminPaidOrder(order) {
+  const status = String(order && order.status || '')
+  return order && (
+    order.pay_status === true ||
+    order.payStatus === true ||
+    status === 'paid' ||
+    status === 'completed'
+  )
+}
+
+function isAdminPreparingOrder(order) {
+  const status = String(order && order.status || '')
+  return order && (
+    order.frontDeskConfirmed === true ||
+    order.kitchenPrinted === true ||
+    status === 'pending_prepare' ||
+    status === 'preparing' ||
+    status === 'served' ||
+    status === 'ready_pickup' ||
+    status === 'picked_up'
+  )
+}
+
+function getAdminTableStatus(orders) {
+  if (!orders || orders.length === 0) return 'empty'
+  if (orders.some(isAdminPreparingOrder)) return 'preparing'
+  if (orders.some(order => !isAdminPaidOrder(order))) return 'submitted'
+  return 'paid'
+}
+
+function getOrderGoodsCount(order) {
+  return (Array.isArray(order.goods) ? order.goods : []).reduce((sum, item) => {
+    return sum + (Number(item.count) || 0)
+  }, 0)
+}
+
+function summarizeAdminTable(table, orders) {
+  const activeOrders = (orders || []).filter(isAdminTableOrder)
+  const rootOrderIds = []
+  const userIds = []
+  let totalPrice = 0
+  let itemCount = 0
+  let scannedAt = 0
+  let peopleCount = 0
+
+  activeOrders.forEach(order => {
+    const rootOrderId = order.rootOrderId || order._id
+    if (rootOrderId && rootOrderIds.indexOf(rootOrderId) === -1) {
+      rootOrderIds.push(rootOrderId)
+    }
+    const userId = order.userId || order._openid || ''
+    if (userId && userIds.indexOf(userId) === -1) {
+      userIds.push(userId)
+    }
+    totalPrice = roundMoney(totalPrice + Number(order.finalPrice || order.totalPrice || 0))
+    itemCount += getOrderGoodsCount(order)
+
+    const createTime = getTimeValue(order.createTime)
+    if (createTime && (!scannedAt || createTime < scannedAt)) {
+      scannedAt = createTime
+    }
+
+    peopleCount = Math.max(peopleCount, Number(order.peopleCount || 0))
+  })
+
+  if (!peopleCount && activeOrders.length > 0) {
+    peopleCount = Math.max(1, userIds.length)
+  }
+
+  return {
+    ...table,
+    status: getAdminTableStatus(activeOrders),
+    totalPrice,
+    peopleCount,
+    scannedAt,
+    orderCount: activeOrders.length,
+    itemCount,
+    rootOrderIds
+  }
+}
+
+function buildAdminTableSections(orders) {
+  const sections = createAdminTableSections()
+  const tableMap = getAdminTableMap(sections)
+  const ordersByTable = {}
+
+  ;(orders || []).filter(isAdminTableOrder).forEach(order => {
+    const parsed = parseAdminTableNumber(order.tableNumber)
+    if (!parsed || !tableMap[parsed.tableKey]) return
+    if (!ordersByTable[parsed.tableKey]) ordersByTable[parsed.tableKey] = []
+    ordersByTable[parsed.tableKey].push(order)
+  })
+
+  sections.forEach(section => {
+    section.tables = section.tables.map(table => {
+      return summarizeAdminTable(table, ordersByTable[table.tableKey] || [])
+    })
+  })
+
+  return sections
+}
+
+function getAdminOrderStatusText(order) {
+  if (isAdminPreparingOrder(order)) return '制作中'
+  if (isAdminPaidOrder(order)) return '已支付'
+  return '已提交'
+}
+
+function formatAdminGoods(goods) {
+  return (Array.isArray(goods) ? goods : []).map(item => {
+    const count = Number(item.count || 0)
+    const subtotal = roundMoney(item.subtotal !== undefined
+      ? item.subtotal
+      : Number(item.price || 0) * count)
+    const tags = normalizeTags(item.tags)
+    return {
+      dishId: item.dishId || '',
+      dishName: item.dishName || item.name || '',
+      dishImage: item.dishImage || item.image || '',
+      price: roundMoney(item.price || 0),
+      count,
+      subtotal,
+      subtotalText: String(subtotal),
+      tags,
+      tagText: tags.join('、')
+    }
+  })
+}
+
+function buildAdminBillGroups(orders) {
+  return (orders || []).filter(isAdminTableOrder).map((order, index) => {
+    const goods = formatAdminGoods(order.goods)
+    const finalPrice = roundMoney(order.finalPrice || order.totalPrice || 0)
+    return {
+      id: order._id,
+      orderId: order._id,
+      rootOrderId: order.rootOrderId || order._id,
+      title: order.orderCardTitle || (order.isAddOnOrder ? `加菜单${order.addOnIndex || index}` : '第一单'),
+      status: order.status || '',
+      statusText: getAdminOrderStatusText(order),
+      createTime: order.createTime,
+      createTimeValue: getTimeValue(order.createTime),
+      userCode: order.userCode || '',
+      userNickName: order.userNickName || order.userSnapshot && order.userSnapshot.nickName || '',
+      userPhone: order.userPhone || order.userSnapshot && order.userSnapshot.phoneNumber || '',
+      goods,
+      goodsCount: goods.reduce((sum, item) => sum + (Number(item.count) || 0), 0),
+      finalPrice,
+      finalPriceText: String(finalPrice),
+      kitchenPrinted: order.kitchenPrinted === true,
+      frontDeskConfirmed: order.frontDeskConfirmed === true
+    }
+  })
+}
+
+async function adminListTables() {
+  const res = await db.collection('order')
+    .where({
+      type: 'order'
+    })
+    .orderBy('createTime', 'desc')
+    .limit(300)
+    .get()
+
+  return {
+    success: true,
+    data: {
+      sections: buildAdminTableSections(res.data || [])
+    }
+  }
+}
+
+async function getAdminTableOrders(payload) {
+  const areaKey = String(payload.areaKey || 'normal').trim() || 'normal'
+  const tableNumber = padTableNumber(payload.tableNumber)
+  const candidates = getAdminTableNumberCandidates(areaKey, tableNumber)
+  if (!tableNumber || candidates.length === 0) return []
+
+  const res = await db.collection('order')
+    .where({
+      type: 'order',
+      tableNumber: _.in(candidates)
+    })
+    .orderBy('createTime', 'asc')
+    .limit(100)
+    .get()
+
+  return (res.data || []).filter(order => {
+    if (!isAdminTableOrder(order)) return false
+    const parsed = parseAdminTableNumber(order.tableNumber)
+    return parsed && parsed.areaKey === areaKey && parsed.tableNumber === tableNumber
+  })
+}
+
+async function adminGetTableDetail(payload) {
+  const areaKey = String(payload.areaKey || 'normal').trim() || 'normal'
+  const tableNumber = padTableNumber(payload.tableNumber)
+  const section = ADMIN_TABLE_SECTIONS.find(item => item.areaKey === areaKey) || ADMIN_TABLE_SECTIONS[0]
+  const baseTable = createAdminTableSections()
+    .find(item => item.areaKey === section.areaKey)
+    .tables
+    .find(item => item.tableNumber === tableNumber)
+
+  if (!baseTable) {
+    return {
+      success: false,
+      code: 'TABLE_NOT_FOUND',
+      message: 'table not found'
+    }
+  }
+
+  const orders = await getAdminTableOrders({ areaKey, tableNumber })
+  const table = summarizeAdminTable(baseTable, orders)
+  const billGroups = buildAdminBillGroups(orders)
+  const totalPrice = roundMoney(billGroups.reduce((sum, group) => sum + Number(group.finalPrice || 0), 0))
+  const itemCount = billGroups.reduce((sum, group) => sum + Number(group.goodsCount || 0), 0)
+
+  return {
+    success: true,
+    data: {
+      table,
+      billGroups,
+      totalPrice,
+      totalPriceText: String(totalPrice),
+      itemCount
+    }
+  }
+}
+
+async function adminSendTableToKitchen(payload) {
+  const orders = await getAdminTableOrders(payload)
+  const targetOrders = orders.filter(order => !isAdminPaidOrder(order) && !isAdminPreparingOrder(order))
+
+  await Promise.all(targetOrders.map(order => db.collection('order').doc(order._id).update({
+    data: {
+      status: 'pending_prepare',
+      frontDeskConfirmed: true,
+      kitchenPrintStatus: 'sent',
+      updateTime: db.serverDate()
+    }
+  })))
+
+  return {
+    success: true,
+    data: {
+      updated: targetOrders.length
+    }
+  }
+}
+
 function normalizeTableNumber(tableNumber) {
   return String(tableNumber || '').trim()
 }
@@ -2020,6 +2406,7 @@ async function handleAction(action, payload) {
   if (
     action.indexOf('admin.category.') === 0 ||
     action.indexOf('admin.dish.') === 0 ||
+    action.indexOf('admin.table.') === 0 ||
     action.indexOf('admin.collection.') === 0
   ) {
     const adminAuth = await requireAdminAuth(payload)
@@ -2033,6 +2420,9 @@ async function handleAction(action, payload) {
   if (action === 'admin.dish.save') return adminSaveDish(payload)
   if (action === 'admin.dish.delete') return adminDeleteDish(payload)
   if (action === 'admin.dish.status') return adminSetDishStatus(payload)
+  if (action === 'admin.table.list') return adminListTables(payload)
+  if (action === 'admin.table.detail') return adminGetTableDetail(payload)
+  if (action === 'admin.table.sendKitchen') return adminSendTableToKitchen(payload)
   if (action === 'admin.collection.list') return adminCollectionList(payload)
   if (action === 'admin.collection.save') return adminCollectionSave(payload)
   if (action === 'admin.collection.update') return adminCollectionUpdate(payload)
