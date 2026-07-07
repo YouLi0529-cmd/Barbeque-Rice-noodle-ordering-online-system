@@ -106,6 +106,7 @@
 }
 
 .admin-menu-card {
+  position: relative;
   min-height: 146rpx;
   padding: 24rpx;
   border-radius: 24rpx;
@@ -117,6 +118,12 @@
 .admin-menu-card.hot {
   color: #FFF7EC;
   background: linear-gradient(135deg, #F26A2E 0%, #C9341C 100%);
+}
+
+.admin-menu-card-pressed {
+  color: #FFF7EC;
+  background: linear-gradient(135deg, #F26A2E 0%, #C9341C 100%);
+  box-shadow: 0 8rpx 18rpx rgba(201, 52, 28, 0.22);
 }
 
 .card-title {
@@ -134,6 +141,30 @@
 
 .admin-menu-card.hot .card-desc {
   color: rgba(255, 247, 236, 0.82);
+}
+
+.admin-menu-card-pressed .card-desc {
+  color: rgba(255, 247, 236, 0.82);
+}
+
+.reservation-badge {
+  position: absolute;
+  top: -10rpx;
+  right: -10rpx;
+  z-index: 2;
+  min-width: 38rpx;
+  height: 38rpx;
+  padding: 0 9rpx;
+  border-radius: 999rpx;
+  color: #FFFFFF;
+  background: #D8321B;
+  border: 3rpx solid #FFF7EC;
+  box-shadow: 0 8rpx 18rpx rgba(216, 50, 27, 0.28);
+  text-align: center;
+  line-height: 38rpx;
+  font-size: 20rpx;
+  font-weight: 900;
+  box-sizing: border-box;
 }
 
 .bottom-actions {
@@ -205,6 +236,14 @@
   margin-bottom: 0;
 }
 
+.auth-required-tip {
+  margin: -2rpx 0 14rpx;
+  color: #C9341C;
+  font-size: 20rpx;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
 .password-hint {
   margin-top: 14rpx;
   color: rgba(58, 36, 24, 0.56);
@@ -234,6 +273,202 @@
 
 .modal-btn.confirm {
   color: #C9341C;
+}
+
+.reservation-dialog {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  max-width: none;
+  height: 78vh;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 28rpx 28rpx 0 0;
+  background: #FFF7EC;
+  box-shadow: 0 -18rpx 42rpx rgba(30, 23, 20, 0.18);
+}
+
+.reservation-dialog-head {
+  flex: none;
+  padding: 28rpx 32rpx 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.reservation-dialog-title {
+  color: #1E1714;
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
+.reservation-dialog-refresh {
+  height: 46rpx;
+  padding: 0 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  color: #3A2418;
+  background: #F1C46B;
+  font-size: 22rpx;
+  font-weight: 900;
+}
+
+.reservation-list {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  padding: 0 32rpx 24rpx;
+  box-sizing: border-box;
+}
+
+.reservation-item {
+  width: 18.7%;
+  min-height: 146rpx;
+  margin: 0 1.55% 16rpx 0;
+  padding: 14rpx 15rpx;
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: top;
+  border-radius: 14rpx;
+  background: #FFFFFF;
+  border: 1rpx solid rgba(58, 36, 24, 0.08);
+  box-shadow:
+    0 8rpx 18rpx rgba(58, 36, 24, 0.16),
+    0 2rpx 4rpx rgba(58, 36, 24, 0.12),
+    inset 0 1rpx 0 rgba(255, 255, 255, 0.42);
+  box-sizing: border-box;
+}
+
+.reservation-item:nth-child(5n) {
+  margin-right: 0;
+}
+
+.reservation-item-head {
+  display: flex;
+  flex-direction: column;
+  gap: 5rpx;
+  min-width: 0;
+}
+
+.reservation-phone {
+  color: #2C1A12;
+  font-size: 22rpx;
+  font-weight: 900;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reservation-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8rpx;
+  min-width: 0;
+  gap: 6rpx;
+  color: rgba(58, 36, 24, 0.62);
+  font-size: 13rpx;
+  font-weight: 800;
+}
+
+.reservation-info-row text:last-child {
+  color: #3A2418;
+  font-weight: 900;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reservation-empty,
+.reservation-loading {
+  padding: 90rpx 0;
+  color: rgba(58, 36, 24, 0.46);
+  text-align: center;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.reservation-detail-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 23, 20, 0.34);
+}
+
+.reservation-detail-dialog {
+  width: 620rpx;
+  max-width: 86vw;
+  overflow: hidden;
+  border-radius: 24rpx;
+  background: #FFF7EC;
+  box-shadow: 0 22rpx 54rpx rgba(30, 23, 20, 0.24);
+}
+
+.reservation-detail-title {
+  padding: 30rpx 30rpx 18rpx;
+  color: #1E1714;
+  text-align: center;
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
+.reservation-detail-content {
+  padding: 4rpx 34rpx 28rpx;
+}
+
+.reservation-detail-row {
+  min-height: 58rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+  border-bottom: 1rpx solid rgba(58, 36, 24, 0.08);
+  color: rgba(58, 36, 24, 0.58);
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.reservation-detail-row text:last-child {
+  color: #2C1A12;
+  font-weight: 900;
+  text-align: right;
+}
+
+.reservation-detail-footer {
+  display: flex;
+  border-top: 1rpx solid rgba(58, 36, 24, 0.08);
+}
+
+.detail-btn {
+  flex: 1;
+  height: 86rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+.detail-btn.cancel {
+  color: rgba(58, 36, 24, 0.54);
+  background: #FFFFFF;
+}
+
+.detail-btn.confirm {
+  color: #FFF7EC;
+  background: #B15B18;
 }
 
 @media (orientation: landscape) {
@@ -329,6 +564,80 @@
   .modal-dialog {
     width: 560rpx;
     max-width: 60vw;
+  }
+
+  .reservation-dialog {
+    width: 100vw;
+    max-width: none;
+    height: 80vh;
+  }
+
+  .reservation-dialog-head {
+    padding: 22rpx 24rpx 14rpx;
+  }
+
+  .reservation-dialog-title {
+    font-size: 26rpx;
+  }
+
+  .reservation-dialog-refresh {
+    height: 38rpx;
+    font-size: 18rpx;
+  }
+
+  .reservation-list {
+    max-height: none;
+    padding: 0 28rpx 20rpx;
+  }
+
+  .reservation-item {
+    width: 15.4%;
+    min-height: 118rpx;
+    margin: 0 1.45% 14rpx 0;
+    padding: 11rpx 12rpx;
+    border-radius: 12rpx;
+  }
+
+  .reservation-item:nth-child(5n) {
+    margin-right: 1.45%;
+  }
+
+  .reservation-item:nth-child(6n) {
+    margin-right: 0;
+  }
+
+  .reservation-phone {
+    font-size: 17rpx;
+  }
+
+  .reservation-info-row {
+    margin-top: 6rpx;
+    font-size: 10rpx;
+  }
+
+  .reservation-detail-dialog {
+    width: 520rpx;
+    max-width: 52vw;
+    border-radius: 18rpx;
+  }
+
+  .reservation-detail-title {
+    padding: 22rpx 24rpx 12rpx;
+    font-size: 25rpx;
+  }
+
+  .reservation-detail-content {
+    padding: 0 26rpx 18rpx;
+  }
+
+  .reservation-detail-row {
+    min-height: 44rpx;
+    font-size: 18rpx;
+  }
+
+  .detail-btn {
+    height: 66rpx;
+    font-size: 22rpx;
   }
 
   .modal-title {

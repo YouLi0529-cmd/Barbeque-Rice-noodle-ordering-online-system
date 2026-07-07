@@ -22,7 +22,8 @@
         "pages/myorder/myorder",
         "pages/orderdetail/orderdetail",
         "pages/myhome/myhome",
-        "pages/about/about"
+        "pages/about/about",
+        "pages/reservation/reservation"
       ]
     },
     {
@@ -33,8 +34,8 @@
         "pages/admin/tableDetail/tableDetail",
         "pages/admin/order/order",
         "pages/admin/queue/queue",
-        "pages/admin/reservation/reservation",
         "pages/admin/outdoor/outdoor",
+        "pages/admin/outdoorDetail/outdoorDetail",
         "pages/admin/grill/grill",
         "pages/admin/dish/dish",
         "pages/admin/user/user",

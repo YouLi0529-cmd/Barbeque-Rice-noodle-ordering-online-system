@@ -14,27 +14,28 @@
     <view class="menu-section">
       <view class="section-title">{{ui.coreSection}}</view>
       <view class="admin-grid">
-        <view class="admin-menu-card hot" bindtap="goToOrder">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToOrder">
           <view class="card-title">{{ui.orderTitle}}</view>
           <view class="card-desc">{{ui.orderDesc}}</view>
         </view>
-        <view class="admin-menu-card" bindtap="goToDish">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToDish">
           <view class="card-title">{{ui.dishTitle}}</view>
           <view class="card-desc">{{ui.dishDesc}}</view>
         </view>
-        <view class="admin-menu-card" bindtap="goToQueue">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToQueue">
           <view class="card-title">{{ui.queueTitle}}</view>
           <view class="card-desc">{{ui.queueDesc}}</view>
         </view>
-        <view class="admin-menu-card" bindtap="goToReservation">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToReservation">
+          <view class="reservation-badge" wx:if="{{reservationCount > 0}}">{{reservationBadgeText}}</view>
           <view class="card-title">{{ui.reservationTitle}}</view>
           <view class="card-desc">{{ui.reservationDesc}}</view>
         </view>
-        <view class="admin-menu-card" bindtap="goToOutdoor">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToOutdoor">
           <view class="card-title">{{ui.outdoorTitle}}</view>
           <view class="card-desc">{{ui.outdoorDesc}}</view>
         </view>
-        <view class="admin-menu-card" bindtap="goToGrill">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToGrill">
           <view class="card-title">{{ui.grillTitle}}</view>
           <view class="card-desc">{{ui.grillDesc}}</view>
         </view>
@@ -44,27 +45,27 @@
     <view class="menu-section">
       <view class="section-title">{{ui.settingsSection}}</view>
       <view class="admin-grid">
-        <view class="admin-menu-card" bindtap="goToUser">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToUser">
           <view class="card-title">{{ui.userTitle}}</view>
           <view class="card-desc">{{ui.userDesc}}</view>
         </view>
-        <view class="admin-menu-card" bindtap="goToNotice">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToNotice">
           <view class="card-title">{{ui.noticeTitle}}</view>
           <view class="card-desc">{{ui.noticeDesc}}</view>
         </view>
-        <view class="admin-menu-card" bindtap="goToTableCode">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToTableCode">
           <view class="card-title">{{ui.tableCodeTitle}}</view>
           <view class="card-desc">{{ui.tableCodeDesc}}</view>
         </view>
-        <view class="admin-menu-card" bindtap="goToShopInfo">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToShopInfo">
           <view class="card-title">{{ui.shopInfoTitle}}</view>
           <view class="card-desc">{{ui.shopInfoDesc}}</view>
         </view>
-        <view class="admin-menu-card" bindtap="goToPrinter">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToPrinter">
           <view class="card-title">{{ui.printerTitle}}</view>
           <view class="card-desc">{{ui.printerDesc}}</view>
         </view>
-        <view class="admin-menu-card" bindtap="goToRechargeOptions">
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToRechargeOptions">
           <view class="card-title">{{ui.rechargeTitle}}</view>
           <view class="card-desc">{{ui.rechargeDesc}}</view>
         </view>
@@ -87,6 +88,7 @@
           placeholder="{{isFirstTime ? ui.setupPasswordPlaceholder : ui.loginPasswordPlaceholder}}"
           value="{{adminPassword}}"
           bindinput="onAdminPasswordInput" />
+        <view class="auth-required-tip" wx:if="{{authRequiredTip}}">{{authRequiredTip}}</view>
         <view class="password-hint" wx:if="{{isFirstTime}}">{{ui.firstPasswordHint}}</view>
       </view>
       <view class="modal-footer">
@@ -107,6 +109,73 @@
       <view class="modal-footer">
         <view class="modal-btn cancel" bindtap="closePasswordModal">{{ui.cancel}}</view>
         <view class="modal-btn confirm" bindtap="confirmChangePassword">{{ui.confirm}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="modal-mask" wx:if="{{showReservationModal}}" catchtap="closeReservationModal">
+    <view class="reservation-dialog" catchtap="stopPropagation">
+      <view class="reservation-dialog-head">
+        <view class="reservation-dialog-title">{{ui.reservationModalTitle}}</view>
+        <view class="reservation-dialog-refresh" bindtap="loadReservationList">{{ui.reservationRefresh}}</view>
+      </view>
+
+      <scroll-view class="reservation-list" scroll-y>
+        <view class="reservation-loading" wx:if="{{reservationLoading}}">{{ui.loading}}</view>
+        <view class="reservation-empty" wx:elif="{{reservationList.length === 0}}">{{ui.reservationEmpty}}</view>
+        <block wx:else>
+          <view class="reservation-item" wx:for="{{reservationList}}" wx:key="_id" data-index="{{index}}" bindtap="openReservationDetail">
+            <view class="reservation-item-head">
+              <view class="reservation-phone">{{item.displayPhone}}</view>
+            </view>
+            <view class="reservation-info-row">
+              <text>{{ui.reservationDate}}</text>
+              <text>{{item.displayDateTime}}</text>
+            </view>
+            <view class="reservation-info-row">
+              <text>{{ui.reservationPeople}}</text>
+              <text>{{item.displayPeople}}</text>
+            </view>
+            <view class="reservation-info-row">
+              <text>{{ui.reservationRoom}}</text>
+              <text>{{item.displayRoom}}</text>
+            </view>
+          </view>
+        </block>
+      </scroll-view>
+
+      <view class="modal-footer">
+        <view class="modal-btn cancel" bindtap="closeReservationModal">{{ui.close}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="reservation-detail-mask" wx:if="{{showReservationDetailModal}}" catchtap="closeReservationDetailModal">
+    <view class="reservation-detail-dialog" catchtap="stopPropagation">
+      <view class="reservation-detail-title">{{ui.reservationDetailTitle}}</view>
+      <view class="reservation-detail-content">
+        <view class="reservation-detail-row">
+          <text>{{ui.reservationPhone}}</text>
+          <text>{{selectedReservation.detailPhone}}</text>
+        </view>
+        <view class="reservation-detail-row">
+          <text>{{ui.reservationDate}}</text>
+          <text>{{selectedReservation.displayDateTime}}</text>
+        </view>
+        <view class="reservation-detail-row">
+          <text>{{ui.reservationPeople}}</text>
+          <text>{{selectedReservation.displayPeople}}</text>
+        </view>
+        <view class="reservation-detail-row">
+          <text>{{ui.reservationRoom}}</text>
+          <text>{{selectedReservation.displayRoom}}</text>
+        </view>
+      </view>
+      <view class="reservation-detail-footer">
+        <view class="detail-btn cancel" bindtap="closeReservationDetailModal">{{ui.cancel}}</view>
+        <view class="detail-btn confirm" bindtap="confirmReservation">
+          {{confirmingReservation ? ui.loading : ui.confirmReservation}}
+        </view>
       </view>
     </view>
   </view>

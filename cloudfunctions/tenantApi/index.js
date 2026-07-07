@@ -15,6 +15,18 @@ const DEFAULT_TENANT_ID = 'zhangnan'
 const ACTIVE_STATUS = 'active'
 const SESSION_EXPIRE_DAYS = 7
 const DRAFT_EXPIRE_MS = 24 * 60 * 60 * 1000
+const PRINTER_IDS = {
+  FRONT: 'qian1',
+  RAW: 'sheng2',
+  COOKED: 'shu3',
+  DESSERT: 'tian4'
+}
+const PRINTER_NAMES = {
+  qian1: '前台打印机',
+  sheng2: '生菜打印机',
+  shu3: '熟食打印机',
+  tian4: '甜品打印机'
+}
 let ensureSessionCollectionPromise = null
 let ensureCoreCollectionsPromise = null
 
@@ -71,6 +83,10 @@ function buildResponse(payload, statusCode = 200) {
 
 function getTenantId(payload) {
   return String(payload.tenantId || process.env.TENANT_ID || DEFAULT_TENANT_ID).trim()
+}
+
+function padNumber(value) {
+  return value < 10 ? `0${value}` : `${value}`
 }
 
 function toTime(value) {
@@ -183,6 +199,7 @@ async function ensureCoreCollections() {
       ensureCollection('orderDraft'),
       ensureCollection('tableOrderSession'),
       ensureCollection('tableCartItem'),
+      ensureCollection('tableGroup'),
       ensureCollection('queue'),
       ensureCollection('reservation'),
       ensureCollection('outdoorGrill'),
@@ -398,12 +415,19 @@ async function buildServerOrderGoods(transaction, orderGoods) {
 
     const price = roundMoney(dish.price)
     const subtotal = roundMoney(price * count)
+    let categoryName = dish.categoryName || ''
+    if (!categoryName && dish.categoryId) {
+      const categoryRes = await transaction.collection('dishCategory').doc(dish.categoryId).get()
+      categoryName = categoryRes.data && categoryRes.data.name || ''
+    }
     totalPrice = roundMoney(totalPrice + subtotal)
 
     goods.push({
       dishId,
       dishName: dish.name || item.dishName || '',
       dishImage: dish.image || item.dishImage || '',
+      categoryId: dish.categoryId || '',
+      categoryName,
       price,
       count,
       subtotal,
@@ -430,6 +454,7 @@ async function createOrder(payload) {
   const parentOrderId = String(payload.parentOrderId || '').trim()
   const isAddOnOrder = !!parentOrderId
   const addOnIndex = Math.max(0, Math.floor(Number(payload.addOnIndex) || 0))
+  let effectiveTableNumber = tableNumber
 
   if (orderScene !== 'camping' && !tableNumber) {
     return {
@@ -443,6 +468,7 @@ async function createOrder(payload) {
     const user = await getActiveUser(transaction, openid)
     const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods)
     let rootOrderId = ''
+    let inheritedTableGroup = {}
 
     if (isAddOnOrder) {
       const parentRes = await transaction.collection('order').doc(parentOrderId).get()
@@ -458,10 +484,21 @@ async function createOrder(payload) {
         throw new Error('order scene mismatch')
       }
       if (orderScene !== 'camping' && String(parentOrder.tableNumber || '') !== tableNumber) {
-        throw new Error('table number mismatch')
+        if (isOrderTransferredFromTable(parentOrder, tableNumber)) {
+          effectiveTableNumber = String(parentOrder.tableNumber || '').trim()
+        } else {
+          throw new Error('table number mismatch')
+        }
       }
 
       rootOrderId = parentOrder.rootOrderId || parentOrder._id || parentOrderId
+      if (parentOrder.tableGroupId) {
+        inheritedTableGroup = {
+          tableGroupId: parentOrder.tableGroupId,
+          tableGroupPrimary: parentOrder.tableGroupPrimary || null,
+          tableGroupTables: Array.isArray(parentOrder.tableGroupTables) ? parentOrder.tableGroupTables : []
+        }
+      }
     }
 
     const orderData = {
@@ -472,14 +509,14 @@ async function createOrder(payload) {
       parentOrderId: isAddOnOrder ? parentOrderId : '',
       rootOrderId,
       addOnIndex: isAddOnOrder ? addOnIndex : 0,
-      orderCardTitle: payload.orderCardTitle || (isAddOnOrder ? `Add-on ${addOnIndex}` : 'First order'),
+      orderCardTitle: payload.orderCardTitle || (isAddOnOrder ? `加菜单${addOnIndex}` : '首单'),
       goods: priceResult.goods,
       totalPrice: priceResult.totalPrice,
       finalPrice: priceResult.finalPrice,
       pay_status: false,
       payStatus: false,
       payMethod: 'offline',
-      status: 'waiting_pay',
+      status: 'submitted',
       frontDeskConfirmed: false,
       frontDeskRemark: '',
       kitchenPrinted: false,
@@ -498,7 +535,8 @@ async function createOrder(payload) {
       userNickName: user.nickName || '',
       userAvatar: user.avatarUrl || '',
       userPhone: user.phoneNumber || '',
-      tableNumber: orderScene === 'camping' ? '' : tableNumber
+      tableNumber: orderScene === 'camping' ? '' : effectiveTableNumber,
+      ...inheritedTableGroup
     }
 
     const orderRes = await transaction.collection('order').add({
@@ -652,6 +690,77 @@ async function completeUserProfile(payload) {
     success: true,
     data: {
       user
+    }
+  }
+}
+
+async function createReservation(payload) {
+  const auth = await getAuthSession(payload)
+  if (!auth.success) return auth
+
+  const selectedDate = String(payload.selectedDate || payload.reservationDate || '').trim()
+  const selectedDateText = String(payload.selectedDateText || payload.reservationDateText || '').trim()
+  const selectedTime = String(payload.selectedTime || payload.reservationTime || '').trim()
+  const peopleCount = Number(payload.peopleCount || payload.selectedPeople || 0)
+  const roomType = String(payload.roomType || payload.selectedRoom || '').trim()
+
+  if (!selectedDate || !selectedTime || !Number.isFinite(peopleCount) || peopleCount <= 0 || !roomType) {
+    return {
+      success: false,
+      code: 'INVALID_RESERVATION',
+      message: 'reservation info incomplete'
+    }
+  }
+
+  const userRes = await db.collection('user')
+    .where({
+      _openid: auth.data.openid,
+      status: _.neq(0)
+    })
+    .limit(1)
+    .get()
+  const user = userRes.data && userRes.data[0]
+  const phone = user && (user.phoneNumber || user.phone || user.userPhone)
+
+  if (!phone) {
+    return {
+      success: false,
+      code: 'PHONE_REQUIRED',
+      message: 'phone number required'
+    }
+  }
+
+  const now = new Date()
+  const reservationNo = `R${now.getFullYear()}${padNumber(now.getMonth() + 1)}${padNumber(now.getDate())}${padNumber(now.getHours())}${padNumber(now.getMinutes())}${padNumber(now.getSeconds())}`
+  const reservation = {
+    reservationNo,
+    _openid: auth.data.openid,
+    userId: user._id || '',
+    userCode: user.userCode || '',
+    nickName: user.nickName || user.nickname || '',
+    phone,
+    phoneNumber: phone,
+    reservationDate: selectedDate,
+    reservationDateText: selectedDateText,
+    reservationTime: selectedTime,
+    peopleCount,
+    roomType,
+    status: 'pending',
+    createTime: db.serverDate(),
+    updateTime: db.serverDate()
+  }
+
+  const addRes = await db.collection('reservation').add({
+    data: reservation
+  })
+
+  return {
+    success: true,
+    data: {
+      _id: addRes._id,
+      ...reservation,
+      createTime: now,
+      updateTime: now
     }
   }
 }
@@ -987,12 +1096,119 @@ function getAdminTableNumberCandidates(areaKey, tableNumber) {
   ])
 }
 
+function getAdminTableSection(areaKey) {
+  return ADMIN_TABLE_SECTIONS.find(item => item.areaKey === areaKey) || ADMIN_TABLE_SECTIONS[0]
+}
+
+function getAdminTableRef(areaKey, tableNumber) {
+  const section = getAdminTableSection(areaKey)
+  const number = padTableNumber(tableNumber)
+  if (!number || Number(number) < 1 || Number(number) > section.count) return null
+
+  return {
+    tableKey: `${section.areaKey}-${number}`,
+    areaKey: section.areaKey,
+    areaName: section.areaName,
+    tableNumber: number,
+    label: `${section.areaName}${number}号桌`
+  }
+}
+
+function getOrderTableRef(order) {
+  const parsed = parseAdminTableNumber(order && order.tableNumber)
+  return parsed ? getAdminTableRef(parsed.areaKey, parsed.tableNumber) : null
+}
+
+function normalizeAdminTableRefs(tables) {
+  const map = {}
+  ;(tables || []).forEach(table => {
+    const ref = getAdminTableRef(table && table.areaKey, table && table.tableNumber)
+    if (ref) map[ref.tableKey] = ref
+  })
+  return Object.keys(map).map(key => map[key])
+}
+
+function getMergedTablesFromOrders(orders, fallbackTable) {
+  const map = {}
+  const fallbackRef = fallbackTable ? getAdminTableRef(fallbackTable.areaKey, fallbackTable.tableNumber) : null
+  if (fallbackRef) map[fallbackRef.tableKey] = fallbackRef
+
+  ;(orders || []).forEach(order => {
+    normalizeAdminTableRefs(order.tableGroupTables).forEach(ref => {
+      map[ref.tableKey] = ref
+    })
+    const orderRef = getOrderTableRef(order)
+    if (orderRef) map[orderRef.tableKey] = orderRef
+  })
+
+  return Object.keys(map)
+    .map(key => map[key])
+    .sort((a, b) => a.tableKey.localeCompare(b.tableKey))
+}
+
+function getMergedTableText(tables) {
+  return (tables || []).map(table => table.label).join(' + ')
+}
+
+function formatAdminTableNumber(ref) {
+  if (!ref) return ''
+  if (ref.areaKey === 'vip') return `VIP${ref.tableNumber}`
+  if (ref.areaKey === 'sky') return `天楼${ref.tableNumber}`
+  return ref.tableNumber
+}
+
+function isSameAdminTableRef(left, right) {
+  return left && right &&
+    left.areaKey === right.areaKey &&
+    left.tableNumber === right.tableNumber
+}
+
+function replaceAdminTableRef(tables, sourceRef, targetRef) {
+  const map = {}
+  normalizeAdminTableRefs(tables).forEach(ref => {
+    const nextRef = isSameAdminTableRef(ref, sourceRef) ? targetRef : ref
+    if (nextRef) map[nextRef.tableKey] = nextRef
+  })
+  if (targetRef && !map[targetRef.tableKey]) {
+    map[targetRef.tableKey] = targetRef
+  }
+  return Object.keys(map)
+    .map(key => map[key])
+    .sort((a, b) => a.tableKey.localeCompare(b.tableKey))
+}
+
+function isOrderTransferredFromTable(order, tableNumber) {
+  const sourceRef = getOrderTableRef({ tableNumber })
+  if (!sourceRef || !order) return false
+
+  const directFrom = getAdminTableRef(
+    order.transferFromTable && order.transferFromTable.areaKey,
+    order.transferFromTable && order.transferFromTable.tableNumber
+  )
+  if (isSameAdminTableRef(sourceRef, directFrom)) return true
+
+  return (Array.isArray(order.transferLogs) ? order.transferLogs : []).some(log => {
+    const fromRef = getAdminTableRef(log.from && log.from.areaKey, log.from && log.from.tableNumber)
+    return isSameAdminTableRef(sourceRef, fromRef)
+  })
+}
+
 function isAdminTableOrder(order) {
   if (!order || order.type !== 'order') return false
   if (order.deleted === true) return false
   if (isExpiredSavedOrder(order)) return false
   if (order.orderScene === 'camping' || order.orderType === 'camping') return false
   if (!order.tableNumber) return false
+
+  const status = String(order.status || '')
+  if (status === 'cancelled' || status === '3') return false
+  return true
+}
+
+function isKitchenPrintableOrder(order) {
+  if (!order || order.type !== 'order') return false
+  if (order.deleted === true) return false
+  if (isSavedOrder(order)) return false
 
   const status = String(order.status || '')
   if (status === 'cancelled' || status === '3') return false
@@ -1024,6 +1240,7 @@ function isAdminPreparingOrder(order) {
 
 function getAdminTableStatus(orders) {
   if (!orders || orders.length === 0) return 'empty'
+  if (orders.every(isAdminPaidOrder)) return 'paid'
   if (orders.some(isAdminPreparingOrder)) return 'preparing'
   if (orders.some(order => !isAdminPaidOrder(order))) return 'submitted'
   return 'paid'
@@ -1042,6 +1259,7 @@ function summarizeAdminTable(table, orders) {
   let totalPrice = 0
   let itemCount = 0
   let scannedAt = 0
+  let finishedAt = 0
   let peopleCount = 0
 
   activeOrders.forEach(order => {
@@ -1060,6 +1278,10 @@ function summarizeAdminTable(table, orders) {
     if (createTime && (!scannedAt || createTime < scannedAt)) {
       scannedAt = createTime
     }
+    const checkoutTime = getTimeValue(order.checkoutAt || order.payTime || order.finishTime || order.updateTime)
+    if (checkoutTime && checkoutTime > finishedAt) {
+      finishedAt = checkoutTime
+    }
 
     peopleCount = Math.max(peopleCount, Number(order.peopleCount || 0))
   })
@@ -1068,12 +1290,15 @@ function summarizeAdminTable(table, orders) {
     peopleCount = Math.max(1, userIds.length)
   }
 
+  const status = getAdminTableStatus(activeOrders)
+
   return {
     ...table,
-    status: getAdminTableStatus(activeOrders),
+    status,
     totalPrice,
     peopleCount,
     scannedAt,
+    finishedAt: status === 'paid' ? finishedAt : 0,
     orderCount: activeOrders.length,
     itemCount,
     rootOrderIds
@@ -1087,9 +1312,16 @@ function buildAdminTableSections(orders) {
 
   ;(orders || []).filter(isAdminTableOrder).forEach(order => {
     const parsed = parseAdminTableNumber(order.tableNumber)
-    if (!parsed || !tableMap[parsed.tableKey]) return
-    if (!ordersByTable[parsed.tableKey]) ordersByTable[parsed.tableKey] = []
-    ordersByTable[parsed.tableKey].push(order)
+    const tableRefs = normalizeAdminTableRefs(order.tableGroupTables)
+    const targetRefs = tableRefs.length > 1
+      ? tableRefs
+      : (parsed ? [getAdminTableRef(parsed.areaKey, parsed.tableNumber)] : [])
+
+    targetRefs.forEach(ref => {
+      if (!ref || !tableMap[ref.tableKey]) return
+      if (!ordersByTable[ref.tableKey]) ordersByTable[ref.tableKey] = []
+      ordersByTable[ref.tableKey].push(order)
+    })
   })
 
   sections.forEach(section => {
@@ -1102,8 +1334,8 @@ function buildAdminTableSections(orders) {
 }
 
 function getAdminOrderStatusText(order) {
-  if (isAdminPreparingOrder(order)) return '制作中'
   if (isAdminPaidOrder(order)) return '已支付'
+  if (isAdminPreparingOrder(order)) return '制作中'
   return '已提交'
 }
 
@@ -1114,18 +1346,204 @@ function formatAdminGoods(goods) {
       ? item.subtotal
       : Number(item.price || 0) * count)
     const tags = normalizeTags(item.tags)
+    if ((item.isGift === true || item.giftDish === true) && tags.indexOf('赠菜') === -1) {
+      tags.push('赠菜')
+    }
     return {
       dishId: item.dishId || '',
       dishName: item.dishName || item.name || '',
       dishImage: item.dishImage || item.image || '',
+      categoryId: item.categoryId || '',
+      categoryName: item.categoryName || '',
       price: roundMoney(item.price || 0),
       count,
       subtotal,
       subtotalText: String(subtotal),
       tags,
-      tagText: tags.join('、')
+      tagText: tags.join('、'),
+      isGift: item.isGift === true || item.giftDish === true,
+      kitchenSent: item.kitchenSent === true,
+      kitchenStatus: item.kitchenStatus || ''
     }
   })
+}
+
+function postJson(url, payload) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload || {})
+    const target = new URL(url)
+    const req = https.request({
+      hostname: target.hostname,
+      port: target.port || 443,
+      path: `${target.pathname}${target.search}`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }, res => {
+      let raw = ''
+      res.on('data', chunk => {
+        raw += chunk
+      })
+      res.on('end', () => {
+        const data = parseJson(raw)
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(data)
+          return
+        }
+        reject(new Error(data.errmsg || data.message || `http ${res.statusCode}`))
+      })
+    })
+    req.on('error', reject)
+    req.write(body)
+    req.end()
+  })
+}
+
+function normalizeRouteText(value) {
+  return String(value || '').replace(/\s+/g, '').trim()
+}
+
+function routeTextIncludes(value, patterns) {
+  const text = normalizeRouteText(value)
+  return patterns.some(pattern => text.indexOf(normalizeRouteText(pattern)) !== -1)
+}
+
+function routeTextEquals(value, names) {
+  const text = normalizeRouteText(value)
+  return names.some(name => text === normalizeRouteText(name))
+}
+
+function isCampingOrder(order = {}) {
+  return order.orderScene === 'camping' || order.orderType === 'camping'
+}
+
+function getCampingDishPrinterId(item = {}) {
+  const categoryName = normalizeRouteText(item.categoryName || item.category || '')
+  const dishName = normalizeRouteText(item.dishName || item.name || '')
+
+  if (routeTextEquals(dishName, ['小薄饼', '烤榴莲'])) {
+    return PRINTER_IDS.COOKED
+  }
+  if (routeTextIncludes(categoryName, ['锡纸类', '锡纸'])) {
+    return PRINTER_IDS.COOKED
+  }
+  if (routeTextIncludes(categoryName, [
+    '张南招牌',
+    '牛肉',
+    '牛肉i',
+    '猪肉',
+    '明星烤肉',
+    '素菜',
+    '蔬菜',
+    '小料区',
+    '包肉搭子',
+    '包肉好搭子',
+    '包肉好打字'
+  ])) {
+    return PRINTER_IDS.RAW
+  }
+
+  return PRINTER_IDS.RAW
+}
+
+function getDishPrinterId(item = {}, order = {}) {
+  if (isCampingOrder(order)) {
+    return getCampingDishPrinterId(item)
+  }
+
+  const categoryName = normalizeRouteText(item.categoryName || item.category || '')
+  const dishName = normalizeRouteText(item.dishName || item.name || '')
+
+  if (routeTextIncludes(categoryName, ['贵州冰浆', '雪冰', '甜品饮料'])) {
+    return PRINTER_IDS.DESSERT
+  }
+  if (routeTextIncludes(categoryName, ['主食'])) {
+    return PRINTER_IDS.COOKED
+  }
+  if (routeTextIncludes(categoryName, ['张南原切'])) {
+    return PRINTER_IDS.RAW
+  }
+  if (routeTextIncludes(categoryName, ['张南招牌'])) {
+    if (routeTextEquals(dishName, ['泰式冬阴功', '烤榴莲'])) {
+      return PRINTER_IDS.DESSERT
+    }
+    return PRINTER_IDS.RAW
+  }
+  if (routeTextIncludes(categoryName, ['包肉搭子', '包肉好搭子', '包肉好打字'])) {
+    if (routeTextEquals(dishName, ['小薄饼'])) return PRINTER_IDS.COOKED
+    if (routeTextEquals(dishName, ['糖心苹果片'])) return PRINTER_IDS.DESSERT
+    if (routeTextEquals(dishName, ['生菜', '蔬菜', '菠萝片'])) return PRINTER_IDS.RAW
+    return PRINTER_IDS.RAW
+  }
+  if (routeTextIncludes(categoryName, ['明星烤肉'])) {
+    return PRINTER_IDS.RAW
+  }
+  if (routeTextIncludes(categoryName, ['素菜', '蔬菜'])) {
+    return PRINTER_IDS.RAW
+  }
+  if (routeTextIncludes(categoryName, ['熟食'])) {
+    if (routeTextEquals(dishName, ['绝味花生米', '油酥花生米', '葱心豆干', '芥末黄瓜条', '芥末黄瓜', '虾片'])) {
+      return PRINTER_IDS.RAW
+    }
+  }
+
+  return PRINTER_IDS.FRONT
+}
+
+function groupDishEntriesByPrinter(dishEntries, order = {}) {
+  return (dishEntries || []).reduce((groups, entry) => {
+    const printerId = getDishPrinterId(entry.item || {}, order)
+    if (!groups[printerId]) groups[printerId] = []
+    groups[printerId].push(entry)
+    return groups
+  }, {})
+}
+
+function getPrinterWebhookUrl(printerId) {
+  const upperId = String(printerId || '').toUpperCase()
+  const specificUrl = process.env[`PRINTER_${upperId}_WEBHOOK_URL`] || process.env[`${upperId}_PRINTER_WEBHOOK_URL`]
+  return String(specificUrl || process.env.KITCHEN_PRINTER_WEBHOOK_URL || process.env.PRINTER_WEBHOOK_URL || '').trim()
+}
+
+async function enrichDishEntriesForPrinter(dishEntries) {
+  const result = []
+
+  for (const entry of dishEntries || []) {
+    const item = {
+      ...(entry.item || {})
+    }
+    if (!item.categoryName && item.dishId) {
+      const dishRes = await db.collection('dish').doc(item.dishId).get()
+      const dish = dishRes.data || {}
+      item.categoryId = item.categoryId || dish.categoryId || ''
+      item.categoryName = item.categoryName || dish.categoryName || ''
+      if (!item.categoryName && item.categoryId) {
+        const categoryRes = await db.collection('dishCategory').doc(item.categoryId).get()
+        item.categoryName = categoryRes.data && categoryRes.data.name || ''
+      }
+    }
+    result.push({
+      ...entry,
+      item
+    })
+  }
+
+  return result
+}
+
+function getAdminOrderTitle(order, index) {
+  const rawTitle = String(order.orderCardTitle || '').trim()
+  const addOnIndex = Number(order.addOnIndex || index)
+
+  if (rawTitle === 'First order' || rawTitle === '第一单') return '首单'
+  if (/^Add-on\s+\d+/i.test(rawTitle)) {
+    const match = rawTitle.match(/\d+/)
+    return `加菜单${match ? match[0] : addOnIndex || index}`
+  }
+  if (rawTitle) return rawTitle
+  return order.isAddOnOrder ? `加菜单${addOnIndex || index}` : '首单'
 }
 
 function buildAdminBillGroups(orders) {
@@ -1136,7 +1554,7 @@ function buildAdminBillGroups(orders) {
       id: order._id,
       orderId: order._id,
       rootOrderId: order.rootOrderId || order._id,
-      title: order.orderCardTitle || (order.isAddOnOrder ? `加菜单${order.addOnIndex || index}` : '第一单'),
+      title: getAdminOrderTitle(order, index),
       status: order.status || '',
       statusText: getAdminOrderStatusText(order),
       createTime: order.createTime,
@@ -1171,11 +1589,11 @@ async function adminListTables() {
   }
 }
 
-async function getAdminTableOrders(payload) {
-  const areaKey = String(payload.areaKey || 'normal').trim() || 'normal'
-  const tableNumber = padTableNumber(payload.tableNumber)
-  const candidates = getAdminTableNumberCandidates(areaKey, tableNumber)
-  if (!tableNumber || candidates.length === 0) return []
+async function getSingleAdminTableOrders(areaKey, tableNumber) {
+  const targetAreaKey = String(areaKey || 'normal').trim() || 'normal'
+  const number = padTableNumber(tableNumber)
+  const candidates = getAdminTableNumberCandidates(targetAreaKey, number)
+  if (!number || candidates.length === 0) return []
 
   const res = await db.collection('order')
     .where({
@@ -1189,8 +1607,63 @@ async function getAdminTableOrders(payload) {
   return (res.data || []).filter(order => {
     if (!isAdminTableOrder(order)) return false
     const parsed = parseAdminTableNumber(order.tableNumber)
-    return parsed && parsed.areaKey === areaKey && parsed.tableNumber === tableNumber
+    return parsed && parsed.areaKey === targetAreaKey && parsed.tableNumber === number
   })
+}
+
+async function getAdminTableOrders(payload) {
+  const areaKey = String(payload.areaKey || 'normal').trim() || 'normal'
+  const tableNumber = padTableNumber(payload.tableNumber)
+  const tableRef = getAdminTableRef(areaKey, tableNumber)
+  const baseOrders = await getSingleAdminTableOrders(areaKey, tableNumber)
+  let relatedOrders = baseOrders
+  let groupMemberOrders = []
+
+  if (tableRef) {
+    const groupMemberRes = await db.collection('order')
+      .where({
+        type: 'order'
+      })
+      .orderBy('createTime', 'desc')
+      .limit(300)
+      .get()
+    groupMemberOrders = (groupMemberRes.data || []).filter(order => {
+      if (!isAdminTableOrder(order)) return false
+      return normalizeAdminTableRefs(order.tableGroupTables).some(ref => isSameAdminTableRef(ref, tableRef))
+    })
+    const relatedMap = {}
+    const baseOrdersForCurrentBill = groupMemberOrders.length > 0
+      ? baseOrders.filter(order => !isAdminPaidOrder(order) || order.tableGroupId)
+      : baseOrders
+    baseOrdersForCurrentBill.concat(groupMemberOrders).forEach(order => {
+      if (order._id) relatedMap[order._id] = order
+    })
+    relatedOrders = Object.keys(relatedMap).map(key => relatedMap[key])
+  }
+
+  const groupIds = Array.from(new Set(relatedOrders.map(order => String(order.tableGroupId || '').trim()).filter(Boolean)))
+
+  if (groupIds.length === 0) return relatedOrders
+
+  const groupRes = await db.collection('order')
+    .where({
+      type: 'order',
+      tableGroupId: _.in(groupIds)
+    })
+    .orderBy('createTime', 'asc')
+    .limit(200)
+    .get()
+
+  const orderMap = {}
+  relatedOrders.concat(groupRes.data || []).forEach(order => {
+    if (isAdminTableOrder(order) && order._id) {
+      orderMap[order._id] = order
+    }
+  })
+
+  return Object.keys(orderMap)
+    .map(key => orderMap[key])
+    .sort((a, b) => getTimeValue(a.createTime) - getTimeValue(b.createTime))
 }
 
 async function adminGetTableDetail(payload) {
@@ -1212,6 +1685,11 @@ async function adminGetTableDetail(payload) {
 
   const orders = await getAdminTableOrders({ areaKey, tableNumber })
   const table = summarizeAdminTable(baseTable, orders)
+  const mergedTables = getMergedTablesFromOrders(orders, baseTable)
+  const tableGroupId = (orders.find(order => order.tableGroupId) || {}).tableGroupId || ''
+  table.tableGroupId = tableGroupId
+  table.mergedTables = mergedTables
+  table.mergedTableText = mergedTables.length > 1 ? getMergedTableText(mergedTables) : ''
   const billGroups = buildAdminBillGroups(orders)
   const totalPrice = roundMoney(billGroups.reduce((sum, group) => sum + Number(group.finalPrice || 0), 0))
   const itemCount = billGroups.reduce((sum, group) => sum + Number(group.goodsCount || 0), 0)
@@ -1224,6 +1702,371 @@ async function adminGetTableDetail(payload) {
       totalPrice,
       totalPriceText: String(totalPrice),
       itemCount
+    }
+  }
+}
+
+async function adminUpdateTablePeople(payload) {
+  const peopleCount = Math.floor(Number(payload.peopleCount))
+  if (!Number.isInteger(peopleCount) || peopleCount < 1 || peopleCount > 99) {
+    return {
+      success: false,
+      code: 'PEOPLE_COUNT_INVALID',
+      message: 'people count invalid'
+    }
+  }
+
+  const orders = await getAdminTableOrders(payload)
+  const targetOrders = orders.filter(order => !isAdminPaidOrder(order))
+
+  if (targetOrders.length === 0) {
+    return {
+      success: false,
+      code: 'NO_ACTIVE_ORDER',
+      message: 'no active order'
+    }
+  }
+
+  await Promise.all(targetOrders.map(order => db.collection('order').doc(order._id).update({
+    data: {
+      peopleCount,
+      updateTime: db.serverDate()
+    }
+  })))
+
+  return {
+    success: true,
+    data: {
+      updated: targetOrders.length,
+      peopleCount
+    }
+  }
+}
+
+async function adminMergeTables(payload) {
+  const primaryRef = getAdminTableRef(payload.areaKey, payload.tableNumber)
+  const targetRefs = normalizeAdminTableRefs(payload.tables)
+  if (!primaryRef) {
+    return {
+      success: false,
+      code: 'TABLE_NOT_FOUND',
+      message: 'table not found'
+    }
+  }
+
+  const refMap = {
+    [primaryRef.tableKey]: primaryRef
+  }
+  targetRefs.forEach(ref => {
+    if (ref.tableKey !== primaryRef.tableKey) {
+      refMap[ref.tableKey] = ref
+    }
+  })
+  const mergeRefs = Object.keys(refMap).map(key => refMap[key])
+
+  if (mergeRefs.length < 2) {
+    return {
+      success: false,
+      code: 'MERGE_TARGET_REQUIRED',
+      message: 'merge target required'
+    }
+  }
+
+  const activeOrderMap = {}
+
+  for (const ref of mergeRefs) {
+    const orders = await getSingleAdminTableOrders(ref.areaKey, ref.tableNumber)
+    const activeOrders = orders.filter(order => !isAdminPaidOrder(order))
+    activeOrders.forEach(order => {
+      if (order._id) activeOrderMap[order._id] = order
+    })
+  }
+
+  let activeOrders = Object.keys(activeOrderMap).map(key => activeOrderMap[key])
+  const groupIds = Array.from(new Set(activeOrders.map(order => String(order.tableGroupId || '').trim()).filter(Boolean)))
+
+  if (groupIds.length > 0) {
+    const groupRes = await db.collection('order')
+      .where({
+        type: 'order',
+        tableGroupId: _.in(groupIds)
+      })
+      .limit(200)
+      .get()
+    ;(groupRes.data || []).forEach(order => {
+      if (isAdminTableOrder(order) && !isAdminPaidOrder(order) && order._id) {
+        activeOrderMap[order._id] = order
+      }
+    })
+    activeOrders = Object.keys(activeOrderMap).map(key => activeOrderMap[key])
+  }
+
+  if (activeOrders.length === 0) {
+    return {
+      success: false,
+      code: 'NO_ACTIVE_ORDER',
+      message: 'no active order'
+    }
+  }
+
+  const tableMap = {}
+  mergeRefs.forEach(ref => {
+    tableMap[ref.tableKey] = ref
+  })
+  getMergedTablesFromOrders(activeOrders, primaryRef).forEach(ref => {
+    tableMap[ref.tableKey] = ref
+  })
+  const mergedTables = Object.keys(tableMap)
+    .map(key => tableMap[key])
+    .sort((a, b) => a.tableKey.localeCompare(b.tableKey))
+  const existingGroupId = groupIds[0] || ''
+  const tableGroupId = existingGroupId || `merge_${primaryRef.tableKey}_${Date.now()}`
+  const updateData = {
+    tableGroupId,
+    tableGroupPrimary: primaryRef,
+    tableGroupTables: mergedTables,
+    tableGroupUpdatedAt: db.serverDate(),
+    updateTime: db.serverDate()
+  }
+
+  await Promise.all(activeOrders.map(order => db.collection('order').doc(order._id).update({
+    data: updateData
+  })))
+
+  await db.collection('tableGroup').doc(tableGroupId).set({
+    data: {
+      tableGroupId,
+      primaryTable: primaryRef,
+      tables: mergedTables,
+      status: 'active',
+      updateTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true,
+    data: {
+      tableGroupId,
+      primaryTable: primaryRef,
+      tables: mergedTables,
+      tableText: getMergedTableText(mergedTables),
+      updatedOrders: activeOrders.length
+    }
+  }
+}
+
+async function adminTransferTable(payload) {
+  const sourceRef = getAdminTableRef(
+    payload.sourceAreaKey || payload.areaKey,
+    payload.sourceTableNumber || payload.tableNumber
+  )
+  const targetRef = getAdminTableRef(payload.targetAreaKey, payload.targetTableNumber)
+
+  if (!sourceRef || !targetRef) {
+    return {
+      success: false,
+      code: 'TABLE_NOT_FOUND',
+      message: 'table not found'
+    }
+  }
+  if (sourceRef.tableKey === targetRef.tableKey) {
+    return {
+      success: false,
+      code: 'SAME_TABLE',
+      message: 'target table is same as source table'
+    }
+  }
+
+  const sourceOrders = (await getSingleAdminTableOrders(sourceRef.areaKey, sourceRef.tableNumber))
+    .filter(order => !isAdminPaidOrder(order))
+  if (sourceOrders.length === 0) {
+    return {
+      success: false,
+      code: 'NO_ACTIVE_ORDER',
+      message: 'no active order'
+    }
+  }
+
+  const targetOrders = (await getSingleAdminTableOrders(targetRef.areaKey, targetRef.tableNumber))
+    .filter(order => !isAdminPaidOrder(order))
+  if (targetOrders.length > 0) {
+    return {
+      success: false,
+      code: 'TARGET_TABLE_OCCUPIED',
+      message: '目标桌已有未结账订单，请使用拼桌'
+    }
+  }
+
+  const sourceOrderMap = {}
+  sourceOrders.forEach(order => {
+    if (order._id) sourceOrderMap[order._id] = order
+  })
+
+  const groupIds = Array.from(new Set(sourceOrders.map(order => String(order.tableGroupId || '').trim()).filter(Boolean)))
+  const groupOrderMap = {}
+  if (groupIds.length > 0) {
+    const groupRes = await db.collection('order')
+      .where({
+        type: 'order',
+        tableGroupId: _.in(groupIds)
+      })
+      .limit(200)
+      .get()
+    ;(groupRes.data || []).forEach(order => {
+      if (isAdminTableOrder(order) && !isAdminPaidOrder(order) && order._id) {
+        groupOrderMap[order._id] = order
+      }
+    })
+  }
+
+  const transferTime = new Date()
+  const targetTableNumber = formatAdminTableNumber(targetRef)
+  const allGroupOrders = Object.keys(groupOrderMap).map(key => groupOrderMap[key])
+  const groupTables = replaceAdminTableRef(
+    getMergedTablesFromOrders(allGroupOrders.length > 0 ? allGroupOrders : sourceOrders, sourceRef),
+    sourceRef,
+    targetRef
+  )
+
+  const updates = []
+  sourceOrders.forEach(order => {
+    const nextGroupTables = order.tableGroupId
+      ? groupTables
+      : replaceAdminTableRef([sourceRef], sourceRef, targetRef)
+    const nextPrimary = isSameAdminTableRef(
+      getAdminTableRef(order.tableGroupPrimary && order.tableGroupPrimary.areaKey, order.tableGroupPrimary && order.tableGroupPrimary.tableNumber),
+      sourceRef
+    ) ? targetRef : (order.tableGroupPrimary || targetRef)
+    const updateData = {
+      tableNumber: targetTableNumber,
+      transferFromTable: sourceRef,
+      transferToTable: targetRef,
+      transferAt: transferTime,
+      transferLogs: [
+        ...(Array.isArray(order.transferLogs) ? order.transferLogs : []),
+        {
+          from: sourceRef,
+          to: targetRef,
+          createTime: transferTime
+        }
+      ],
+      updateTime: db.serverDate()
+    }
+
+    if (order.tableGroupId) {
+      updateData.tableGroupPrimary = nextPrimary
+      updateData.tableGroupTables = nextGroupTables
+    }
+
+    updates.push(db.collection('order').doc(order._id).update({
+      data: updateData
+    }))
+  })
+
+  Object.keys(groupOrderMap).forEach(orderId => {
+    if (sourceOrderMap[orderId]) return
+    const order = groupOrderMap[orderId]
+    const updateData = {
+      tableGroupTables: groupTables,
+      updateTime: db.serverDate()
+    }
+    if (order.tableGroupPrimary) {
+      updateData.tableGroupPrimary = isSameAdminTableRef(
+        getAdminTableRef(order.tableGroupPrimary && order.tableGroupPrimary.areaKey, order.tableGroupPrimary && order.tableGroupPrimary.tableNumber),
+        sourceRef
+      ) ? targetRef : order.tableGroupPrimary
+    }
+    updates.push(db.collection('order').doc(orderId).update({
+      data: updateData
+    }))
+  })
+
+  await Promise.all(updates)
+
+  if (groupIds.length > 0) {
+    await Promise.all(groupIds.map(groupId => db.collection('tableGroup').doc(groupId).set({
+      data: {
+        tableGroupId: groupId,
+        tables: groupTables,
+        status: 'active',
+        updateTime: db.serverDate()
+      }
+    })))
+  }
+
+  return {
+    success: true,
+    data: {
+      from: sourceRef,
+      to: targetRef,
+      updatedOrders: sourceOrders.length,
+      tableNumber: targetTableNumber
+    }
+  }
+}
+
+function buildAdminCheckoutSummary(orders, payload) {
+  const totalPrice = roundMoney((orders || []).reduce((sum, order) => {
+    return sum + Number(order.finalPrice || order.totalPrice || 0)
+  }, 0))
+  const discountType = String(payload.discountType || '').trim()
+  const discountValueRaw = payload.discountValue
+  const discountValue = discountValueRaw === '' || discountValueRaw == null ? '' : Number(discountValueRaw)
+  const hasDiscount = discountType === 'reduce' && Number.isFinite(discountValue) && discountValue >= 0 && discountValue <= 10
+  const receivable = hasDiscount ? roundMoney(totalPrice * discountValue / 10) : totalPrice
+
+  return {
+    totalPrice,
+    receivable,
+    paymentMethod: String(payload.paymentMethod || 'wechat_alipay').trim() || 'wechat_alipay',
+    discountType: hasDiscount ? discountType : '',
+    discountValue: hasDiscount ? discountValue : ''
+  }
+}
+
+async function adminFinishTableCheckout(payload) {
+  const orders = await getAdminTableOrders(payload)
+  const targetOrders = orders.filter(order => !isAdminPaidOrder(order))
+
+  if (targetOrders.length === 0) {
+    return {
+      success: false,
+      code: 'NO_UNPAID_ORDER',
+      message: 'no unpaid order'
+    }
+  }
+
+  const checkoutSummary = buildAdminCheckoutSummary(targetOrders, payload)
+  const checkoutTime = new Date()
+
+  await Promise.all(targetOrders.map(order => db.collection('order').doc(order._id).update({
+    data: {
+      pay_status: true,
+      payStatus: true,
+      status: 'completed',
+      checkoutStatus: 'finished',
+      payMethod: checkoutSummary.paymentMethod,
+      paymentMethod: checkoutSummary.paymentMethod,
+      checkoutTotalPrice: checkoutSummary.totalPrice,
+      checkoutReceivable: checkoutSummary.receivable,
+      checkoutDiscountType: checkoutSummary.discountType,
+      checkoutDiscountValue: checkoutSummary.discountValue,
+      checkoutAt: checkoutTime,
+      updateTime: db.serverDate()
+    }
+  })))
+
+  const sharedCartClearResult = await clearCheckoutSharedCarts(targetOrders, payload, checkoutTime)
+
+  return {
+    success: true,
+    data: {
+      updated: targetOrders.length,
+      totalPrice: checkoutSummary.totalPrice,
+      receivable: checkoutSummary.receivable,
+      paymentMethod: checkoutSummary.paymentMethod,
+      sharedCartRemoved: sharedCartClearResult.removed,
+      sharedCartTables: sharedCartClearResult.tableNumbers
     }
   }
 }
@@ -1248,6 +2091,662 @@ async function adminSendTableToKitchen(payload) {
     }
   }
 }
+async function sendOrderDishesToKitchen(orderId, dishIndexes) {
+  if (!orderId) {
+    return {
+      success: false,
+      code: 'ORDER_ID_REQUIRED',
+      message: 'order id required'
+    }
+  }
+
+  const validIndexes = Array.from(new Set((dishIndexes || []).map(index => Math.floor(Number(index)))))
+    .filter(index => Number.isInteger(index) && index >= 0)
+    .sort((a, b) => a - b)
+
+  if (validIndexes.length === 0) {
+    return {
+      success: false,
+      code: 'DISH_INDEX_REQUIRED',
+      message: 'dish index required'
+    }
+  }
+
+  const orderRes = await db.collection('order').doc(orderId).get()
+  const order = orderRes.data
+  if (!order || !isKitchenPrintableOrder(order)) {
+    return {
+      success: false,
+      code: 'ORDER_NOT_FOUND',
+      message: 'order not found'
+    }
+  }
+  if (isAdminPaidOrder(order)) {
+    return {
+      success: false,
+      code: 'ORDER_PAID',
+      message: 'paid order cannot send kitchen here'
+    }
+  }
+
+  const goods = Array.isArray(order.goods) ? order.goods : []
+  const missingIndex = validIndexes.find(index => !goods[index])
+  if (missingIndex !== undefined) {
+    return {
+      success: false,
+      code: 'DISH_NOT_FOUND',
+      message: 'dish not found'
+    }
+  }
+
+  const indexSet = new Set(validIndexes)
+  const sendTime = new Date()
+  const nextGoods = goods.map((item, index) => {
+    if (!indexSet.has(index)) return item
+    return {
+      ...item,
+      kitchenSent: true,
+      kitchenStatus: 'sent',
+      kitchenSentAt: sendTime
+    }
+  })
+  const allSent = nextGoods.length > 0 && nextGoods.every(item => item.kitchenSent === true || item.kitchenStatus === 'sent')
+  const dishEntries = await enrichDishEntriesForPrinter(validIndexes.map(index => ({
+    index,
+    item: goods[index] || {}
+  })))
+  const printerDispatch = await dispatchKitchenPrint('kitchen', order, dishEntries)
+  const kitchenLogs = dishEntries.map(entry => {
+    const index = entry.index
+    const item = entry.item || {}
+    const printerResult = printerDispatch.byDishIndex[index] || {}
+    return {
+      type: 'send_kitchen',
+      dishIndex: index,
+      dishId: item.dishId || '',
+      dishName: item.dishName || item.name || '',
+      count: Number(item.count || 0),
+      printerId: printerResult.printerId || getDishPrinterId(item, order),
+      printerName: printerResult.printerName || PRINTER_NAMES[getDishPrinterId(item, order)] || '',
+      printerStatus: printerResult.status || 'skipped',
+      createTime: sendTime
+    }
+  })
+
+  await db.collection('order').doc(orderId).update({
+    data: {
+      goods: nextGoods,
+      status: 'pending_prepare',
+      frontDeskConfirmed: true,
+      kitchenPrinted: allSent,
+      kitchenPrintStatus: allSent ? 'sent' : 'partial_sent',
+      kitchenLogs: [
+        ...(Array.isArray(order.kitchenLogs) ? order.kitchenLogs : []),
+        ...kitchenLogs
+      ],
+      updateTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true,
+    data: {
+      orderId,
+      sentCount: validIndexes.length,
+      allSent,
+      printers: printerDispatch.results
+    }
+  }
+}
+
+async function adminSendKitchenItems(payload) {
+  const items = Array.isArray(payload.items) ? payload.items : []
+  const groupedItems = {}
+
+  items.forEach(item => {
+    const orderId = String(item && (item.orderId || item.groupId) || '').trim()
+    const dishIndex = Math.floor(Number(item && item.dishIndex))
+    if (!orderId || !Number.isInteger(dishIndex) || dishIndex < 0) return
+    if (!groupedItems[orderId]) groupedItems[orderId] = []
+    groupedItems[orderId].push(dishIndex)
+  })
+
+  const orderIds = Object.keys(groupedItems)
+  if (orderIds.length === 0) {
+    return {
+      success: false,
+      code: 'DISH_INDEX_REQUIRED',
+      message: 'dish index required'
+    }
+  }
+
+  const results = []
+  for (const orderId of orderIds) {
+    const result = await sendOrderDishesToKitchen(orderId, groupedItems[orderId])
+    if (!result.success) return result
+    results.push(result.data)
+  }
+
+  return {
+    success: true,
+    data: {
+      updatedOrders: results.length,
+      sentCount: results.reduce((sum, item) => sum + Number(item.sentCount || 0), 0),
+      results
+    }
+  }
+}
+
+function buildKitchenPrinterPayload(type, order, printerId, dishEntries) {
+  const parsedTable = parseAdminTableNumber(order.tableNumber)
+  const orderScene = isCampingOrder(order) ? 'camping' : 'dineIn'
+  const sceneName = orderScene === 'camping' ? '露营' : '堂食'
+  return {
+    type,
+    printerId,
+    printerName: PRINTER_NAMES[printerId] || printerId,
+    tenantId: process.env.TENANT_ID || DEFAULT_TENANT_ID,
+    orderId: order._id,
+    orderScene,
+    orderType: orderScene,
+    sceneName,
+    tableNumber: order.tableNumber || '',
+    tableArea: parsedTable ? parsedTable.areaName : '',
+    title: type === 'urge' ? `${sceneName}催菜单` : `${sceneName}后厨单`,
+    printTime: new Date().toISOString(),
+    dishes: dishEntries.map(entry => {
+      const item = entry.item || {}
+      return {
+        dishIndex: entry.index,
+        dishId: item.dishId || '',
+        dishName: item.dishName || item.name || '',
+        categoryId: item.categoryId || '',
+        categoryName: item.categoryName || '',
+        count: Number(item.count || 0),
+        tags: normalizeTags(item.tags),
+        tagText: normalizeTags(item.tags).join('、'),
+        remark: item.remark || item.note || ''
+      }
+    })
+  }
+}
+
+async function dispatchPrinterPayload(printerId, payload) {
+  const printerUrl = getPrinterWebhookUrl(printerId)
+  if (!printerUrl) {
+    return {
+      printerId,
+      printerName: PRINTER_NAMES[printerId] || printerId,
+      enabled: false,
+      status: 'skipped',
+      message: 'printer webhook not configured'
+    }
+  }
+
+  try {
+    const response = await postJson(printerUrl, payload)
+    return {
+      printerId,
+      printerName: PRINTER_NAMES[printerId] || printerId,
+      enabled: true,
+      status: 'sent',
+      response
+    }
+  } catch (err) {
+    return {
+      printerId,
+      printerName: PRINTER_NAMES[printerId] || printerId,
+      enabled: true,
+      status: 'failed',
+      message: err.message || 'printer dispatch failed'
+    }
+  }
+}
+
+async function dispatchKitchenPrint(type, order, dishEntries) {
+  const groupedEntries = groupDishEntriesByPrinter(dishEntries, order)
+  const results = []
+
+  for (const printerId of Object.keys(groupedEntries)) {
+    const payload = buildKitchenPrinterPayload(type, order, printerId, groupedEntries[printerId])
+    const result = await dispatchPrinterPayload(printerId, payload)
+    results.push({
+      ...result,
+      dishIndexes: groupedEntries[printerId].map(entry => entry.index)
+    })
+  }
+
+  return {
+    results,
+    byDishIndex: results.reduce((map, result) => {
+      ;(result.dishIndexes || []).forEach(index => {
+        map[index] = result
+      })
+      return map
+    }, {})
+  }
+}
+
+async function urgeOrderDishes(orderId, dishIndexes) {
+  if (!orderId) {
+    return {
+      success: false,
+      code: 'ORDER_ID_REQUIRED',
+      message: 'order id required'
+    }
+  }
+
+  const validIndexes = Array.from(new Set((dishIndexes || []).map(index => Math.floor(Number(index)))))
+    .filter(index => Number.isInteger(index) && index >= 0)
+    .sort((a, b) => a - b)
+
+  if (validIndexes.length === 0) {
+    return {
+      success: false,
+      code: 'DISH_INDEX_REQUIRED',
+      message: 'dish index required'
+    }
+  }
+
+  const orderRes = await db.collection('order').doc(orderId).get()
+  const order = orderRes.data
+  if (!order || !isKitchenPrintableOrder(order)) {
+    return {
+      success: false,
+      code: 'ORDER_NOT_FOUND',
+      message: 'order not found'
+    }
+  }
+  if (isAdminPaidOrder(order)) {
+    return {
+      success: false,
+      code: 'ORDER_PAID',
+      message: 'paid order cannot urge dish here'
+    }
+  }
+
+  const goods = Array.isArray(order.goods) ? order.goods : []
+  const missingIndex = validIndexes.find(index => !goods[index])
+  if (missingIndex !== undefined) {
+    return {
+      success: false,
+      code: 'DISH_NOT_FOUND',
+      message: 'dish not found'
+    }
+  }
+
+  const urgeTime = new Date()
+  const dishEntries = await enrichDishEntriesForPrinter(validIndexes.map(index => ({
+    index,
+    item: goods[index] || {}
+  })))
+  const printerDispatch = await dispatchKitchenPrint('urge', order, dishEntries)
+  const kitchenLogs = dishEntries.map(entry => ({
+    type: 'urge_kitchen',
+    dishIndex: entry.index,
+    dishId: entry.item.dishId || '',
+    dishName: entry.item.dishName || entry.item.name || '',
+    count: Number(entry.item.count || 0),
+    printerId: (printerDispatch.byDishIndex[entry.index] || {}).printerId || getDishPrinterId(entry.item, order),
+    printerName: (printerDispatch.byDishIndex[entry.index] || {}).printerName || PRINTER_NAMES[getDishPrinterId(entry.item, order)] || '',
+    printerStatus: (printerDispatch.byDishIndex[entry.index] || {}).status || 'skipped',
+    createTime: urgeTime
+  }))
+
+  await db.collection('order').doc(orderId).update({
+    data: {
+      kitchenLogs: [
+        ...(Array.isArray(order.kitchenLogs) ? order.kitchenLogs : []),
+        ...kitchenLogs
+      ],
+      lastUrgeAt: urgeTime,
+      updateTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true,
+    data: {
+      orderId,
+      urgedCount: validIndexes.length,
+      printers: printerDispatch.results
+    }
+  }
+}
+
+async function adminUrgeKitchenItems(payload) {
+  const items = Array.isArray(payload.items) ? payload.items : []
+  const groupedItems = {}
+
+  items.forEach(item => {
+    const orderId = String(item && (item.orderId || item.groupId) || '').trim()
+    const dishIndex = Math.floor(Number(item && item.dishIndex))
+    if (!orderId || !Number.isInteger(dishIndex) || dishIndex < 0) return
+    if (!groupedItems[orderId]) groupedItems[orderId] = []
+    groupedItems[orderId].push(dishIndex)
+  })
+
+  const orderIds = Object.keys(groupedItems)
+  if (orderIds.length === 0) {
+    return {
+      success: false,
+      code: 'DISH_INDEX_REQUIRED',
+      message: 'dish index required'
+    }
+  }
+
+  const results = []
+  for (const orderId of orderIds) {
+    const result = await urgeOrderDishes(orderId, groupedItems[orderId])
+    if (!result.success) return result
+    results.push(result.data)
+  }
+
+  return {
+    success: true,
+    data: {
+      updatedOrders: results.length,
+      urgedCount: results.reduce((sum, item) => sum + Number(item.urgedCount || 0), 0),
+      results
+    }
+  }
+}
+async function refundOrderDishes(orderId, dishIndexes) {
+  if (!orderId) {
+    return {
+      success: false,
+      code: 'ORDER_ID_REQUIRED',
+      message: 'order id required'
+    }
+  }
+  const validIndexes = Array.from(new Set((dishIndexes || []).map(index => Math.floor(Number(index)))))
+    .filter(index => Number.isInteger(index) && index >= 0)
+    .sort((a, b) => a - b)
+
+  if (validIndexes.length === 0) {
+    return {
+      success: false,
+      code: 'DISH_INDEX_REQUIRED',
+      message: 'dish index required'
+    }
+  }
+
+  const orderRes = await db.collection('order').doc(orderId).get()
+  const order = orderRes.data
+  if (!order || !isAdminTableOrder(order)) {
+    return {
+      success: false,
+      code: 'ORDER_NOT_FOUND',
+      message: 'order not found'
+    }
+  }
+  if (isAdminPaidOrder(order)) {
+    return {
+      success: false,
+      code: 'ORDER_PAID',
+      message: 'paid order cannot refund dish here'
+    }
+  }
+
+  const goods = Array.isArray(order.goods) ? order.goods : []
+  const missingIndex = validIndexes.find(index => !goods[index])
+  if (missingIndex !== undefined) {
+    return {
+      success: false,
+      code: 'DISH_NOT_FOUND',
+      message: 'dish not found'
+    }
+  }
+
+  const indexSet = new Set(validIndexes)
+  const removedItems = goods
+    .map((item, index) => ({ item, index }))
+    .filter(entry => indexSet.has(entry.index))
+  const nextGoods = goods.filter((_, index) => !indexSet.has(index))
+  const totalPrice = roundMoney(nextGoods.reduce((sum, item) => {
+    const count = Number(item.count || 0)
+    const subtotal = item.subtotal !== undefined
+      ? Number(item.subtotal || 0)
+      : Number(item.price || 0) * count
+    return sum + subtotal
+  }, 0))
+
+  const refundLogs = removedItems.map(entry => ({
+    type: 'dish_refund',
+    dishIndex: entry.index,
+    dishId: entry.item.dishId || '',
+    dishName: entry.item.dishName || entry.item.name || '',
+    count: Number(entry.item.count || 0),
+    subtotal: roundMoney(entry.item.subtotal !== undefined
+      ? entry.item.subtotal
+      : Number(entry.item.price || 0) * Number(entry.item.count || 0)),
+    createTime: new Date()
+  }))
+  const updateData = {
+    goods: nextGoods,
+    totalPrice,
+    finalPrice: totalPrice,
+    updateTime: db.serverDate(),
+    refundLogs: [
+      ...(Array.isArray(order.refundLogs) ? order.refundLogs : []),
+      ...refundLogs
+    ]
+  }
+
+  if (nextGoods.length === 0) {
+    updateData.status = 'cancelled'
+  }
+
+  await db.collection('order').doc(orderId).update({
+    data: updateData
+  })
+
+  return {
+    success: true,
+    data: {
+      orderId,
+      removed: removedItems.map(entry => entry.item),
+      removedCount: removedItems.length,
+      totalPrice,
+      remainingCount: nextGoods.reduce((sum, item) => sum + Number(item.count || 0), 0)
+    }
+  }
+}
+
+async function adminRefundDish(payload) {
+  const orderId = String(payload.orderId || payload.groupId || '').trim()
+  const dishIndex = Math.floor(Number(payload.dishIndex))
+  return refundOrderDishes(orderId, [dishIndex])
+}
+
+async function adminRefundDishes(payload) {
+  const items = Array.isArray(payload.items) ? payload.items : []
+  const groupedItems = {}
+
+  items.forEach(item => {
+    const orderId = String(item && (item.orderId || item.groupId) || '').trim()
+    const dishIndex = Math.floor(Number(item && item.dishIndex))
+    if (!orderId || !Number.isInteger(dishIndex) || dishIndex < 0) return
+    if (!groupedItems[orderId]) groupedItems[orderId] = []
+    groupedItems[orderId].push(dishIndex)
+  })
+
+  const orderIds = Object.keys(groupedItems)
+  if (orderIds.length === 0) {
+    return {
+      success: false,
+      code: 'DISH_INDEX_REQUIRED',
+      message: 'dish index required'
+    }
+  }
+
+  const results = []
+  for (const orderId of orderIds) {
+    const result = await refundOrderDishes(orderId, groupedItems[orderId])
+    if (!result.success) return result
+    results.push(result.data)
+  }
+
+  return {
+    success: true,
+    data: {
+      updatedOrders: results.length,
+      removedCount: results.reduce((sum, item) => sum + Number(item.removedCount || 0), 0),
+      results
+    }
+  }
+}
+
+async function giftOrderDishes(orderId, dishIndexes) {
+  if (!orderId) {
+    return {
+      success: false,
+      code: 'ORDER_ID_REQUIRED',
+      message: 'order id required'
+    }
+  }
+  const validIndexes = Array.from(new Set((dishIndexes || []).map(index => Math.floor(Number(index)))))
+    .filter(index => Number.isInteger(index) && index >= 0)
+    .sort((a, b) => a - b)
+
+  if (validIndexes.length === 0) {
+    return {
+      success: false,
+      code: 'DISH_INDEX_REQUIRED',
+      message: 'dish index required'
+    }
+  }
+
+  const orderRes = await db.collection('order').doc(orderId).get()
+  const order = orderRes.data
+  if (!order || !isAdminTableOrder(order)) {
+    return {
+      success: false,
+      code: 'ORDER_NOT_FOUND',
+      message: 'order not found'
+    }
+  }
+  if (isAdminPaidOrder(order)) {
+    return {
+      success: false,
+      code: 'ORDER_PAID',
+      message: 'paid order cannot gift dish here'
+    }
+  }
+
+  const goods = Array.isArray(order.goods) ? order.goods : []
+  const missingIndex = validIndexes.find(index => !goods[index])
+  if (missingIndex !== undefined) {
+    return {
+      success: false,
+      code: 'DISH_NOT_FOUND',
+      message: 'dish not found'
+    }
+  }
+
+  const indexSet = new Set(validIndexes)
+  const giftTime = new Date()
+  const giftLogs = []
+  const nextGoods = goods.map((item, index) => {
+    if (!indexSet.has(index)) return item
+
+    const count = Number(item.count || 0)
+    const originalSubtotal = roundMoney(item.originalSubtotal !== undefined
+      ? item.originalSubtotal
+      : item.subtotal !== undefined
+        ? item.subtotal
+        : Number(item.price || 0) * count)
+    const originalPrice = roundMoney(item.originalPrice !== undefined ? item.originalPrice : item.price || 0)
+
+    giftLogs.push({
+      type: 'gift_dish',
+      dishIndex: index,
+      dishId: item.dishId || '',
+      dishName: item.dishName || item.name || '',
+      count,
+      originalPrice,
+      originalSubtotal,
+      createTime: giftTime
+    })
+
+    return {
+      ...item,
+      isGift: true,
+      giftDish: true,
+      giftAt: giftTime,
+      originalPrice,
+      originalSubtotal,
+      subtotal: 0
+    }
+  })
+  const totalPrice = roundMoney(nextGoods.reduce((sum, item) => {
+    const count = Number(item.count || 0)
+    const subtotal = item.subtotal !== undefined
+      ? Number(item.subtotal || 0)
+      : Number(item.price || 0) * count
+    return sum + subtotal
+  }, 0))
+
+  await db.collection('order').doc(orderId).update({
+    data: {
+      goods: nextGoods,
+      totalPrice,
+      finalPrice: totalPrice,
+      giftLogs: [
+        ...(Array.isArray(order.giftLogs) ? order.giftLogs : []),
+        ...giftLogs
+      ],
+      updateTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true,
+    data: {
+      orderId,
+      giftedCount: validIndexes.length,
+      totalPrice
+    }
+  }
+}
+
+async function adminGiftDishes(payload) {
+  const items = Array.isArray(payload.items) ? payload.items : []
+  const groupedItems = {}
+
+  items.forEach(item => {
+    const orderId = String(item && (item.orderId || item.groupId) || '').trim()
+    const dishIndex = Math.floor(Number(item && item.dishIndex))
+    if (!orderId || !Number.isInteger(dishIndex) || dishIndex < 0) return
+    if (!groupedItems[orderId]) groupedItems[orderId] = []
+    groupedItems[orderId].push(dishIndex)
+  })
+
+  const orderIds = Object.keys(groupedItems)
+  if (orderIds.length === 0) {
+    return {
+      success: false,
+      code: 'DISH_INDEX_REQUIRED',
+      message: 'dish index required'
+    }
+  }
+
+  const results = []
+  for (const orderId of orderIds) {
+    const result = await giftOrderDishes(orderId, groupedItems[orderId])
+    if (!result.success) return result
+    results.push(result.data)
+  }
+
+  return {
+    success: true,
+    data: {
+      updatedOrders: results.length,
+      giftedCount: results.reduce((sum, item) => sum + Number(item.giftedCount || 0), 0),
+      results
+    }
+  }
+}
 
 function normalizeTableNumber(tableNumber) {
   return String(tableNumber || '').trim()
@@ -1256,6 +2755,96 @@ function normalizeTableNumber(tableNumber) {
 function getSharedCartSessionId(tableNumber) {
   const safeTable = encodeURIComponent(tableNumber).replace(/%/g, '_')
   return `table_${safeTable}`
+}
+
+function getSharedCartTableNumbersForAdminRef(ref) {
+  if (!ref) return []
+  const shortNumber = String(Number(ref.tableNumber || 0) || '')
+  const candidates = getAdminTableNumberCandidates(ref.areaKey, ref.tableNumber)
+  const numbers = ref.areaKey === 'normal'
+    ? [ref.tableNumber, shortNumber].concat(candidates)
+    : [formatAdminTableNumber(ref)].concat(candidates.filter(item => {
+      return item !== ref.tableNumber && item !== shortNumber
+    }))
+
+  return Array.from(new Set(numbers.map(normalizeTableNumber).filter(Boolean)))
+}
+
+function getCheckoutSharedCartTableNumbers(orders, fallbackPayload) {
+  const refMap = {}
+  const fallbackRef = getAdminTableRef(fallbackPayload && fallbackPayload.areaKey, fallbackPayload && fallbackPayload.tableNumber)
+  if (fallbackRef) refMap[fallbackRef.tableKey] = fallbackRef
+
+  ;(orders || []).forEach(order => {
+    const orderRef = getOrderTableRef(order)
+    if (orderRef) refMap[orderRef.tableKey] = orderRef
+    normalizeAdminTableRefs(order.tableGroupTables).forEach(ref => {
+      refMap[ref.tableKey] = ref
+    })
+  })
+
+  return Array.from(new Set(Object.keys(refMap).reduce((list, key) => {
+    return list.concat(getSharedCartTableNumbersForAdminRef(refMap[key]))
+  }, [])))
+}
+
+async function clearSharedCartSessionByTableNumber(tableNumber, finishedAt) {
+  const normalizedTableNumber = normalizeTableNumber(tableNumber)
+  if (!normalizedTableNumber) {
+    return {
+      tableNumber: normalizedTableNumber,
+      removed: 0
+    }
+  }
+
+  const sessionId = getSharedCartSessionId(normalizedTableNumber)
+  const res = await db.collection('tableCartItem')
+    .where({
+      sessionId,
+      deleted: _.neq(true)
+    })
+    .limit(200)
+    .get()
+
+  await Promise.all((res.data || []).map(item => {
+    return db.collection('tableCartItem').doc(item._id).remove()
+  }))
+
+  const sessionRef = db.collection('tableOrderSession').doc(sessionId)
+  const sessionRes = await sessionRef.get()
+  if (sessionRes.data) {
+    await sessionRef.update({
+      data: {
+        tableNumber: normalizedTableNumber,
+        status: 'finished',
+        checkoutStatus: 'finished',
+        memberOpenids: [],
+        finishedAt,
+        updateTime: db.serverDate()
+      }
+    })
+  }
+
+  return {
+    tableNumber: normalizedTableNumber,
+    sessionId,
+    removed: (res.data || []).length
+  }
+}
+
+async function clearCheckoutSharedCarts(orders, payload, finishedAt) {
+  const tableNumbers = getCheckoutSharedCartTableNumbers(orders, payload)
+  const results = []
+
+  for (const tableNumber of tableNumbers) {
+    results.push(await clearSharedCartSessionByTableNumber(tableNumber, finishedAt))
+  }
+
+  return {
+    tableNumbers,
+    removed: results.reduce((sum, item) => sum + Number(item.removed || 0), 0),
+    results
+  }
 }
 
 function getSharedCartDocId(sessionId, cartKey) {
@@ -1301,13 +2890,20 @@ async function joinSharedCart(payload) {
   const oldSession = oldSessionRes.data
 
   if (oldSession) {
+    const shouldResetSession = oldSession.status === 'finished' || oldSession.checkoutStatus === 'finished'
+    const updateData = {
+      tableNumber,
+      status: 'ordering',
+      checkoutStatus: '',
+      finishedAt: null,
+      memberOpenids: shouldResetSession ? [auth.data.openid] : _.addToSet(auth.data.openid),
+      updateTime: db.serverDate()
+    }
+    if (shouldResetSession) {
+      updateData.createTime = db.serverDate()
+    }
     await sessionRef.update({
-      data: {
-        tableNumber,
-        status: 'ordering',
-        memberOpenids: _.addToSet(auth.data.openid),
-        updateTime: db.serverDate()
-      }
+      data: updateData
     })
   } else {
     await sessionRef.set({
@@ -1864,6 +3460,32 @@ async function adminDeleteCategory(payload) {
 async function adminListDishes(payload) {
   const menuType = getMenuType(payload.menuType)
   const categoryId = String(payload.categoryId || '').trim()
+  const keyword = String(payload.keyword || '').trim()
+  const limit = getLimit(payload, 100, 100)
+
+  if (keyword) {
+    const matcher = db.RegExp({
+      regexp: keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+      options: 'i'
+    })
+    const commonWhere = {
+      menuType: getMenuTypeWhere(menuType)
+    }
+    const res = await db.collection('dish')
+      .where(_.or([
+        { ...commonWhere, name: matcher },
+        { ...commonWhere, categoryName: matcher },
+        { ...commonWhere, description: matcher }
+      ]))
+      .limit(limit)
+      .get()
+
+    return {
+      success: true,
+      data: res.data || []
+    }
+  }
+
   if (!categoryId) {
     return {
       success: true,
@@ -1871,7 +3493,6 @@ async function adminListDishes(payload) {
     }
   }
 
-  const limit = getLimit(payload, 100, 100)
   const res = await db.collection('dish')
     .where({
       categoryId,
@@ -2407,6 +4028,7 @@ async function handleAction(action, payload) {
     action.indexOf('admin.category.') === 0 ||
     action.indexOf('admin.dish.') === 0 ||
     action.indexOf('admin.table.') === 0 ||
+    action.indexOf('admin.order.') === 0 ||
     action.indexOf('admin.collection.') === 0
   ) {
     const adminAuth = await requireAdminAuth(payload)
@@ -2422,7 +4044,18 @@ async function handleAction(action, payload) {
   if (action === 'admin.dish.status') return adminSetDishStatus(payload)
   if (action === 'admin.table.list') return adminListTables(payload)
   if (action === 'admin.table.detail') return adminGetTableDetail(payload)
+  if (action === 'admin.table.updatePeople') return adminUpdateTablePeople(payload)
+  if (action === 'admin.table.merge') return adminMergeTables(payload)
+  if (action === 'admin.table.transfer') return adminTransferTable(payload)
+  if (action === 'admin.table.finishCheckout') return adminFinishTableCheckout(payload)
   if (action === 'admin.table.sendKitchen') return adminSendTableToKitchen(payload)
+  if (action === 'admin.table.sendKitchenItems') return adminSendKitchenItems(payload)
+  if (action === 'admin.table.urgeKitchenItems') return adminUrgeKitchenItems(payload)
+  if (action === 'admin.order.sendKitchenItems') return adminSendKitchenItems(payload)
+  if (action === 'admin.order.urgeKitchenItems') return adminUrgeKitchenItems(payload)
+  if (action === 'admin.table.refundDish') return adminRefundDish(payload)
+  if (action === 'admin.table.refundDishes') return adminRefundDishes(payload)
+  if (action === 'admin.table.giftDishes') return adminGiftDishes(payload)
   if (action === 'admin.collection.list') return adminCollectionList(payload)
   if (action === 'admin.collection.save') return adminCollectionSave(payload)
   if (action === 'admin.collection.update') return adminCollectionUpdate(payload)
@@ -2431,6 +4064,7 @@ async function handleAction(action, payload) {
   if (action === 'user.me') return getCurrentUser(payload)
   if (action === 'user.completeProfile') return completeUserProfile(payload)
   if (action === 'phone.getNumber') return getPhoneNumber(payload)
+  if (action === 'reservation.create') return createReservation(payload)
   if (action === 'order.create') return createOrder(payload)
   if (action === 'order.list') return listUserOrders(payload)
   if (action === 'order.detail') return getUserOrderDetail(payload)

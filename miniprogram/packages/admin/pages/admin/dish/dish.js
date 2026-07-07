@@ -53,6 +53,10 @@ const UI = {
   currency: '\uffe5',
   slash: '/',
   defaultUnit: '\u4efd',
+  searchPlaceholder: '\u641c\u7d22\u83dc\u54c1',
+  searchResult: '\u641c\u7d22\u7ed3\u679c',
+  emptySearch: '\u672a\u627e\u5230\u83dc\u54c1',
+  clearSearch: '\u6e05\u7a7a',
   imageTip: '\u56fe\u7247\u4e0a\u4f20\u5df2\u4ece\u65e7\u4e91\u73af\u5883\u79fb\u9664\uff0c\u6682\u65f6\u8bf7\u586b\u5199\u56fe\u7247\u5730\u5740\u3002'
 }
 
@@ -100,6 +104,8 @@ Page({
     categories: [],
     currentCategoryId: '',
     dishes: [],
+    searchKeyword: '',
+    isSearching: false,
     loadingCategories: false,
     loadingDishes: false,
     showCategoryModal: false,
@@ -114,6 +120,11 @@ Page({
     this.loadCategories()
   },
 
+  onUnload() {
+    this.clearSearchTimer()
+    this.searchToken = null
+  },
+
   async changeMenuType(e) {
     const menuType = e.currentTarget.dataset.type
     if (!menuType || menuType === this.data.currentMenuType) return
@@ -122,8 +133,11 @@ Page({
       currentMenuType: menuType,
       currentCategoryId: '',
       categories: [],
-      dishes: []
+      dishes: [],
+      searchKeyword: '',
+      isSearching: false
     })
+    this.searchToken = null
     await this.loadCategories()
   },
 
@@ -178,9 +192,94 @@ Page({
 
   switchCategory(e) {
     const categoryId = e.currentTarget.dataset.id
-    this.setData({ currentCategoryId: categoryId }, () => {
+    this.clearSearchTimer()
+    this.searchToken = null
+    this.setData({
+      currentCategoryId: categoryId,
+      searchKeyword: '',
+      isSearching: false
+    }, () => {
       this.loadDishes()
     })
+  },
+
+  clearSearchTimer() {
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer)
+      this.searchTimer = null
+    }
+  },
+
+  onSearchInput(e) {
+    const searchKeyword = e.detail.value || ''
+    this.setData({ searchKeyword })
+    this.clearSearchTimer()
+
+    const keyword = searchKeyword.trim()
+    if (!keyword) {
+      this.searchToken = null
+      this.setData({ isSearching: false }, () => {
+        this.loadDishes()
+      })
+      return
+    }
+
+    this.searchTimer = setTimeout(() => {
+      this.searchDishes(keyword)
+    }, 260)
+  },
+
+  confirmSearch() {
+    const keyword = String(this.data.searchKeyword || '').trim()
+    if (keyword) {
+      this.clearSearchTimer()
+      this.searchDishes(keyword)
+    }
+  },
+
+  clearSearch() {
+    this.clearSearchTimer()
+    this.searchToken = null
+    this.setData({
+      searchKeyword: '',
+      isSearching: false
+    }, () => {
+      this.loadDishes()
+    })
+  },
+
+  async searchDishes(keyword) {
+    const currentKeyword = String(keyword || '').trim()
+    if (!currentKeyword) {
+      this.clearSearch()
+      return
+    }
+
+    this.searchToken = Date.now()
+    const token = this.searchToken
+    this.setData({
+      isSearching: true,
+      loadingDishes: true
+    })
+
+    try {
+      const res = await apiClient.call('admin.dish.list', {
+        menuType: this.data.currentMenuType,
+        keyword: currentKeyword,
+        limit: 100
+      })
+      if (this.searchToken !== token) return
+
+      this.setData({
+        dishes: res.data || [],
+        loadingDishes: false
+      })
+    } catch (err) {
+      if (this.searchToken !== token) return
+      console.error('search admin dishes failed', err)
+      this.setData({ loadingDishes: false })
+      showToast(err.message || UI.failed)
+    }
   },
 
   showAddCategoryModal() {
@@ -315,14 +414,15 @@ Page({
   },
 
   async saveDish() {
+    const currentDish = this.data.currentDish || {}
     const dish = {
-      ...this.data.currentDish,
+      ...currentDish,
       menuType: this.data.currentMenuType,
-      categoryId: this.data.currentCategoryId,
-      categoryName: this.getCurrentCategoryName(),
-      price: toNumber(this.data.currentDish.price, -1),
-      originalPrice: toNumber(this.data.currentDish.originalPrice),
-      sort: toNumber(this.data.currentDish.sort)
+      categoryId: currentDish.categoryId || this.data.currentCategoryId,
+      categoryName: currentDish.categoryName || this.getCurrentCategoryName(),
+      price: toNumber(currentDish.price, -1),
+      originalPrice: toNumber(currentDish.originalPrice),
+      sort: toNumber(currentDish.sort)
     }
 
     if (!String(dish.name || '').trim()) {
@@ -341,7 +441,11 @@ Page({
       wx.hideLoading()
       this.setData({ showDishModal: false })
       showToast(UI.saved, 'success')
-      await this.loadDishes()
+      if (this.data.isSearching && this.data.searchKeyword.trim()) {
+        await this.searchDishes(this.data.searchKeyword)
+      } else {
+        await this.loadDishes()
+      }
     } catch (err) {
       wx.hideLoading()
       console.error('save dish failed', err)
@@ -357,7 +461,11 @@ Page({
         dishId: dish._id,
         status
       })
-      await this.loadDishes()
+      if (this.data.isSearching && this.data.searchKeyword.trim()) {
+        await this.searchDishes(this.data.searchKeyword)
+      } else {
+        await this.loadDishes()
+      }
     } catch (err) {
       console.error('toggle dish status failed', err)
       showToast(err.message || UI.failed)
@@ -376,7 +484,11 @@ Page({
           await apiClient.call('admin.dish.delete', { dishId: dish._id })
           wx.hideLoading()
           showToast(UI.deleted, 'success')
-          await this.loadDishes()
+          if (this.data.isSearching && this.data.searchKeyword.trim()) {
+            await this.searchDishes(this.data.searchKeyword)
+          } else {
+            await this.loadDishes()
+          }
         } catch (err) {
           wx.hideLoading()
           console.error('delete dish failed', err)

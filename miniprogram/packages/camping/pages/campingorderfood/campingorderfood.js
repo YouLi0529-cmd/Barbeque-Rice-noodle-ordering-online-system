@@ -769,7 +769,7 @@ Page({
 
   showCampingFreeBucketTip() {
     wx.showToast({
-      title: '点单满188元自动提供',
+      title: '满188元免费提供桶和碳',
       icon: 'none'
     })
   },

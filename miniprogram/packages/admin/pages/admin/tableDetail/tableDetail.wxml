@@ -15,6 +15,10 @@
             <text>{{ui.diningTime}} {{table.diningTimeText}}</text>
             <text class="meta-price">{{ui.moneySymbol}}{{totalPriceText}}</text>
           </view>
+          <view class="merged-table-row" wx:if="{{table.mergedTableText}}">
+            <text>{{ui.mergedTables}}</text>
+            <text class="merged-table-text">{{table.mergedTableText}}</text>
+          </view>
         </view>
 
         <view class="empty-bill" wx:if="{{loading}}">
@@ -28,24 +32,47 @@
 
         <scroll-view class="bill-groups" scroll-y wx:else>
           <view class="bill-group" wx:for="{{billGroups}}" wx:key="id">
-            <view class="bill-group-head">
-              <view>
+            <view
+              class="bill-group-head {{item.selected ? 'bill-group-head-active' : ''}} {{item.partialSelected ? 'bill-group-head-partial' : ''}}"
+              data-group-id="{{item.id}}"
+              bindtap="toggleGroupSelection"
+            >
+              <view class="bill-group-title-wrap">
+                <view class="bill-group-check {{item.selected ? 'bill-group-check-active' : ''}} {{item.partialSelected ? 'bill-group-check-partial' : ''}}"></view>
+                <view>
                 <view class="bill-group-title">{{item.title}}</view>
                 <view class="bill-group-meta">{{item.statusText}}</view>
+                </view>
               </view>
               <view class="bill-group-price">{{ui.moneySymbol}}{{item.finalPriceText}}</view>
             </view>
 
             <view
-              class="dish-row {{selectedDishRowId === dish.rowId ? 'dish-row-active' : ''}}"
+              class="dish-row {{dish.selected ? 'dish-row-active' : ''}}"
               wx:for="{{item.goods}}"
               wx:for-item="dish"
+              wx:for-index="dishIndex"
               wx:key="rowId"
               data-row-id="{{dish.rowId}}"
               data-dish-name="{{dish.dishName}}"
+              data-dish-index="{{dishIndex}}"
               data-group-id="{{item.id}}"
-              bindtap="selectDish"
+              bindtap="toggleDishSelection"
             >
+              <view
+                class="dish-check-wrap"
+                data-row-id="{{dish.rowId}}"
+                data-dish-name="{{dish.dishName}}"
+                data-dish-index="{{dishIndex}}"
+                data-group-id="{{item.id}}"
+                bindtouchstart="startDishDragSelect"
+                bindtouchmove="moveDishDragSelect"
+                bindtouchend="endDishDragSelect"
+                bindtouchcancel="endDishDragSelect"
+                catchtap="toggleDishSelection"
+              >
+                <view class="dish-check {{dish.selected ? 'dish-check-active' : ''}}"></view>
+              </view>
               <view class="dish-main">
                 <view class="dish-name">{{dish.dishName}}</view>
                 <view class="dish-tags" wx:if="{{dish.tagText}}">{{dish.tagText}}</view>
@@ -57,7 +84,7 @@
         </scroll-view>
 
         <view class="bill-total">
-          <view class="mini-back" bindtap="goBack">{{ui.back}}</view>
+          <view class="mini-send-kitchen" bindtap="sendKitchen">{{ui.sendKitchen}}</view>
           <view class="total-area">
             <text>{{ui.total}}</text>
             <text class="total-price">{{ui.moneySymbol}}{{totalPriceText}}</text>
@@ -120,7 +147,10 @@
           <text>{{ui.moneySymbol}}{{paySummary.totalText}}</text>
         </view>
         <view class="summary-row strong-row">
-          <text>{{ui.receivable}}</text>
+          <view class="discount-summary-label">
+            <text>{{ui.receivable}}</text>
+            <text class="discount-summary-text" wx:if="{{paySummary.discountText}}">{{paySummary.discountText}}</text>
+          </view>
           <text>{{ui.moneySymbol}}{{paySummary.receivableText}}</text>
         </view>
         <view class="summary-row">
@@ -129,7 +159,88 @@
         </view>
       </view>
 
-      <button class="checkout-btn" bindtap="finishCheckout">{{ui.finishCheckout}}</button>
+      <button
+        class="checkout-btn"
+        loading="{{checkingOut}}"
+        disabled="{{checkingOut}}"
+        bindtap="finishCheckout"
+      >{{ui.finishCheckout}}</button>
+    </view>
+  </view>
+  <view class="discount-mask" wx:if="{{showDiscountDialog}}" catchtap="closeDiscountDialog">
+    <view class="discount-dialog" catchtap="stopDiscountDialogTap">
+      <view class="discount-title">{{ui.discountDialogTitle}}</view>
+      <input
+        class="discount-input"
+        type="digit"
+        value="{{discountInput}}"
+        placeholder="{{ui.discountInputPlaceholder}}"
+        bindinput="onDiscountInput"
+      />
+      <view class="discount-actions">
+        <view class="discount-action cancel" bindtap="closeDiscountDialog">{{ui.discountCancel}}</view>
+        <view class="discount-action confirm" bindtap="confirmDiscountDialog">{{ui.discountConfirm}}</view>
+      </view>
+    </view>
+  </view>
+  <view class="people-mask" wx:if="{{showPeopleDialog}}" catchtap="closePeopleDialog">
+    <view class="people-dialog" catchtap="stopPeopleDialogTap">
+      <view class="people-title">{{ui.peopleDialogTitle}}</view>
+      <input
+        class="people-input"
+        type="number"
+        value="{{peopleInput}}"
+        placeholder="{{ui.peopleInputPlaceholder}}"
+        bindinput="onPeopleInput"
+      />
+      <view class="people-actions">
+        <view class="people-action cancel" bindtap="closePeopleDialog">{{ui.discountCancel}}</view>
+        <view class="people-action confirm" bindtap="confirmPeopleDialog">{{ui.discountConfirm}}</view>
+      </view>
+    </view>
+  </view>
+  <view class="merge-mask" wx:if="{{showMergeDialog}}" catchtap="closeMergeDialog">
+    <view class="merge-dialog" catchtap="stopMergeDialogTap">
+      <view class="merge-head">
+        <view>
+          <view class="merge-title">{{ui.mergeDialogTitle}}</view>
+          <view class="merge-tip">{{ui.mergeDialogTip}}</view>
+        </view>
+        <view class="merge-close" bindtap="closeMergeDialog">×</view>
+      </view>
+
+      <view class="merge-loading" wx:if="{{mergeLoading}}">{{ui.loading}}</view>
+      <view class="merge-loading" wx:elif="{{!mergeTableSections.length}}">{{ui.mergeEmpty}}</view>
+      <scroll-view class="merge-table-board" scroll-y wx:else>
+        <view class="merge-section" wx:for="{{mergeTableSections}}" wx:for-item="section" wx:key="areaKey">
+          <view class="merge-section-title">{{section.areaName}}</view>
+          <view class="merge-table-grid">
+            <view
+              class="merge-table-card {{table.statusClass}} {{table.selected ? 'merge-table-card-active' : ''}}"
+              wx:for="{{section.tables}}"
+              wx:for-item="table"
+              wx:key="tableKey"
+              data-table-key="{{table.tableKey}}"
+              bindtap="toggleMergeTable"
+            >
+              <view class="merge-table-name">{{table.label}}</view>
+              <view class="merge-table-info">
+                <text>{{ui.moneySymbol}}{{table.priceText}}</text>
+                <text>{{table.peopleText}}</text>
+              </view>
+              <view class="merge-table-status">{{table.statusText}}</view>
+            </view>
+          </view>
+        </view>
+      </scroll-view>
+
+      <view class="merge-actions">
+        <view class="merge-action cancel" bindtap="closeMergeDialog">{{ui.discountCancel}}</view>
+        <view
+          class="merge-action confirm"
+          bindtap="confirmMergeTables"
+        >{{ui.mergeTable}} {{selectedMergeTableCount}}</view>
+      </view>
     </view>
   </view>
 </view>

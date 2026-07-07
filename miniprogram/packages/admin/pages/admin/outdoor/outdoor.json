@@ -1,4 +1,6 @@
 {
   "navigationBarTitleText": "\u6237\u5916\u8ba2\u5355",
+  "pageOrientation": "landscape",
+  "disableScroll": true,
   "usingComponents": {}
 }

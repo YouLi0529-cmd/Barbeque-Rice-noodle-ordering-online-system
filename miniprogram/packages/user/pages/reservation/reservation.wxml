@@ -1,0 +1,108 @@
+<!-- packages/user/pages/reservation/reservation.wxml -->
+<view class="reservation-page">
+  <view class="top-safe-bg" style="height: {{statusBarHeight}}px;"></view>
+  <view class="reservation-header" style="padding-top: {{statusBarHeight}}px;">
+    <view class="reservation-nav" style="height: {{navBarHeight}}px;">
+      <view class="reservation-nav-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">
+        <view class="back-btn" bindtap="goBack">
+          <view class="back-icon" style="width: {{navIconSize}}px; height: {{navIconSize}}px; border-width: {{navIconStroke}}px;"></view>
+        </view>
+        <view class="reservation-title" style="font-size: {{navTitleFontSize}}px; line-height: {{navTitleFontSize}}px;">预约</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="reservation-content">
+    <view class="reservation-card">
+      <view class="form-section time-summary">
+        <view class="section-label">时间</view>
+        <view class="summary-value">{{selectedDateText}} {{selectedTime}}</view>
+      </view>
+
+      <view class="form-section">
+        <view class="section-label">日期</view>
+        <scroll-view class="date-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+          <view class="date-row">
+            <view
+              class="date-chip {{selectedDate === item.value ? 'active' : ''}}"
+              wx:for="{{weekDates}}"
+              wx:key="value"
+              data-value="{{item.value}}"
+              bindtap="selectDate"
+            >
+              <view class="date-week">{{item.week}}</view>
+              <view class="date-day">{{item.day}}</view>
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+
+      <view class="form-section">
+        <view class="section-label">时段</view>
+        <view class="option-grid time-grid">
+          <view
+            class="option-chip {{!isCustomTime && selectedTime === item ? 'active' : ''}}"
+            wx:for="{{timeOptions}}"
+            wx:key="*this"
+            data-value="{{item}}"
+            bindtap="selectTime"
+          >{{item}}</view>
+          <picker mode="time" value="{{customTime}}" bindchange="onCustomTimeChange">
+            <view class="option-chip custom-chip {{isCustomTime ? 'active' : ''}}">
+              {{isCustomTime ? customTime : '自定义时间'}}
+            </view>
+          </picker>
+        </view>
+      </view>
+
+      <view class="form-section">
+        <view class="section-label">人数</view>
+        <view class="option-grid people-grid">
+          <view
+            class="option-chip {{!isCustomPeople && selectedPeople === item ? 'active' : ''}}"
+            wx:for="{{peopleOptions}}"
+            wx:key="*this"
+            data-value="{{item}}"
+            bindtap="selectPeople"
+          >{{item}}人</view>
+          <view class="custom-people-box {{isCustomPeople ? 'active' : ''}}">
+            <input
+              class="custom-people-input"
+              type="number"
+              maxlength="2"
+              value="{{customPeople}}"
+              placeholder="自定义人数"
+              bindfocus="focusCustomPeople"
+              bindinput="onCustomPeopleInput"
+            />
+          </view>
+        </view>
+      </view>
+
+      <view class="form-section room-section">
+        <view class="section-label">房间</view>
+        <view class="option-grid room-grid">
+          <view
+            class="option-chip room-chip {{selectedRoom === item ? 'active' : ''}}"
+            wx:for="{{roomOptions}}"
+            wx:key="*this"
+            data-value="{{item}}"
+            bindtap="selectRoom"
+          >{{item}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="reservation-submit" bindtap="submitReservation">提交预约</view>
+  </view>
+
+  <avatar-nickname-modal
+    showAvaModal="{{showAuthModal}}"
+    loadingGif="{{actionLoadingGif}}"
+    titleText="授权手机号完成预约"
+    descText="预约需要手机号，方便门店确认到店时间。"
+    confirmText="授权并预约"
+    bind:saved="onUserInfoSaved"
+    bind:closed="onAuthModalClosed">
+  </avatar-nickname-modal>
+</view>

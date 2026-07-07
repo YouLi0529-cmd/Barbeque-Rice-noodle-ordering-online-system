@@ -1,58 +1,188 @@
-<!-- admin simple collection page -->
-<view class="admin-simple-page">
-  <view class="admin-simple-header">
-    <view class="admin-simple-title">{{ui.title}}</view>
-    <view class="admin-simple-actions">
-      <view class="header-btn" bindtap="loadList">{{ui.refresh}}</view>
-      <view class="header-btn primary" wx:if="{{canAdd}}" bindtap="showAddModal">{{ui.add}}</view>
-    </view>
-  </view>
-
-  <view class="search-row" wx:if="{{allowSearch}}">
-    <input class="search-input" placeholder="{{ui.searchPlaceholder}}" value="{{keyword}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="doSearch" />
-    <view class="search-btn" bindtap="doSearch">{{ui.searchPlaceholder}}</view>
-    <view class="clear-btn" bindtap="clearSearch">x</view>
-  </view>
-
-  <scroll-view class="admin-list" scroll-y>
-    <view class="admin-card" wx:for="{{list}}" wx:key="_id">
-      <view class="card-head">
-        <view class="card-title">{{item._displayTitle}}</view>
-        <view class="card-status" wx:if="{{item._displayStatus}}">{{item._displayStatus}}</view>
-      </view>
-      <view class="card-subtitle" wx:if="{{item._displaySubtitle}}">{{item._displaySubtitle}}</view>
-      <view class="line-row" wx:for="{{item._displayLines}}" wx:for-item="line" wx:key="key">
-        <text class="line-label">{{line.label}}</text>
-        <text class="line-value">{{line.value}}</text>
-      </view>
-      <view class="card-actions">
-        <view class="mini-btn" wx:if="{{canEdit}}" bindtap="showEditModal" data-item="{{item}}">{{ui.edit}}</view>
-        <view class="mini-btn" wx:for="{{item._actions}}" wx:for-item="act" wx:for-index="actIndex" wx:key="label" bindtap="runAction" data-id="{{item._id}}" data-index="{{actIndex}}">{{act.label}}</view>
-        <view class="mini-btn danger" wx:if="{{canDelete}}" bindtap="deleteItem" data-item="{{item}}">{{ui.delete}}</view>
+<!-- packages/admin/pages/admin/outdoor/outdoor.wxml -->
+<view class="outdoor-page">
+  <view class="outdoor-left">
+    <view class="outdoor-tools">
+      <input class="search-input" placeholder="{{ui.searchPlaceholder}}" value="{{keyword}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="doSearch" />
+      <view class="tool-actions">
+        <view class="tool-btn refresh-btn" bindtap="loadList">{{ui.refresh}}</view>
+        <view class="tool-btn clear-btn" bindtap="clearSearch">{{ui.clear}}</view>
+        <view class="tool-btn search-btn" bindtap="doSearch">{{ui.search}}</view>
       </view>
     </view>
 
-    <view class="empty-text" wx:if="{{!loading && list.length === 0}}">{{ui.empty}}</view>
-    <view class="empty-text" wx:if="{{loading}}">{{ui.loading}}</view>
-  </scroll-view>
-
-  <view class="modal-mask" wx:if="{{showModal}}" catchtap="closeModal">
-    <view class="modal-dialog" catchtap="stopPropagation">
-      <view class="modal-title">{{editMode ? ui.edit : ui.add}}</view>
-      <scroll-view class="modal-content" scroll-y>
-        <view class="form-item" wx:for="{{formFields}}" wx:key="key">
-          <view class="form-label">{{item.label}}</view>
-          <textarea wx:if="{{item.type === 'textarea'}}" class="form-textarea" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
-          <view wx:elif="{{item.type === 'switch'}}" class="switch-row">
-            <text>{{item.value ? ui.yes : ui.no}}</text>
-            <switch checked="{{item.value}}" data-key="{{item.key}}" bindchange="onFieldSwitch" color="#C99A4A" />
-          </view>
-          <input wx:else class="form-input" type="{{item.type === 'number' ? 'digit' : 'text'}}" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
+    <scroll-view class="order-list" scroll-y>
+      <view
+        class="order-card {{selectedOrderId === item._id ? 'active' : ''}}"
+        wx:for="{{list}}"
+        wx:key="_id"
+        bindtap="selectOrder"
+        data-id="{{item._id}}"
+      >
+        <view class="order-card-head">
+          <view class="order-no">{{item._displayTitle}}</view>
+          <view class="order-status">{{item._displayStatus}}</view>
         </view>
-      </scroll-view>
-      <view class="modal-footer">
-        <view class="modal-btn cancel" bindtap="closeModal">{{ui.cancel}}</view>
-        <view class="modal-btn confirm" bindtap="saveItem">{{ui.save}}</view>
+        <view class="order-card-meta">
+          <text>{{item._outdoorPointText}}</text>
+          <text>{{item._createTimeText}}</text>
+        </view>
+        <view class="order-card-foot">
+          <text>{{item._goodsCountText}}</text>
+          <text class="order-price">{{item._priceText}}</text>
+        </view>
+      </view>
+
+      <view class="empty-text" wx:if="{{!loading && list.length === 0}}">{{ui.empty}}</view>
+      <view class="empty-text" wx:if="{{loading}}">{{ui.loading}}</view>
+    </scroll-view>
+  </view>
+
+  <view class="outdoor-workspace">
+    <view class="bill-shell">
+      <view class="order-panel">
+        <view class="bill-top" wx:if="{{selectedOrder}}">
+          <view class="bill-title-row">
+            <view class="panel-title">{{orderTitle}}</view>
+            <view class="status-pill">{{statusText}}</view>
+          </view>
+          <view class="table-meta-row">
+            <text>{{outdoorPointText}}</text>
+          </view>
+        </view>
+
+        <view class="empty-bill" wx:if="{{loading}}">
+          <view class="empty-title">{{ui.loading}}</view>
+        </view>
+
+        <view class="empty-bill" wx:elif="{{!selectedOrder}}">
+          <view class="empty-title">{{ui.selectTip}}</view>
+        </view>
+
+        <scroll-view class="bill-groups" scroll-y wx:else>
+          <view class="bill-group">
+            <view
+              class="dish-row {{item.selected ? 'dish-row-active' : ''}}"
+              wx:for="{{goodsList}}"
+              wx:key="key"
+              data-key="{{item.key}}"
+              bindtap="toggleGoodsSelection"
+            >
+              <view class="dish-main">
+                <view class="dish-name">{{item.name}}</view>
+                <view class="dish-tags" wx:if="{{item.optionText}}">{{item.optionText}}</view>
+              </view>
+              <view class="dish-count">x{{item.count}}</view>
+              <view class="dish-price">{{ui.moneySymbol}}{{item.subtotalText}}</view>
+            </view>
+          </view>
+        </scroll-view>
+
+        <view class="bill-summary-footer" wx:if="{{selectedOrder && !loading}}">
+          <text>{{goodsCountText}}</text>
+          <text class="summary-total-price">{{ui.moneySymbol}}{{totalPriceText}}</text>
+        </view>
+
+        <view class="bill-total">
+          <view class="mini-send-kitchen" bindtap="sendKitchen">{{ui.sendKitchen}}</view>
+          <view class="total-area"></view>
+        </view>
+      </view>
+
+      <view class="dish-action-strip">
+        <view class="strip-title">{{ui.orderActions}}</view>
+        <view
+          class="operation-btn"
+          wx:for="{{orderActions}}"
+          wx:key="label"
+          data-index="{{index}}"
+          bindtap="runOrderAction"
+        >
+          {{item.label}}
+        </view>
+      </view>
+    </view>
+
+    <view class="pay-panel">
+      <view class="panel-title">{{ui.payTitle}}</view>
+
+      <view class="pay-section">
+        <view class="pay-section-title">{{ui.discountTitle}}</view>
+        <view class="option-row">
+          <view
+            class="pay-option {{discountType === item.value ? 'pay-option-active' : ''}}"
+            wx:for="{{discountOptions}}"
+            wx:key="value"
+            data-value="{{item.value}}"
+            bindtap="selectDiscount"
+          >
+            {{item.label}}
+          </view>
+        </view>
+      </view>
+
+      <view class="pay-section">
+        <view class="pay-section-title">{{ui.paymentTitle}}</view>
+        <view class="option-row">
+          <view
+            class="pay-option {{paymentMethod === item.value ? 'pay-option-active' : ''}}"
+            wx:for="{{paymentOptions}}"
+            wx:key="value"
+            data-value="{{item.value}}"
+            bindtap="selectPayment"
+          >
+            {{item.label}}
+          </view>
+        </view>
+      </view>
+
+      <view class="summary-card">
+        <view class="summary-title">{{ui.billSummary}}</view>
+        <view class="summary-row">
+          <text>{{ui.priceTotal}}</text>
+          <text>{{ui.moneySymbol}}{{paySummary.totalText}}</text>
+        </view>
+        <view class="summary-row strong-row">
+          <view class="discount-summary-label">
+            <text>{{ui.receivable}}</text>
+            <text class="discount-summary-text" wx:if="{{paySummary.discountText}}">{{paySummary.discountText}}</text>
+          </view>
+          <text>{{ui.moneySymbol}}{{paySummary.receivableText}}</text>
+        </view>
+        <view class="summary-row">
+          <text>{{paySummary.paymentLabel}}</text>
+          <text>{{ui.actualReceived}}{{ui.moneySymbol}}{{paySummary.receivedText}}</text>
+        </view>
+      </view>
+
+      <button
+        class="return-all-btn"
+        loading="{{saving}}"
+        disabled="{{saving || !selectedOrder}}"
+        bindtap="confirmAllReturned"
+      >{{ui.confirmAllReturned}}</button>
+
+      <button
+        class="checkout-btn"
+        loading="{{saving}}"
+        disabled="{{saving || !selectedOrder}}"
+        bindtap="finishCheckout"
+      >{{ui.finishCheckout}}</button>
+    </view>
+  </view>
+
+  <view class="discount-mask" wx:if="{{showDiscountDialog}}" catchtap="closeDiscountDialog">
+    <view class="discount-dialog" catchtap="stopDiscountDialogTap">
+      <view class="discount-title">{{ui.discountDialogTitle}}</view>
+      <input
+        class="discount-input"
+        type="digit"
+        value="{{discountInput}}"
+        placeholder="{{ui.discountInputPlaceholder}}"
+        bindinput="onDiscountInput"
+      />
+      <view class="discount-actions">
+        <view class="discount-action cancel" bindtap="closeDiscountDialog">{{ui.discountCancel}}</view>
+        <view class="discount-action confirm" bindtap="confirmDiscountDialog">{{ui.discountConfirm}}</view>
       </view>
     </view>
   </view>

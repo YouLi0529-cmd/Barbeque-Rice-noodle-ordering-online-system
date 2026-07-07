@@ -10,13 +10,20 @@
       <view class="action-card" hover-class="btn-hover" bindtap="goOrder">
         <text>预点单</text>
       </view>
-      <view class="action-card" hover-class="btn-hover" bindtap="goContact">
-        <text>联系我</text>
+      <view class="action-card" hover-class="btn-hover" bindtap="goReservation">
+        <text>预约</text>
       </view>
       <view class="action-card camping-card" hover-class="btn-hover" bindtap="goCamping">
         <image class="plane-img corner-plane" src="/images/zhifeiji2-transparent.png" mode="aspectFit"></image>
         <text>{{planeState ? '出发中...' : '去露营'}}</text>
       </view>
+    </view>
+  </view>
+
+  <view class="floating-contact-btn" hover-class="btn-hover" bindtap="goContact">
+    <view class="phone-icon">
+      <view class="phone-icon-body"></view>
+      <view class="phone-icon-dot"></view>
     </view>
   </view>
 

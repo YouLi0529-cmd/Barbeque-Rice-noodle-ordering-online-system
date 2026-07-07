@@ -101,9 +101,8 @@ Page({
   },
 
   getMergedStatus(orders) {
-    const statuses = orders.map(order => Number(order.status))
-    if (statuses.length > 0 && statuses.every(status => status === 3)) return 3
-    if (statuses.length > 0 && statuses.every(status => status === 2)) return 2
+    if (orders.length > 0 && orders.every(order => this.isOrderCancelled(order))) return 'cancelled'
+    if (orders.length > 0 && orders.every(order => this.isOrderCompleted(order))) return 'completed'
     const rootOrder = orders.find(order => order.isAddOnOrder !== true) || orders[0] || {}
     return rootOrder.status
   },
@@ -170,13 +169,32 @@ Page({
     return expiresAt > 0 && expiresAt <= Date.now()
   },
 
+  isOrderCompleted(order) {
+    const status = String(order && order.status != null ? order.status : '').toLowerCase()
+    return !!order && (
+      order.pay_status === true ||
+      order.payStatus === true ||
+      order.checkoutStatus === 'finished' ||
+      status === 'completed' ||
+      status === 'paid' ||
+      Number(order.status) === 2
+    )
+  },
+
+  isOrderCancelled(order) {
+    const status = String(order && order.status != null ? order.status : '').toLowerCase()
+    return !!order && (
+      status === 'cancelled' ||
+      Number(order.status) === 3
+    )
+  },
+
   getOrderStatusText(order) {
-    const status = Number(order.status)
-    if (status === 2) return '已完成'
-    if (status === 3) return '已取消'
     if (this.isSavedOrder(order)) {
       return '已保存'
     }
+    if (this.isOrderCompleted(order)) return '已完成'
+    if (this.isOrderCancelled(order)) return '已取消'
     return '已提交'
   },
 

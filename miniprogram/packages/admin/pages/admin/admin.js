@@ -30,8 +30,19 @@ const ADMIN_TEXT = {
   printerDesc: '\u5c0f\u7968\u6253\u5370\u914d\u7f6e',
   rechargeTitle: '\u5145\u503c\u9009\u9879',
   rechargeDesc: '\u6682\u65f6\u4fdd\u7559',
+  reservationModalTitle: '\u65b0\u9884\u7ea6',
+  reservationEmpty: '\u6682\u65e0\u65b0\u9884\u7ea6',
+  reservationRefresh: '\u5237\u65b0',
+  reservationPhone: '\u624b\u673a',
+  reservationDate: '\u5230\u5e97\u65f6\u95f4',
+  reservationPeople: '\u4eba\u6570',
+  reservationRoom: '\u623f\u95f4',
+  reservationDetailTitle: '\u9884\u7ea6\u8be6\u60c5',
+  confirmReservation: '\u786e\u8ba4\u9884\u7ea6',
+  reservationConfirmed: '\u5df2\u786e\u8ba4\u9884\u7ea6',
   changePassword: '\u4fee\u6539\u5bc6\u7801',
   back: '\u8fd4\u56de',
+  close: '\u5173\u95ed',
   setupAdminPassword: '\u8bbe\u7f6e\u7ba1\u7406\u5458\u5bc6\u7801',
   adminLogin: '\u7ba1\u7406\u5458\u767b\u5f55',
   setupPasswordPlaceholder: '\u8bf7\u8bbe\u7f6e\u7ba1\u7406\u5458\u5bc6\u7801\uff08\u81f3\u5c116\u4f4d\uff09',
@@ -40,10 +51,31 @@ const ADMIN_TEXT = {
   cancel: '\u53d6\u6d88',
   setup: '\u8bbe\u7f6e',
   login: '\u767b\u5f55',
+  loading: '\u52a0\u8f7d\u4e2d',
   oldPasswordPlaceholder: '\u8bf7\u8f93\u5165\u539f\u5bc6\u7801',
   newPasswordPlaceholder: '\u8bf7\u8f93\u5165\u65b0\u5bc6\u7801\uff08\u81f3\u5c116\u4f4d\uff09',
   confirmPasswordPlaceholder: '\u8bf7\u518d\u6b21\u8f93\u5165\u65b0\u5bc6\u7801',
   confirm: '\u786e\u8ba4'
+}
+
+const AUTH_REQUIRED_TIP = '\u5fc5\u987b\u767b\u5f55\u624d\u80fd\u8fdb\u5165\u540e\u53f0'
+const PASSWORD_REQUIRED_TIP = '\u8bf7\u8f93\u5165\u5bc6\u7801'
+const PASSWORD_LENGTH_TIP = '\u5bc6\u7801\u4e0d\u80fd\u5c11\u4e8e6\u4f4d'
+const PASSWORD_ERROR_TIP = '\u5bc6\u7801\u9519\u8bef'
+
+function formatReservation(item = {}) {
+  const dateText = item.reservationDateText || item.reservationDate || ''
+  const timeText = item.reservationTime || ''
+  const digits = String(item.phone || item.phoneNumber || '').replace(/\D/g, '')
+  const lastFour = digits.slice(-4)
+  return {
+    ...item,
+    displayPhone: lastFour ? `\u5c3e\u53f7${lastFour}` : '\u672a\u8bb0\u5f55',
+    detailPhone: item.phone || item.phoneNumber || '\u672a\u8bb0\u5f55',
+    displayDateTime: `${dateText} ${timeText}`.trim() || '\u672a\u8bb0\u5f55',
+    displayPeople: `${item.peopleCount || 0}\u4eba`,
+    displayRoom: item.roomType || '\u672a\u9009\u62e9'
+  }
 }
 
 Page({
@@ -54,10 +86,19 @@ Page({
     showAuthModal: false,
     isFirstTime: false,
     adminPassword: '',
+    authRequiredTip: '',
     showPasswordModal: false,
     oldPassword: '',
     newPassword: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    reservationCount: 0,
+    reservationBadgeText: '',
+    reservationList: [],
+    reservationLoading: false,
+    showReservationModal: false,
+    selectedReservation: null,
+    showReservationDetailModal: false,
+    confirmingReservation: false
   },
 
   async onLoad(options = {}) {
@@ -66,6 +107,20 @@ Page({
     if (options.changePassword === 'true' && this.data.isAuthorized) {
       this.showChangePassword()
     }
+  },
+
+  onShow() {
+    if (!this.data.isAuthorized) return
+    this.loadReservationList(true)
+    this.startReservationPolling()
+  },
+
+  onHide() {
+    this.stopReservationPolling()
+  },
+
+  onUnload() {
+    this.stopReservationPolling()
   },
 
   async prepareAdminAuth() {
@@ -80,7 +135,8 @@ Page({
         isAuthorized: false,
         showAuthModal: true,
         isFirstTime: !hasAdmin,
-        adminPassword: ''
+        adminPassword: '',
+        authRequiredTip: ''
       })
     } catch (err) {
       wx.hideLoading()
@@ -90,7 +146,8 @@ Page({
         isAuthorized: false,
         showAuthModal: true,
         isFirstTime: false,
-        adminPassword: ''
+        adminPassword: '',
+        authRequiredTip: ''
       })
       wx.showToast({
         title: '\u670d\u52a1\u8fde\u63a5\u5931\u8d25',
@@ -100,27 +157,28 @@ Page({
   },
 
   onAdminPasswordInput(e) {
-    this.setData({ adminPassword: e.detail.value })
+    this.setData({
+      adminPassword: e.detail.value,
+      authRequiredTip: ''
+    })
   },
 
   closeAuthModal() {
     this.setData({
-      showAuthModal: false,
-      adminPassword: ''
+      authRequiredTip: AUTH_REQUIRED_TIP
     })
-    this.goBack()
   },
 
   async confirmAdminAuth() {
     const password = String(this.data.adminPassword || '').trim()
 
     if (!password) {
-      wx.showToast({ title: '\u8bf7\u8f93\u5165\u5bc6\u7801', icon: 'none' })
+      this.setData({ authRequiredTip: PASSWORD_REQUIRED_TIP })
       return
     }
 
     if (password.length < 6) {
-      wx.showToast({ title: '\u5bc6\u7801\u4e0d\u80fd\u5c11\u4e8e6\u4f4d', icon: 'none' })
+      this.setData({ authRequiredTip: PASSWORD_LENGTH_TIP })
       return
     }
 
@@ -141,15 +199,17 @@ Page({
       this.setData({
         isAuthorized: true,
         showAuthModal: false,
-        adminPassword: ''
+        adminPassword: '',
+        authRequiredTip: ''
       })
+      this.loadReservationList(true)
+      this.startReservationPolling()
       wx.showToast({ title: '\u767b\u5f55\u6210\u529f', icon: 'success' })
     } catch (err) {
       wx.hideLoading()
       console.error('admin auth failed', err)
-      wx.showToast({
-        title: err.message || '\u64cd\u4f5c\u5931\u8d25',
-        icon: 'none'
+      this.setData({
+        authRequiredTip: PASSWORD_ERROR_TIP
       })
     }
   },
@@ -171,7 +231,122 @@ Page({
   },
 
   goToReservation() {
-    wx.navigateTo({ url: `${ADMIN_ROOT}/reservation/reservation` })
+    if (!this.data.isAuthorized) {
+      this.setData({ showAuthModal: true })
+      return
+    }
+    this.setData({ showReservationModal: true })
+    this.loadReservationList()
+  },
+
+  async loadReservationList(silent = false) {
+    if (silent && silent.currentTarget) silent = false
+    if (!this.data.isAuthorized) return
+    if (!silent) {
+      this.setData({ reservationLoading: true })
+    }
+
+    try {
+      const res = await apiClient.call('admin.collection.list', {
+        collection: 'reservation',
+        filters: { status: 'pending' },
+        orderBy: 'createTime',
+        order: 'desc',
+        limit: 100
+      })
+      const reservationList = (res.data || []).map(formatReservation)
+      const count = reservationList.length
+      this.setData({
+        reservationList,
+        reservationCount: count,
+        reservationBadgeText: count > 99 ? '99+' : (count ? String(count) : ''),
+        reservationLoading: false
+      })
+    } catch (err) {
+      console.error('load reservations failed', err)
+      this.setData({ reservationLoading: false })
+      if (!silent) {
+        wx.showToast({
+          title: err.message || '\u9884\u7ea6\u52a0\u8f7d\u5931\u8d25',
+          icon: 'none'
+        })
+      }
+    }
+  },
+
+  startReservationPolling() {
+    this.stopReservationPolling()
+    this.reservationTimer = setInterval(() => {
+      if (this.data.isAuthorized) {
+        this.loadReservationList(true)
+      }
+    }, 30000)
+  },
+
+  stopReservationPolling() {
+    if (!this.reservationTimer) return
+    clearInterval(this.reservationTimer)
+    this.reservationTimer = null
+  },
+
+  closeReservationModal() {
+    this.setData({
+      showReservationModal: false,
+      showReservationDetailModal: false,
+      selectedReservation: null
+    })
+  },
+
+  openReservationDetail(e) {
+    const index = Number(e.currentTarget.dataset.index)
+    const selectedReservation = this.data.reservationList[index]
+    if (!selectedReservation) return
+    this.setData({
+      selectedReservation,
+      showReservationDetailModal: true
+    })
+  },
+
+  closeReservationDetailModal() {
+    this.setData({
+      showReservationDetailModal: false,
+      selectedReservation: null
+    })
+  },
+
+  async confirmReservation() {
+    const reservation = this.data.selectedReservation
+    if (!reservation || !reservation._id || this.data.confirmingReservation) return
+
+    this.setData({ confirmingReservation: true })
+
+    try {
+      await apiClient.call('admin.collection.update', {
+        collection: 'reservation',
+        id: reservation._id,
+        data: {
+          status: 'confirmed',
+          confirmedAt: new Date().toISOString()
+        }
+      })
+      wx.showToast({
+        title: ADMIN_TEXT.reservationConfirmed,
+        icon: 'success'
+      })
+      this.setData({
+        confirmingReservation: false,
+        showReservationDetailModal: false,
+        selectedReservation: null
+      })
+      this.loadReservationList(true)
+    } catch (err) {
+      console.error('confirm reservation failed', err)
+      this.setData({ confirmingReservation: false })
+      wx.showToast({
+        title: err.message || '\u786e\u8ba4\u5931\u8d25',
+        icon: 'none'
+      })
+    }
   },
 
   goToOutdoor() {

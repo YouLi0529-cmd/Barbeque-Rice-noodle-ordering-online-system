@@ -1,11 +1,63 @@
 <!-- packages/admin/pages/admin/table/table.wxml -->
 <view class="table-page">
-  <scroll-view class="table-board" scroll-y>
+  <view class="transfer-banner" wx:if="{{transferMode}}">
+    <view class="transfer-copy">
+      <text class="transfer-title">{{ui.transferTitle}}</text>
+      <text class="transfer-source">{{transferSourceText}}</text>
+      <text class="transfer-tip">{{ui.transferTip}}</text>
+    </view>
+    <view class="transfer-cancel" bindtap="cancelTransfer">{{ui.cancelTransfer}}</view>
+  </view>
+  <view class="transfer-banner merge-banner" wx:elif="{{mergeMode}}">
+    <view class="transfer-copy">
+      <text class="transfer-title">{{ui.mergeTitle}}</text>
+      <text class="transfer-source">{{mergeSourceText}}</text>
+      <text class="transfer-tip">{{ui.mergeTip}}</text>
+    </view>
+    <view class="merge-banner-actions">
+      <view class="merge-count">{{ui.mergeSelected}}{{selectedMergeTableCount}}{{ui.mergeUnit}}</view>
+      <view class="transfer-cancel" bindtap="cancelMerge">{{ui.cancelMerge}}</view>
+      <view class="merge-confirm" bindtap="confirmMergeTables">{{ui.confirmMerge}}</view>
+    </view>
+  </view>
+
+  <view class="reservation-reminder-bar" wx:if="{{reservationReminders.length > 0 && !transferMode && !mergeMode}}">
+    <view class="reservation-reminder-copy">
+      <view class="reservation-reminder-title">{{ui.reservationReminderTitle}}</view>
+    </view>
+    <scroll-view class="reservation-reminder-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="reservation-reminder-list">
+        <view
+          class="reservation-reminder-card {{selectedReservationReminderId === item._id ? 'selected' : ''}}"
+          wx:for="{{reservationReminders}}"
+          wx:key="_id"
+          bindtap="selectReservationReminder"
+          data-id="{{item._id}}">
+          <text class="reservation-room">{{item.displayRoom}}</text>
+          <text class="reservation-time">{{item.displayDateTime}}</text>
+          <text class="reservation-people">{{item.displayPeople}}</text>
+          <text class="reservation-phone">{{item.displayPhone}}</text>
+        </view>
+      </view>
+    </scroll-view>
+    <view class="reservation-actions">
+      <view
+        class="reservation-action arrived"
+        bindtap="handleReservationAction"
+        data-status="arrived">{{ui.reservationArrived}}</view>
+      <view
+        class="reservation-action cancel"
+        bindtap="handleReservationAction"
+        data-status="cancelled">{{ui.reservationCancel}}</view>
+    </view>
+  </view>
+
+  <scroll-view class="table-board {{transferMode || mergeMode ? 'table-board-transfer' : ''}} {{reservationReminders.length > 0 && !transferMode && !mergeMode ? 'table-board-reservation' : ''}}" scroll-y>
     <view class="table-section" wx:for="{{tableSections}}" wx:for-item="section" wx:key="areaKey">
       <view class="section-title">{{section.areaName}}</view>
       <view class="table-section-body">
         <view
-          class="table-card {{table.statusClass}}"
+          class="table-card {{table.statusClass}} {{table.mergeSelected ? 'table-card-merge-selected' : ''}} {{table.mergeSource ? 'table-card-merge-source' : ''}}"
           wx:for="{{section.tables}}"
           wx:for-item="table"
           wx:key="tableKey"
@@ -18,7 +70,8 @@
           data-price="{{table.totalPrice}}"
           data-people="{{table.peopleCount}}"
           data-max="{{table.maxPeople}}"
-          data-scanned="{{table.scannedAt}}">
+          data-scanned="{{table.scannedAt}}"
+          data-finished="{{table.finishedAt}}">
           <view class="table-card-head">
             <view class="table-name">
               <text class="table-number">{{table.tableNumber}}</text>

@@ -13,10 +13,209 @@ page {
   overflow: hidden;
 }
 
+.transfer-banner {
+  height: 38rpx;
+  padding: 0 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  box-sizing: border-box;
+  background: #2C1A12;
+  color: #FFF7EC;
+}
+
+.transfer-copy {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.transfer-title {
+  font-size: 13rpx;
+  font-weight: 900;
+}
+
+.transfer-source {
+  color: #F5D58B;
+  font-size: 13rpx;
+  font-weight: 900;
+}
+
+.transfer-tip {
+  color: rgba(255, 247, 236, 0.72);
+  font-size: 10rpx;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transfer-cancel {
+  width: 74rpx;
+  height: 24rpx;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  background: rgba(255, 247, 236, 0.14);
+  color: #FFF7EC;
+  font-size: 10rpx;
+  font-weight: 900;
+}
+
+.merge-banner-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.merge-count {
+  height: 24rpx;
+  padding: 0 10rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  color: #2C1A12;
+  background: #F5D58B;
+  font-size: 10rpx;
+  font-weight: 900;
+}
+
+.merge-confirm {
+  height: 24rpx;
+  padding: 0 12rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  color: #2C1A12;
+  background: #FFF7EC;
+  font-size: 10rpx;
+  font-weight: 900;
+}
+
+.reservation-reminder-bar {
+  height: 46rpx;
+  padding: 6rpx 18rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  box-sizing: border-box;
+  background: #FFF7EC;
+  border-bottom: 1rpx solid rgba(58, 36, 24, 0.08);
+}
+
+.reservation-reminder-copy {
+  width: 58rpx;
+  flex: none;
+  min-width: 0;
+}
+
+.reservation-reminder-title {
+  color: #3A2418;
+  font-size: 12rpx;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.reservation-reminder-scroll {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.reservation-reminder-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 100%;
+}
+
+.reservation-reminder-card {
+  height: 32rpx;
+  padding: 0 10rpx;
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  border-radius: 9rpx;
+  box-sizing: border-box;
+  background: #FFFFFF;
+  border: 1rpx solid rgba(154, 100, 42, 0.18);
+  box-shadow: 0 5rpx 12rpx rgba(58, 36, 24, 0.08);
+}
+
+.reservation-reminder-card.selected {
+  background: rgba(245, 213, 139, 0.2);
+  border-color: rgba(177, 91, 24, 0.72);
+  box-shadow:
+    0 0 0 2rpx rgba(245, 213, 139, 0.42),
+    0 5rpx 12rpx rgba(58, 36, 24, 0.1);
+}
+
+.reservation-room {
+  color: #8F3E17;
+  font-size: 10rpx;
+  font-weight: 900;
+}
+
+.reservation-time,
+.reservation-people,
+.reservation-phone {
+  color: rgba(58, 36, 24, 0.72);
+  font-size: 9rpx;
+  font-weight: 800;
+}
+
+.reservation-actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4rpx;
+}
+
+.reservation-action {
+  height: 20rpx;
+  padding: 0 7rpx;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  box-sizing: border-box;
+  font-size: 8rpx;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.reservation-action.arrived {
+  color: #FFFFFF;
+  background: #4B9D64;
+}
+
+.reservation-action.cancel {
+  color: #8F3E17;
+  background: rgba(143, 62, 23, 0.1);
+  border: 1rpx solid rgba(143, 62, 23, 0.22);
+}
+
 .table-board {
   height: calc(100vh - 34rpx);
   padding: 14rpx 18rpx 8rpx;
   box-sizing: border-box;
+}
+
+.table-board-transfer {
+  height: calc(100vh - 72rpx);
+}
+
+.table-board-reservation {
+  height: calc(100vh - 80rpx);
+  padding-top: 10rpx;
 }
 
 .table-section {
@@ -198,6 +397,21 @@ page {
 .table-card.status-empty {
   background: #FFFFFF;
   color: #3A2418;
+}
+
+.table-card-merge-selected {
+  box-shadow:
+    0 0 0 3rpx rgba(245, 213, 139, 0.9),
+    0 8rpx 18rpx rgba(58, 36, 24, 0.16),
+    0 2rpx 4rpx rgba(58, 36, 24, 0.12);
+  border-color: #B15B18;
+}
+
+.table-card-merge-source {
+  box-shadow:
+    0 0 0 3rpx rgba(44, 26, 18, 0.72),
+    0 8rpx 18rpx rgba(58, 36, 24, 0.16),
+    0 2rpx 4rpx rgba(58, 36, 24, 0.12);
 }
 
 .table-card.status-submitted {

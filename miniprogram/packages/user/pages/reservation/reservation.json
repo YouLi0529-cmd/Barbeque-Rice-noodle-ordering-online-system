@@ -1,0 +1,10 @@
+{
+  "navigationBarTitleText": "预约",
+  "navigationStyle": "custom",
+  "backgroundColor": "#f7efe3",
+  "backgroundColorTop": "#f7efe3",
+  "backgroundColorBottom": "#fffaf3",
+  "usingComponents": {
+    "avatar-nickname-modal": "/components/avatarNicknameModal/avatarNicknameModal"
+  }
+}

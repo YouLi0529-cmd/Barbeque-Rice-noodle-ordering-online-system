@@ -1,7 +1,20 @@
 <!-- packages/admin/pages/admin/dish/dish.wxml -->
 <view class="page">
   <view class="top-bar">
-    <view class="page-title">{{ui.pageTitle}}</view>
+    <view class="title-search">
+      <view class="page-title">{{ui.pageTitle}}</view>
+      <view class="dish-search">
+        <input
+          class="dish-search-input"
+          value="{{searchKeyword}}"
+          placeholder="{{ui.searchPlaceholder}}"
+          placeholder-style="color: rgba(255, 247, 236, 0.52);"
+          confirm-type="search"
+          bindinput="onSearchInput"
+          bindconfirm="confirmSearch" />
+        <text class="search-clear" wx:if="{{searchKeyword}}" bindtap="clearSearch">x</text>
+      </view>
+    </view>
     <view class="menu-tabs">
       <view
         wx:for="{{menuTypes}}"
@@ -37,14 +50,14 @@
 
     <view class="dish-content">
       <view class="dish-header">
-        <view class="header-title">{{currentCategoryId ? ui.pageTitle : ui.selectCategory}}</view>
-        <view class="add-dish-btn" bindtap="showAddDishModal" wx:if="{{currentCategoryId}}">
+        <view class="header-title">{{isSearching ? ui.searchResult : (currentCategoryId ? ui.pageTitle : ui.selectCategory)}}</view>
+        <view class="add-dish-btn" bindtap="showAddDishModal" wx:if="{{currentCategoryId && !isSearching}}">
           <text class="add-icon">+</text>
           <text>{{ui.addDish}}</text>
         </view>
       </view>
 
-      <scroll-view class="dish-list" scroll-y wx:if="{{currentCategoryId}}">
+      <scroll-view class="dish-list" scroll-y wx:if="{{currentCategoryId || isSearching}}">
         <view class="dish-item" wx:for="{{dishes}}" wx:key="_id">
           <view class="dish-image">
             <image wx:if="{{item.image}}" src="{{item.image}}" mode="aspectFill"></image>
@@ -56,7 +69,7 @@
 
           <view class="dish-info">
             <view class="dish-name">{{item.name}}</view>
-            <view class="dish-desc">{{item.description}}</view>
+            <view class="dish-desc">{{item.description || item.categoryName}}</view>
             <view class="dish-price">
               <text class="price-current">{{ui.currency}}{{item.price}}</text>
               <text class="price-unit">{{ui.slash}}{{item.unit || ui.defaultUnit}}</text>
@@ -72,7 +85,7 @@
           </view>
         </view>
 
-        <view class="empty-list" wx:if="{{dishes.length === 0 && !loadingDishes}}">{{ui.emptyDish}}</view>
+        <view class="empty-list" wx:if="{{dishes.length === 0 && !loadingDishes}}">{{isSearching ? ui.emptySearch : ui.emptyDish}}</view>
         <view class="empty-list" wx:if="{{loadingDishes}}">{{ui.loading}}</view>
       </scroll-view>
 

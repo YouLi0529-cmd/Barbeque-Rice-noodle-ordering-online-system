@@ -121,6 +121,16 @@ Page({
     })
   },
 
+  goReservation() {
+    this.preloadPackage('packages/user')
+    this.setData({
+      showContactModal: false
+    })
+    wx.navigateTo({
+      url: '/packages/user/pages/reservation/reservation'
+    })
+  },
+
   goCover() {
     this.setData({
       showContactModal: false

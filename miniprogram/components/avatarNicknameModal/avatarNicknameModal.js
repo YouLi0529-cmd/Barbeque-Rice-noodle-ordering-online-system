@@ -15,6 +15,18 @@ Component({
     loadingGif: {
       type: String,
       value: '/images/orderloadinggif-transparent.gif',
+    },
+    titleText: {
+      type: String,
+      value: '授权手机号完成下单',
+    },
+    descText: {
+      type: String,
+      value: '授权后将用会员卡号记录您的订单信息，无需单独设置昵称。',
+    },
+    confirmText: {
+      type: String,
+      value: '授权并提交',
     }
   },
 

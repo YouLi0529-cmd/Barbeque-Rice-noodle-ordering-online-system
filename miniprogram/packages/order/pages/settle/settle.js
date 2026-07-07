@@ -37,7 +37,7 @@ Page({
     appendToOrderId: '',
     isAddOnOrder: false,
     addOnIndex: 0,
-    currentCardTitle: '第一单'
+    currentCardTitle: '首单'
   },
 
   onLoad() {
@@ -61,7 +61,7 @@ Page({
     return {
       cardId: options.cardId || options.orderId || `pending-${Date.now()}`,
       orderId: options.orderId || '',
-      title: options.title || '第一单',
+      title: options.title || '首单',
       goods,
       goodsCount,
       totalPrice: Number(options.totalPrice || finalPrice),
@@ -219,7 +219,7 @@ Page({
       const activeOrderSession = this.getValidActiveOrderSession(cartData)
       const savedCards = activeOrderSession ? activeOrderSession.cards : []
       const addOnIndex = activeOrderSession ? Number(activeOrderSession.addOnCount || Math.max(savedCards.length - 1, 0)) + 1 : 0
-      const currentCardTitle = activeOrderSession ? `加菜单${addOnIndex}` : '第一单'
+      const currentCardTitle = activeOrderSession ? `加菜单${addOnIndex}` : '首单'
       const pendingCard = this.buildOrderCard({
         cardId: 'pending-current-order',
         title: currentCardTitle,

@@ -5,12 +5,12 @@
 
 		<view class="super-modal-body-box">
 			<view class="super-modal-title flex-jc-ac">
-				授权手机号完成下单
+				{{titleText}}
 				<image src="./image/close.png" mode="widthFix" bindtap="closeModalTap" style="position: absolute; top: 10rpx; right: 20rpx; height: 55rpx; width: 55rpx;"></image>
 			</view>
 
 				<view class="auth-desc">
-					授权后将用会员卡号记录您的订单信息，无需单独设置昵称。
+					{{descText}}
 				</view>
 
 				<view class="super-phone-box flex-jb-ac">
@@ -19,7 +19,7 @@
 						<view class="phone-display">{{phoneNumber || '未授权'}}</view>
 					</view>
 					<button class="phone-btn" open-type="getPhoneNumber" bindgetphonenumber="getphonenumber" disabled="{{saving}}">
-						{{saving ? '保存中' : '授权并提交'}}
+						{{saving ? '保存中' : confirmText}}
 					</button>
 				</view>
 
