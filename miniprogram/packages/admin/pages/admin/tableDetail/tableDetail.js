@@ -34,7 +34,7 @@ const UI = {
   mergeTableStarted: '\u8bf7\u9009\u62e9\u8981\u62fc\u7684\u684c\u53f0',
   mergedTables: '\u5df2\u62fc',
   mergeDialogTitle: '\u9009\u62e9\u62fc\u684c\u684c\u53f0',
-  mergeDialogTip: '\u53ea\u663e\u793a\u672a\u7ed3\u8d26\u4e14\u6709\u8ba2\u5355\u7684\u684c\u53f0',
+  mergeDialogTip: '\u53ef\u9009\u62e9\u7a7a\u684c\u6216\u672a\u7ed3\u8d26\u684c\u53f0',
   mergeEmpty: '\u6682\u65e0\u53ef\u62fc\u684c\u53f0',
   mergeConfirmTitle: '\u786e\u8ba4\u62fc\u684c',
   mergeConfirmPrefix: '\u786e\u5b9a\u5c06\u5f53\u524d\u684c\u4e0e',
@@ -259,12 +259,25 @@ function isSameTable(left, right) {
     left.tableNumber === right.tableNumber
 }
 
+function getSafeTableRef(table) {
+  const source = table || {}
+  const tableKeyParts = String(source.tableKey || '').split('-')
+  const areaKey = source.areaKey || tableKeyParts[0] || ''
+  const tableNumber = source.tableNumber || tableKeyParts[1] || ''
+  return {
+    areaKey,
+    areaName: source.areaName || '',
+    tableNumber,
+    tableKey: source.tableKey || (areaKey && tableNumber ? `${areaKey}-${tableNumber}` : '')
+  }
+}
+
 function formatMergeTableSections(sections, currentTable, selectedMap = {}) {
   return (sections || []).map(section => {
     const tables = (section.tables || [])
       .filter(table => {
         if (isSameTable(table, currentTable)) return false
-        return table.status !== 'empty' && table.status !== 'paid'
+        return table.status !== 'paid'
       })
       .map(table => {
         const status = STATUS[table.status] || STATUS.empty
@@ -850,7 +863,7 @@ Page({
   },
 
   startMergeTable() {
-    const table = this.data.table || {}
+    const table = getSafeTableRef(this.data.table)
     if (!table.tableNumber) {
       wx.showToast({
         title: UI.noOrder,

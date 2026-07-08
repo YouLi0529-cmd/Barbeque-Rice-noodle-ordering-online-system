@@ -188,9 +188,43 @@ page {
 
 /* 轮播公告 */
 .notice-wrapper {
+  position: relative;
+  z-index: 22;
+  flex: none;
+  display: block;
+  min-height: 58rpx;
+  padding: 0 30rpx 8rpx;
   background: #f5e7d5;
+  box-sizing: border-box;
+  overflow: visible;
 }
 
+.notice-component {
+  display: block;
+  width: 100%;
+}
+
+.notice-bar {
+  width: 100%;
+  height: 52rpx !important;
+  --notice-bar-height: 52rpx;
+  --notice-bar-line-height: 52rpx;
+  --notice-bar-padding: 0 18rpx;
+  --notice-bar-font-size: 22rpx;
+  --notice-bar-icon-size: 24rpx;
+  --notice-bar-icon-min-width: 30rpx;
+  display: flex !important;
+  align-items: center !important;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: rgba(255, 250, 241, 0.78) !important;
+  border: 1rpx solid rgba(216, 180, 126, 0.38);
+  box-shadow: 0 5rpx 14rpx rgba(95, 61, 32, 0.05);
+  box-sizing: border-box;
+  color: #7A4A1F !important;
+  font-size: 22rpx !important;
+  line-height: 52rpx !important;
+}
 /* 顶部用户信息栏 */
 .user-bar {
   background: linear-gradient(135deg, #e54d42 0%, #f37370 100%);
@@ -1071,8 +1105,6 @@ page {
   z-index: 10;
   line-height: 1;
   height: 100%;
-  display: flex;
-  align-items: center;
 }
 
 .modal-content {

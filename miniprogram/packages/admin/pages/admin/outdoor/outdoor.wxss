@@ -1041,6 +1041,19 @@ page {
   padding: 7rpx 0;
 }
 
+.dish-group-title {
+  margin: 4rpx 5rpx 3rpx;
+  padding-left: 6rpx;
+  color: #8A5526;
+  font-size: 9rpx;
+  font-weight: 900;
+  line-height: 16rpx;
+  border-left: 3rpx solid rgba(177, 91, 24, 0.56);
+  background: linear-gradient(90deg, rgba(255, 242, 211, 0.88), rgba(255, 247, 236, 0));
+  border-radius: 4rpx;
+  box-sizing: border-box;
+}
+
 .dish-row {
   min-height: 24rpx;
   display: grid;

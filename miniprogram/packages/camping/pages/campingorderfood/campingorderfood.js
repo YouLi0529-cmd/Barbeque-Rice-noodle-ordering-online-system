@@ -1,4 +1,4 @@
-﻿// packages/order/pages/index/index.js
+// packages/order/pages/index/index.js
 const app = getApp()
 const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()
@@ -66,14 +66,21 @@ Page({
   refreshCustomNav() {
     const navOptions = getCustomNavOptions()
     const searchRowHeight = 38
+    const topLift = Math.round(navOptions.navContentHeight * 0.3)
+    const navContentTop = Math.max(0, navOptions.navContentTop - topLift)
+    const searchRowTop = Math.max(
+      navContentTop + navOptions.navContentHeight + 4,
+      navOptions.navBarHeight + 8 - topLift
+    )
+
     this.setData({
       ...navOptions,
+      navContentTop,
       searchRowHeight,
-      searchRowTop: navOptions.navBarHeight + 8,
-      shopNavTotalHeight: navOptions.navBarHeight + searchRowHeight + 16
+      searchRowTop,
+      shopNavTotalHeight: searchRowTop + searchRowHeight + 8
     })
   },
-
   showActionLoading(text = '加载中') {
     this.setData({
       actionLoading: true,
@@ -829,10 +836,101 @@ Page({
     return Number.isInteger(value) ? String(value) : value.toFixed(2)
   },
 
+  isSingleQuantityGoods(goods) {
+    return !!goods && (Number(goods.maxOrderCount || 0) === 1 || goods.quantityMode === 'single')
+  },
+
+  getExclusiveGroup(goods) {
+    return goods && goods.exclusiveGroup ? String(goods.exclusiveGroup) : ''
+  },
+
+  hasExclusiveGroupConflict(cart, goods) {
+    const exclusiveGroup = this.getExclusiveGroup(goods)
+    if (!exclusiveGroup) {
+      return false
+    }
+
+    return Object.keys(cart || {}).some(cartKey => {
+      const item = cart[cartKey]
+      return (
+        item &&
+        item.info &&
+        item.dishId !== goods._id &&
+        this.getExclusiveGroup(item.info) === exclusiveGroup
+      )
+    })
+  },
+
+  getFreeThreshold(goods) {
+    const value = Number(goods && goods.freeThreshold)
+    return Number.isFinite(value) && value > 0 ? value : 0
+  },
+
+  formatCartPrice(price) {
+    const value = Number(price) || 0
+    return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  },
+
+  getCartPricing(cart) {
+    const nextCart = {}
+    const cartKeys = Object.keys(cart || {})
+    const thresholdBase = cartKeys.reduce((sum, cartKey) => {
+      const item = cart[cartKey]
+      if (!item || !item.info || !item.count) return sum
+      if (this.getFreeThreshold(item.info) > 0) return sum
+      return sum + Number(item.info.price || 0) * Number(item.count || 0)
+    }, 0)
+    let totalCount = 0
+    let totalPrice = 0
+
+    cartKeys.forEach(cartKey => {
+      const item = cart[cartKey]
+      if (!item || !item.info || !item.count) return
+      const count = this.isSingleQuantityGoods(item.info)
+        ? Math.min(Number(item.count || 1), 1)
+        : Number(item.count || 0)
+      if (!count) return
+
+      const originalPrice = Number(item.info.price || 0)
+      const freeThreshold = this.getFreeThreshold(item.info)
+      const freeByThreshold = freeThreshold > 0 && thresholdBase >= freeThreshold
+      const displayPrice = freeByThreshold ? 0 : originalPrice
+      const subtotal = displayPrice * count
+
+      totalCount += count
+      totalPrice += subtotal
+      nextCart[cartKey] = {
+        ...item,
+        count,
+        originalPrice,
+        displayPrice,
+        displayPriceText: this.formatCartPrice(displayPrice),
+        subtotal,
+        subtotalText: this.formatCartPrice(subtotal),
+        freeByThreshold
+      }
+    })
+
+    return {
+      cart: nextCart,
+      totalCount,
+      totalPrice
+    }
+  },
+
   // 确认添加到购物车
   confirmAddToCart(e) {
     const { currentDish, selectedTags, modalDishCount } = this.data
+    if (this.hasExclusiveGroupConflict(this.data.cart, currentDish)) {
+      wx.showToast({
+        title: '只能选择一种烤架',
+        icon: 'none'
+      })
+      return
+    }
+
     const cart = this.data.cart
+    const finalDishCount = this.isSingleQuantityGoods(currentDish) ? 1 : modalDishCount
     
     // 验证必选标签
     if (currentDish.tags && currentDish.tags.length > 0) {
@@ -884,12 +982,20 @@ Page({
       }
     }
     
+    if (this.isSingleQuantityGoods(currentDish) && cart[cartKey]) {
+      wx.showToast({
+        title: '该项只能添加1份',
+        icon: 'none'
+      })
+      return
+    }
+
     if (cart[cartKey]) {
-      cart[cartKey].count += modalDishCount
+      cart[cartKey].count += finalDishCount
     } else {
       cart[cartKey] = {
         info: currentDish,
-        count: modalDishCount,
+        count: finalDishCount,
         tags: { ...selectedTags },
         tagLabels: tagLabels, // 用于显示的标签数组
         dishId: currentDish._id // 保存原始菜品ID
@@ -941,11 +1047,26 @@ Page({
     
     // 如果菜品没有标签，直接添加（使用菜品ID作为key）
     if (!goods.tags || goods.tags.length === 0) {
+      if (this.hasExclusiveGroupConflict(this.data.cart, goods)) {
+        wx.showToast({
+          title: '只能选择一种烤架',
+          icon: 'none'
+        })
+        return
+      }
+
       const cart = { ...this.data.cart }
       const cartKey = goods._id
       const minOrderCount = goods.minOrderCount || 1
       
       if (cart[cartKey]) {
+        if (this.isSingleQuantityGoods(goods)) {
+          wx.showToast({
+            title: '该项只能添加1份',
+            icon: 'none'
+          })
+          return
+        }
         // 已存在，增加数量
         cart[cartKey].count++
       } else {
@@ -1008,6 +1129,13 @@ Page({
   editDishCountFromList(e) {
     const goods = e.currentTarget.dataset.goods
     if (!goods || !goods._id) return
+    if (this.isSingleQuantityGoods(goods)) {
+      wx.showToast({
+        title: '该项只能添加或删除',
+        icon: 'none'
+      })
+      return
+    }
 
     const cart = { ...this.data.cart }
     const cartKeys = Object.keys(cart).filter(key => cart[key] && cart[key].dishId === goods._id)
@@ -1088,6 +1216,13 @@ Page({
     const cart = { ...this.data.cart }
     
     if (cart[cartKey]) {
+      if (this.isSingleQuantityGoods(cart[cartKey].info)) {
+        wx.showToast({
+          title: '该项只能添加1份',
+          icon: 'none'
+        })
+        return
+      }
       cart[cartKey].count++
     }
     
@@ -1100,6 +1235,13 @@ Page({
     const cart = { ...this.data.cart }
     const item = cart[cartKey]
     if (!item) return
+    if (this.isSingleQuantityGoods(item.info)) {
+      wx.showToast({
+        title: '该项只能添加或删除',
+        icon: 'none'
+      })
+      return
+    }
 
     wx.showModal({
       title: item.info && item.info.name ? item.info.name : '修改数量',
@@ -1425,32 +1567,27 @@ Page({
 
   // 更新购物车
   updateCart(cart) {
-    let totalCount = 0
-    let totalPrice = 0
-    
-    for (let cartKey in cart) {
-      if (cart[cartKey] && cart[cartKey].info && cart[cartKey].count) {
-        totalCount += cart[cartKey].count
-        totalPrice += cart[cartKey].info.price * cart[cartKey].count
-      }
-    }
+    const pricing = this.getCartPricing(cart)
+    const nextCart = pricing.cart
+    const totalCount = pricing.totalCount
+    const totalPrice = pricing.totalPrice
     
     // 更新菜品列表中的购物车数量（传入新的 cart 参数，确保使用最新的购物车数据）
     const categorySections = this.data.categorySections.map(section => ({
       ...section,
       goods: section.goods.map(goods => ({
         ...goods,
-        cartCount: this.getDishCartCount(goods._id, cart)
+        cartCount: this.getDishCartCount(goods._id, nextCart)
       }))
     }))
     const goodsList = categorySections.reduce((result, section) => result.concat(section.goods), [])
     const searchGoodsList = this.data.searchGoodsList.map(goods => ({
       ...goods,
-      cartCount: this.getDishCartCount(goods._id, cart)
+      cartCount: this.getDishCartCount(goods._id, nextCart)
     }))
     
     this.setData({
-      cart: cart,
+      cart: nextCart,
       cartCount: totalCount,
       cartTotalPrice: totalPrice,
       cartTotalPriceText: totalPrice.toFixed(2),
@@ -1504,7 +1641,73 @@ Page({
       return
     }
 
+    const reminder = this.getCampingAccessoryReminder()
+    if (reminder) {
+      wx.showModal({
+        title: '露营提醒',
+        content: reminder.content,
+        showCancel: true,
+        cancelText: '返回',
+        confirmText: reminder.confirmText,
+        success: (res) => {
+          if (res.confirm) {
+            this.navigateToSettle()
+          }
+        }
+      })
+      return
+    }
+
     this.navigateToSettle()
+  },
+
+  isCampingGrillCartItem(item) {
+    const info = item && item.info ? item.info : {}
+    return info.exclusiveGroup === 'camping_grill' || info.categoryName === '烤架'
+  },
+
+  isCampingSupplyCartItem(item) {
+    const info = item && item.info ? item.info : {}
+    return info.categoryName === '露营用品'
+  },
+
+  isCampingFoodCartItem(item) {
+    return item && item.info && !this.isCampingGrillCartItem(item) && !this.isCampingSupplyCartItem(item)
+  },
+
+  getCampingAccessoryReminder() {
+    const cartItems = Object.keys(this.data.cart || {})
+      .map(cartKey => this.data.cart[cartKey])
+      .filter(item => item && item.count > 0)
+
+    const hasFood = cartItems.some(item => this.isCampingFoodCartItem(item))
+    if (!hasFood) return null
+
+    const hasGrill = cartItems.some(item => this.isCampingGrillCartItem(item))
+    const hasSupply = cartItems.some(item => this.isCampingSupplyCartItem(item))
+
+    if (!hasGrill && !hasSupply) {
+      return {
+        content: '你只选了生肉哦，选择烤架和露营用品，出游更省心。',
+        confirmText: '不需要'
+      }
+    }
+
+    if (!hasGrill) {
+      return {
+        content: '你还没点烤架哦',
+        confirmText: '知道了'
+      }
+    }
+
+    if (!hasSupply) {
+      return {
+        content: '出行无负担，露营有张南，你还没点露营用品哦！',
+        confirmText: '知道了'
+      }
+    }
+
+    return null
   },
 
   getActiveOrderSessionForSettle() {

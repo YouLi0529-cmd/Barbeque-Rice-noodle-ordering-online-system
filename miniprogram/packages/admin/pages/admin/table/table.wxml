@@ -57,7 +57,7 @@
       <view class="section-title">{{section.areaName}}</view>
       <view class="table-section-body">
         <view
-          class="table-card {{table.statusClass}} {{table.mergeSelected ? 'table-card-merge-selected' : ''}} {{table.mergeSource ? 'table-card-merge-source' : ''}}"
+          class="table-card {{table.statusClass}} {{table.mergeSelected ? 'table-card-merge-selected' : ''}} {{table.mergeSource ? 'table-card-merge-source' : ''}} {{table.clearSelected ? 'table-card-clear-selected' : ''}}"
           wx:for="{{section.tables}}"
           wx:for-item="table"
           wx:key="tableKey"
@@ -72,6 +72,7 @@
           data-max="{{table.maxPeople}}"
           data-scanned="{{table.scannedAt}}"
           data-finished="{{table.finishedAt}}">
+          <view class="merge-mark" wx:if="{{table.hasMergedTable}}">合</view>
           <view class="table-card-head">
             <view class="table-name">
               <text class="table-number">{{table.tableNumber}}</text>
@@ -104,4 +105,8 @@
       <text>{{item.text}}</text>
     </view>
   </view>
+  <view
+    class="clear-table-btn {{clearMode ? 'active' : ''}} {{selectedClearTable ? 'selected' : ''}}"
+    bindtap="confirmClearTable"
+  >{{ui.clearTable}}</view>
 </view>

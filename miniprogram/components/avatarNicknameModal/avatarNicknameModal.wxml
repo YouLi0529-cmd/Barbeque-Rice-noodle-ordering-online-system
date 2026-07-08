@@ -1,36 +1,32 @@
 <!--components/avatarNicknameModal/avatarNicknameModal.wxml-->
 <view class="super-page-box" catchtouchmove="catchtouchmove" wx:if="{{showAvaModal}}">
+  <view class="super-modal-box">
+    <view class="super-modal-body-box">
+      <view class="super-modal-title flex-jc-ac">
+        {{titleText}}
+        <image src="./image/close.png" mode="widthFix" bindtap="closeModalTap" style="position: absolute; top: 10rpx; right: 20rpx; height: 55rpx; width: 55rpx;"></image>
+      </view>
 
-	<view class="super-modal-box">
+      <view class="auth-desc">
+        {{descText}}
+      </view>
 
-		<view class="super-modal-body-box">
-			<view class="super-modal-title flex-jc-ac">
-				{{titleText}}
-				<image src="./image/close.png" mode="widthFix" bindtap="closeModalTap" style="position: absolute; top: 10rpx; right: 20rpx; height: 55rpx; width: 55rpx;"></image>
-			</view>
+      <view class="super-phone-box flex-jb-ac">
+        <view class="phone-label-box flex-ac">
+          <view style="font-size: 28rpx; color: #222; width: 150rpx;">手机号</view>
+          <view class="phone-display">{{phoneNumber || '未授权'}}</view>
+        </view>
+        <button class="phone-btn" open-type="getPhoneNumber" bindgetphonenumber="getphonenumber" disabled="{{saving}}">
+          {{saving ? '保存中' : confirmText}}
+        </button>
+      </view>
 
-				<view class="auth-desc">
-					{{descText}}
-				</view>
+      <view class="apply-btn flex-jc-ac" wx:if="{{false}}" bindtap="saveUserInfo">保存</view>
+    </view>
+  </view>
 
-				<view class="super-phone-box flex-jb-ac">
-					<view class="phone-label-box flex-ac">
-						<view style="font-size: 28rpx; color: #222; width: 150rpx;">手机号</view>
-						<view class="phone-display">{{phoneNumber || '未授权'}}</view>
-					</view>
-					<button class="phone-btn" open-type="getPhoneNumber" bindgetphonenumber="getphonenumber" disabled="{{saving}}">
-						{{saving ? '保存中' : confirmText}}
-					</button>
-				</view>
-
-
-			<view class="apply-btn flex-jc-ac" wx:if="{{false}}" bindtap="saveUserInfo">保存</view>
-		</view>
-
-	</view>
-
-	<view class="auth-loading-float" wx:if="{{saving}}">
-		<image class="auth-loading-img" src="{{loadingGif}}" mode="aspectFit"></image>
-		<view class="auth-loading-text">保存中</view>
-	</view>
+  <view class="auth-loading-float" wx:if="{{saving}}">
+    <image class="auth-loading-img" src="{{loadingGif}}" mode="aspectFit"></image>
+    <view class="auth-loading-text">保存中</view>
+  </view>
 </view>

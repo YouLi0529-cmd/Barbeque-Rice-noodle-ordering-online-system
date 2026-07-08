@@ -157,18 +157,26 @@ function getGoodsSource(order) {
   return { field: 'goods', goods: [] }
 }
 
-function normalizeGoods(order, selectedGoodsMap = {}) {
+function normalizeGoods(order, selectedGoodsMap = {}, options = {}) {
   const source = getGoodsSource(order).goods
   if (!Array.isArray(source)) return []
+
+  const sourceOrderId = options.sourceOrderId || order._id || ''
+  const groupTitle = options.groupTitle || ''
+  const groupIndex = Number(options.groupIndex || 0)
 
   return source.map((item, index) => {
     const count = getCount(item)
     const total = getLineTotal(item)
-    const key = `${item._id || item.dishId || item.id || 'dish'}-${index}`
+    const key = `${sourceOrderId || 'order'}-${item._id || item.dishId || item.id || 'dish'}-${index}`
 
     return {
       key,
+      sourceOrderId,
+      sourceField: getGoodsSource(order).field,
       sourceIndex: index,
+      groupTitle,
+      groupIndex,
       name: getGoodsName(item, index),
       count,
       optionText: getGoodsOptions(item),
@@ -215,6 +223,114 @@ function getOrderTotal(order) {
   return order && order.finalPrice !== undefined ? order.finalPrice : order && order.totalPrice
 }
 
+function getTimeValue(value) {
+  if (!value) return 0
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime()
+}
+
+function getRootOrderId(order) {
+  if (!order) return ''
+  return order.rootOrderId || order.parentOrderId || order._id || ''
+}
+
+function getOutdoorOrderTitle(order, index) {
+  const rawTitle = String(order.orderCardTitle || '').trim()
+  const addOnIndex = Number(order.addOnIndex || index)
+
+  if (rawTitle === 'First order' || rawTitle === '第一单') return '首单'
+  if (/^Add-on\s+\d+/i.test(rawTitle)) {
+    const match = rawTitle.match(/\d+/)
+    return `加菜单${match ? match[0] : addOnIndex || index}`
+  }
+  if (rawTitle) return rawTitle
+  return order.isAddOnOrder ? `加菜单${addOnIndex || index}` : '首单'
+}
+
+function sortOutdoorOrderParts(orders) {
+  return (orders || []).slice().sort((left, right) => {
+    const leftIsRoot = !left.isAddOnOrder || left.parentOrderId === ''
+    const rightIsRoot = !right.isAddOnOrder || right.parentOrderId === ''
+    if (leftIsRoot !== rightIsRoot) return leftIsRoot ? -1 : 1
+
+    const leftIndex = Number(left.addOnIndex || 0)
+    const rightIndex = Number(right.addOnIndex || 0)
+    if (leftIndex !== rightIndex) return leftIndex - rightIndex
+
+    return getTimeValue(left.createTime) - getTimeValue(right.createTime)
+  })
+}
+
+function normalizeMergedGoods(order, selectedGoodsMap = {}) {
+  if (!order || !Array.isArray(order._orders)) {
+    const goods = normalizeGoods(order, selectedGoodsMap, {
+      sourceOrderId: order && order._id,
+      groupTitle: getOutdoorOrderTitle(order || {}, 0)
+    })
+    if (goods.length) goods[0].showGroupTitle = true
+    return goods
+  }
+
+  return order._orders.reduce((result, childOrder, groupIndex) => {
+    const goods = normalizeGoods(childOrder, selectedGoodsMap, {
+      sourceOrderId: childOrder._id,
+      groupTitle: getOutdoorOrderTitle(childOrder, groupIndex),
+      groupIndex
+    })
+    if (goods.length) goods[0].showGroupTitle = true
+    return result.concat(goods)
+  }, [])
+}
+
+function getSelectedOrderDocs(order) {
+  if (!order) return []
+  return Array.isArray(order._orders) && order._orders.length ? order._orders : [order]
+}
+
+function isOutdoorGroupReturned(order) {
+  const orderDocs = getSelectedOrderDocs(order)
+  return orderDocs.length > 0 && orderDocs.every(item => item.allReturned || item.returnStatus === 'all_returned')
+}
+
+function buildMergedOutdoorOrder(orders) {
+  const sortedOrders = sortOutdoorOrderParts(orders)
+  const primary = sortedOrders.find(item => !item.isAddOnOrder) || sortedOrders[0]
+  const rootOrderId = getRootOrderId(primary)
+  const totalPrice = sortedOrders.reduce((sum, order) => sum + getNumber(getOrderTotal(order)), 0)
+  const latestTime = sortedOrders.reduce((latest, order) => Math.max(latest, getTimeValue(order.createTime)), 0)
+  const allPaid = sortedOrders.every(order => order.status === 'completed' || order.status === 'paid' || order.payStatus === true)
+  const groupStatus = allPaid ? 'completed' : 'submitted'
+
+  return {
+    ...primary,
+    _id: rootOrderId,
+    _rootOrderId: rootOrderId,
+    _orders: sortedOrders,
+    _orderIds: sortedOrders.map(order => order._id).filter(Boolean),
+    _latestCreateTime: latestTime,
+    _partCount: sortedOrders.length,
+    status: groupStatus,
+    payStatus: allPaid,
+    finalPrice: totalPrice,
+    totalPrice,
+    createTime: primary.createTime
+  }
+}
+
+function mergeOutdoorOrders(rawOrders) {
+  const groupMap = {}
+  ;(rawOrders || []).forEach(order => {
+    const rootOrderId = getRootOrderId(order)
+    if (!rootOrderId) return
+    if (!groupMap[rootOrderId]) groupMap[rootOrderId] = []
+    groupMap[rootOrderId].push(order)
+  })
+
+  return Object.keys(groupMap)
+    .map(rootOrderId => buildMergedOutdoorOrder(groupMap[rootOrderId]))
+    .sort((left, right) => (right._latestCreateTime || 0) - (left._latestCreateTime || 0))
+}
+
 function getOptionLabel(options, value) {
   const match = options.find(item => item.value === value)
   return match ? match.label : ''
@@ -238,7 +354,7 @@ function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue 
 }
 
 function formatOrderItem(order) {
-  const goodsList = normalizeGoods(order)
+  const goodsList = normalizeMergedGoods(order)
   const goodsCount = goodsList.reduce((sum, goods) => sum + goods.count, 0)
   const total = getOrderTotal(order)
 
@@ -300,7 +416,7 @@ Page({
         order: 'desc',
         limit: 100
       })
-      const list = (res.data || []).map(formatOrderItem)
+      const list = mergeOutdoorOrders(res.data || []).map(formatOrderItem)
       const selectedId = options.selectedId || this.data.selectedOrderId
       const selectedOrder = list.find(item => item._id === selectedId) || list[0] || null
 
@@ -367,7 +483,7 @@ Page({
     const discountType = options.resetPay ? '' : this.data.discountType
     const discountValue = options.resetPay ? '' : this.data.discountValue
     const discountInput = options.resetPay ? '' : this.data.discountInput
-    const goodsList = normalizeGoods(order, selectedGoodsMap)
+    const goodsList = normalizeMergedGoods(order, selectedGoodsMap)
     const goodsCount = goodsList.reduce((sum, goods) => sum + goods.count, 0)
     const totalPrice = getOrderTotal(order)
     const paySummary = buildPaySummary(totalPrice, this.data.paymentMethod, discountType, discountValue)
@@ -394,22 +510,23 @@ Page({
 
   async updateOrder(data, successText = UI.updated) {
     const order = this.data.selectedOrder
-    if (!order || !order._id) return
+    const orderDocs = getSelectedOrderDocs(order).filter(item => item && item._id)
+    if (!orderDocs.length) return
     this.setData({ saving: true })
 
     try {
-      await apiClient.call('admin.collection.update', {
+      await Promise.all(orderDocs.map(item => apiClient.call('admin.collection.update', {
         collection: 'order',
-        id: order._id,
+        id: item._id,
         data
-      })
+      })))
       wx.showToast({ title: successText, icon: 'success' })
       this.setData({
         saving: false,
         selectedGoodsMap: {},
         selectedGoodsCount: 0
       }, () => this.loadList({
-        selectedId: order._id,
+        selectedId: order._rootOrderId || order._id,
         resetSelection: true,
         resetPay: false
       }))
@@ -460,28 +577,74 @@ Page({
     this.applySelectedGoodsMap(selectedGoodsMap)
   },
 
-  getSelectedSourceIndexes() {
+  getSelectedGoodsRefs() {
     const selectedGoodsMap = this.data.selectedGoodsMap || {}
     return (this.data.goodsList || [])
       .filter(item => selectedGoodsMap[item.key])
-      .map(item => item.sourceIndex)
+      .map(item => ({
+        sourceOrderId: item.sourceOrderId,
+        sourceIndex: item.sourceIndex
+      }))
   },
 
-  updateOrderGoods(nextGoods, successText) {
+  async updateSelectedGoods(transformGoods, successText) {
     const order = this.data.selectedOrder
-    if (!order) return
-    const source = getGoodsSource(order)
-    const total = calculateGoodsTotal(nextGoods)
-    this.updateOrder({
-      [source.field]: nextGoods,
-      totalPrice: total,
-      finalPrice: total
-    }, successText)
+    const selectedRefs = this.getSelectedGoodsRefs()
+    if (!order || !selectedRefs.length) return
+
+    const refsByOrderId = selectedRefs.reduce((result, ref) => {
+      if (!ref.sourceOrderId) return result
+      if (!result[ref.sourceOrderId]) result[ref.sourceOrderId] = []
+      result[ref.sourceOrderId].push(ref.sourceIndex)
+      return result
+    }, {})
+    const orderDocs = getSelectedOrderDocs(order)
+    const updates = Object.keys(refsByOrderId).map(orderId => {
+      const orderDoc = orderDocs.find(item => item._id === orderId)
+      if (!orderDoc) return null
+      const source = getGoodsSource(orderDoc)
+      const selectedSet = new Set(refsByOrderId[orderId])
+      const nextGoods = transformGoods(source.goods, selectedSet)
+      const total = calculateGoodsTotal(nextGoods)
+      return {
+        id: orderDoc._id,
+        data: {
+          [source.field]: nextGoods,
+          totalPrice: total,
+          finalPrice: total
+        }
+      }
+    }).filter(Boolean)
+
+    if (!updates.length) return
+    this.setData({ saving: true })
+
+    try {
+      await Promise.all(updates.map(item => apiClient.call('admin.collection.update', {
+        collection: 'order',
+        id: item.id,
+        data: item.data
+      })))
+      wx.showToast({ title: successText, icon: 'success' })
+      this.setData({
+        saving: false,
+        selectedGoodsMap: {},
+        selectedGoodsCount: 0
+      }, () => this.loadList({
+        selectedId: order._rootOrderId || order._id,
+        resetSelection: true,
+        resetPay: false
+      }))
+    } catch (err) {
+      console.error('update outdoor goods failed', err)
+      this.setData({ saving: false })
+      wx.showToast({ title: err.message || UI.actionFailed, icon: 'none' })
+    }
   },
 
   refundSelectedGoods() {
-    const selectedIndexes = this.getSelectedSourceIndexes()
-    if (!selectedIndexes.length) {
+    const selectedRefs = this.getSelectedGoodsRefs()
+    if (!selectedRefs.length) {
       wx.showToast({ title: UI.noSelectedGoods, icon: 'none' })
       return
     }
@@ -491,17 +654,16 @@ Page({
       content: UI.refundConfirmContent,
       success: res => {
         if (!res.confirm) return
-        const source = getGoodsSource(this.data.selectedOrder)
-        const selectedSet = new Set(selectedIndexes)
-        const nextGoods = source.goods.filter((item, index) => !selectedSet.has(index))
-        this.updateOrderGoods(nextGoods, UI.refundSuccess)
+        this.updateSelectedGoods((goods, selectedSet) => {
+          return goods.filter((item, index) => !selectedSet.has(index))
+        }, UI.refundSuccess)
       }
     })
   },
 
   giftSelectedGoods() {
-    const selectedIndexes = this.getSelectedSourceIndexes()
-    if (!selectedIndexes.length) {
+    const selectedRefs = this.getSelectedGoodsRefs()
+    if (!selectedRefs.length) {
       wx.showToast({ title: UI.noSelectedGoods, icon: 'none' })
       return
     }
@@ -511,9 +673,7 @@ Page({
       content: UI.giftConfirmContent,
       success: res => {
         if (!res.confirm) return
-        const source = getGoodsSource(this.data.selectedOrder)
-        const selectedSet = new Set(selectedIndexes)
-        const nextGoods = source.goods.map((item, index) => {
+        this.updateSelectedGoods((goods, selectedSet) => goods.map((item, index) => {
           if (!selectedSet.has(index)) return item
           return {
             ...item,
@@ -523,8 +683,7 @@ Page({
             subtotal: 0,
             amount: 0
           }
-        })
-        this.updateOrderGoods(nextGoods, UI.giftSuccess)
+        }), UI.giftSuccess)
       }
     })
   },
@@ -618,7 +777,7 @@ Page({
 
   finishCheckout() {
     if (!this.data.selectedOrder) return
-    if (!this.data.selectedOrder.allReturned && this.data.selectedOrder.returnStatus !== 'all_returned') {
+    if (!isOutdoorGroupReturned(this.data.selectedOrder)) {
       wx.showToast({
         title: UI.returnRequiredBeforeCheckout,
         icon: 'none'

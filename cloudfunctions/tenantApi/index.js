@@ -393,8 +393,9 @@ async function buildServerOrderGoods(transaction, orderGoods) {
     throw new Error('empty cart')
   }
 
-  const goods = []
-  let totalPrice = 0
+  const records = []
+  const exclusiveGroupCount = {}
+  let thresholdBasePrice = 0
 
   for (const item of orderGoods) {
     const dishId = item && item.dishId
@@ -413,27 +414,66 @@ async function buildServerOrderGoods(transaction, orderGoods) {
       throw new Error(`dish unavailable: ${dish.name || item.dishName || ''}`)
     }
 
-    const price = roundMoney(dish.price)
-    const subtotal = roundMoney(price * count)
+    const maxOrderCount = Math.floor(Number(dish.maxOrderCount || 0))
+    if (maxOrderCount > 0 && count > maxOrderCount) {
+      throw new Error(`dish count too large: ${dish.name || item.dishName || ''}`)
+    }
+
+    const exclusiveGroup = String(dish.exclusiveGroup || '').trim()
+    if (exclusiveGroup) {
+      exclusiveGroupCount[exclusiveGroup] = (exclusiveGroupCount[exclusiveGroup] || 0) + count
+      if (exclusiveGroupCount[exclusiveGroup] > 1) {
+        throw new Error(`exclusive dish conflict: ${dish.name || item.dishName || ''}`)
+      }
+    }
+
+    const originalPrice = roundMoney(dish.price)
+    const originalSubtotal = roundMoney(originalPrice * count)
+    const freeThreshold = Number(dish.freeThreshold || 0)
     let categoryName = dish.categoryName || ''
     if (!categoryName && dish.categoryId) {
       const categoryRes = await transaction.collection('dishCategory').doc(dish.categoryId).get()
       categoryName = categoryRes.data && categoryRes.data.name || ''
     }
-    totalPrice = roundMoney(totalPrice + subtotal)
 
-    goods.push({
+    if (!freeThreshold) {
+      thresholdBasePrice = roundMoney(thresholdBasePrice + originalSubtotal)
+    }
+
+    records.push({
       dishId,
       dishName: dish.name || item.dishName || '',
       dishImage: dish.image || item.dishImage || '',
       categoryId: dish.categoryId || '',
       categoryName,
-      price,
+      originalPrice,
       count,
-      subtotal,
+      originalSubtotal,
+      freeThreshold,
+      maxOrderCount,
+      quantityMode: dish.quantityMode || '',
+      exclusiveGroup,
+      returnRequired: !!dish.returnRequired,
       tags: normalizeTags(item.tags)
     })
   }
+
+  const goods = []
+  let totalPrice = 0
+
+  records.forEach(record => {
+    const freeByThreshold = record.freeThreshold > 0 && thresholdBasePrice >= record.freeThreshold
+    const price = freeByThreshold ? 0 : record.originalPrice
+    const subtotal = roundMoney(price * record.count)
+    totalPrice = roundMoney(totalPrice + subtotal)
+
+    goods.push({
+      ...record,
+      price,
+      subtotal,
+      freeByThreshold
+    })
+  })
 
   return {
     goods,
@@ -464,11 +504,15 @@ async function createOrder(payload) {
     }
   }
 
+  const linkedTableGroup = !isAddOnOrder && orderScene !== 'camping'
+    ? await getActiveTableGroupSnapshotForTableNumber(tableNumber)
+    : {}
+
   const result = await db.runTransaction(async transaction => {
     const user = await getActiveUser(transaction, openid)
     const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods)
     let rootOrderId = ''
-    let inheritedTableGroup = {}
+    let inheritedTableGroup = linkedTableGroup
 
     if (isAddOnOrder) {
       const parentRes = await transaction.collection('order').doc(parentOrderId).get()
@@ -496,7 +540,8 @@ async function createOrder(payload) {
         inheritedTableGroup = {
           tableGroupId: parentOrder.tableGroupId,
           tableGroupPrimary: parentOrder.tableGroupPrimary || null,
-          tableGroupTables: Array.isArray(parentOrder.tableGroupTables) ? parentOrder.tableGroupTables : []
+          tableGroupTables: Array.isArray(parentOrder.tableGroupTables) ? parentOrder.tableGroupTables : [],
+          peopleCount: Number(parentOrder.peopleCount || 0)
         }
       }
     }
@@ -1128,6 +1173,106 @@ function normalizeAdminTableRefs(tables) {
   return Object.keys(map).map(key => map[key])
 }
 
+function mergeAdminTableRefs() {
+  const map = {}
+  Array.prototype.slice.call(arguments).forEach(list => {
+    normalizeAdminTableRefs(list).forEach(ref => {
+      map[ref.tableKey] = ref
+    })
+  })
+  return Object.keys(map)
+    .map(key => map[key])
+    .sort((a, b) => a.tableKey.localeCompare(b.tableKey))
+}
+
+function getTableGroupId(group) {
+  return group && (group.tableGroupId || group._id) || ''
+}
+
+function getTableGroupRefs(group) {
+  return normalizeAdminTableRefs(group && (group.tables || group.tableGroupTables))
+}
+
+function getTableGroupPrimary(group, fallbackRef) {
+  return getAdminTableRef(group && group.primaryTable && group.primaryTable.areaKey, group && group.primaryTable && group.primaryTable.tableNumber) ||
+    getAdminTableRef(group && group.tableGroupPrimary && group.tableGroupPrimary.areaKey, group && group.tableGroupPrimary && group.tableGroupPrimary.tableNumber) ||
+    fallbackRef ||
+    getTableGroupRefs(group)[0] ||
+    null
+}
+
+function getTableGroupSnapshot(group, fallbackRef) {
+  if (!group) return null
+  const groupId = getTableGroupId(group)
+  const refs = mergeAdminTableRefs(getTableGroupRefs(group), fallbackRef ? [fallbackRef] : [])
+  if (!groupId || refs.length < 2) return null
+  return {
+    tableGroupId: groupId,
+    tableGroupPrimary: getTableGroupPrimary(group, fallbackRef),
+    tableGroupTables: refs,
+    peopleCount: Number(group.peopleCount || 0)
+  }
+}
+
+function findTableGroupForRef(tableGroups, ref) {
+  if (!ref) return null
+  return (tableGroups || []).find(group => {
+    return getTableGroupRefs(group).some(item => isSameAdminTableRef(item, ref))
+  }) || null
+}
+
+async function listActiveTableGroups() {
+  try {
+    const res = await db.collection('tableGroup')
+      .where({
+        status: 'active'
+      })
+      .limit(200)
+      .get()
+    return res.data || []
+  } catch (err) {
+    return []
+  }
+}
+
+async function listActiveTableSessions() {
+  try {
+    const res = await db.collection('tableOrderSession')
+      .where({
+        status: 'ordering'
+      })
+      .limit(200)
+      .get()
+    return (res.data || []).filter(isActiveTableSession)
+  } catch (err) {
+    return []
+  }
+}
+
+async function getActiveTableSessionForRef(ref) {
+  if (!ref) return null
+  const sessions = await listActiveTableSessions()
+  return sessions.find(session => {
+    const sessionRef = getOrderTableRef({ tableNumber: session.tableNumber })
+    return isSameAdminTableRef(sessionRef, ref)
+  }) || null
+}
+
+async function getActiveTableGroupForRef(ref) {
+  if (!ref) return null
+  const groups = await listActiveTableGroups()
+  return findTableGroupForRef(groups, ref)
+}
+
+async function getActiveTableGroupSnapshotForTableNumber(tableNumber) {
+  const ref = getOrderTableRef({ tableNumber })
+  if (!ref) return {}
+  const group = await getActiveTableGroupForRef(ref)
+  const snapshot = getTableGroupSnapshot(group, ref)
+  if (!snapshot) return {}
+  return snapshot
+}
+
 function getMergedTablesFromOrders(orders, fallbackTable) {
   const map = {}
   const fallbackRef = fallbackTable ? getAdminTableRef(fallbackTable.areaKey, fallbackTable.tableNumber) : null
@@ -1196,6 +1341,7 @@ function isOrderTransferredFromTable(order, tableNumber) {
 function isAdminTableOrder(order) {
   if (!order || order.type !== 'order') return false
   if (order.deleted === true) return false
+  if (order.tableCleared === true) return false
   if (isExpiredSavedOrder(order)) return false
   if (order.orderScene === 'camping' || order.orderType === 'camping') return false
   if (!order.tableNumber) return false
@@ -1252,15 +1398,24 @@ function getOrderGoodsCount(order) {
   }, 0)
 }
 
-function summarizeAdminTable(table, orders) {
+function summarizeAdminTable(table, orders, tableGroup, tableSession) {
   const activeOrders = (orders || []).filter(isAdminTableOrder)
   const rootOrderIds = []
   const userIds = []
+  const tableRef = getAdminTableRef(table && table.areaKey, table && table.tableNumber)
+  const groupSnapshot = getTableGroupSnapshot(tableGroup, tableRef)
+  const mergedTables = groupSnapshot
+    ? mergeAdminTableRefs(getMergedTablesFromOrders(activeOrders, table), groupSnapshot.tableGroupTables)
+    : getMergedTablesFromOrders(activeOrders, table)
+  const tableGroupId = (activeOrders.find(order => order.tableGroupId) || {}).tableGroupId ||
+    (groupSnapshot && groupSnapshot.tableGroupId) ||
+    ''
   let totalPrice = 0
   let itemCount = 0
   let scannedAt = 0
   let finishedAt = 0
-  let peopleCount = 0
+  let peopleCount = Number(tableGroup && tableGroup.peopleCount || 0)
+  const hasActiveSession = isActiveTableSession(tableSession)
 
   activeOrders.forEach(order => {
     const rootOrderId = order.rootOrderId || order._id
@@ -1289,8 +1444,16 @@ function summarizeAdminTable(table, orders) {
   if (!peopleCount && activeOrders.length > 0) {
     peopleCount = Math.max(1, userIds.length)
   }
+  if (!peopleCount && hasActiveSession) {
+    peopleCount = Math.max(1, Array.isArray(tableSession.memberOpenids) ? tableSession.memberOpenids.length : 0)
+  }
+  if (!scannedAt && hasActiveSession) {
+    scannedAt = getTimeValue(tableSession.createTime || tableSession.updateTime)
+  }
 
-  const status = getAdminTableStatus(activeOrders)
+  const status = activeOrders.length > 0
+    ? getAdminTableStatus(activeOrders)
+    : (hasActiveSession ? 'submitted' : 'empty')
 
   return {
     ...table,
@@ -1301,14 +1464,19 @@ function summarizeAdminTable(table, orders) {
     finishedAt: status === 'paid' ? finishedAt : 0,
     orderCount: activeOrders.length,
     itemCount,
-    rootOrderIds
+    rootOrderIds,
+    tableGroupId,
+    mergedTables,
+    mergedTableText: mergedTables.length > 1 ? getMergedTableText(mergedTables) : ''
   }
 }
 
-function buildAdminTableSections(orders) {
+function buildAdminTableSections(orders, tableGroups = [], tableSessions = []) {
   const sections = createAdminTableSections()
   const tableMap = getAdminTableMap(sections)
   const ordersByTable = {}
+  const tableGroupsByTable = {}
+  const tableSessionsByTable = {}
 
   ;(orders || []).filter(isAdminTableOrder).forEach(order => {
     const parsed = parseAdminTableNumber(order.tableNumber)
@@ -1324,9 +1492,29 @@ function buildAdminTableSections(orders) {
     })
   })
 
+  ;(tableGroups || []).forEach(group => {
+    getTableGroupRefs(group).forEach(ref => {
+      if (!ref || !tableMap[ref.tableKey]) return
+      if (!tableGroupsByTable[ref.tableKey]) {
+        tableGroupsByTable[ref.tableKey] = group
+      }
+    })
+  })
+
+  ;(tableSessions || []).forEach(session => {
+    const ref = getOrderTableRef({ tableNumber: session.tableNumber })
+    if (!ref || !tableMap[ref.tableKey]) return
+    tableSessionsByTable[ref.tableKey] = session
+  })
+
   sections.forEach(section => {
     section.tables = section.tables.map(table => {
-      return summarizeAdminTable(table, ordersByTable[table.tableKey] || [])
+      return summarizeAdminTable(
+        table,
+        ordersByTable[table.tableKey] || [],
+        tableGroupsByTable[table.tableKey],
+        tableSessionsByTable[table.tableKey]
+      )
     })
   })
 
@@ -1580,11 +1768,13 @@ async function adminListTables() {
     .orderBy('createTime', 'desc')
     .limit(300)
     .get()
+  const tableGroups = await listActiveTableGroups()
+  const tableSessions = await listActiveTableSessions()
 
   return {
     success: true,
     data: {
-      sections: buildAdminTableSections(res.data || [])
+      sections: buildAdminTableSections(res.data || [], tableGroups, tableSessions)
     }
   }
 }
@@ -1684,12 +1874,9 @@ async function adminGetTableDetail(payload) {
   }
 
   const orders = await getAdminTableOrders({ areaKey, tableNumber })
-  const table = summarizeAdminTable(baseTable, orders)
-  const mergedTables = getMergedTablesFromOrders(orders, baseTable)
-  const tableGroupId = (orders.find(order => order.tableGroupId) || {}).tableGroupId || ''
-  table.tableGroupId = tableGroupId
-  table.mergedTables = mergedTables
-  table.mergedTableText = mergedTables.length > 1 ? getMergedTableText(mergedTables) : ''
+  const tableGroup = await getActiveTableGroupForRef(baseTable)
+  const tableSession = await getActiveTableSessionForRef(baseTable)
+  const table = summarizeAdminTable(baseTable, orders, tableGroup, tableSession)
   const billGroups = buildAdminBillGroups(orders)
   const totalPrice = roundMoney(billGroups.reduce((sum, group) => sum + Number(group.finalPrice || 0), 0))
   const itemCount = billGroups.reduce((sum, group) => sum + Number(group.goodsCount || 0), 0)
@@ -1716,10 +1903,27 @@ async function adminUpdateTablePeople(payload) {
     }
   }
 
+  const tableRef = getAdminTableRef(payload.areaKey, payload.tableNumber)
+  if (!tableRef) {
+    return {
+      success: false,
+      code: 'TABLE_NOT_FOUND',
+      message: 'table not found'
+    }
+  }
+
   const orders = await getAdminTableOrders(payload)
   const targetOrders = orders.filter(order => !isAdminPaidOrder(order))
+  const activeGroup = await getActiveTableGroupForRef(tableRef)
+  const groupIds = Array.from(new Set(targetOrders
+    .map(order => String(order.tableGroupId || '').trim())
+    .filter(Boolean)))
+  const activeGroupId = getTableGroupId(activeGroup)
+  if (activeGroupId && groupIds.indexOf(activeGroupId) === -1) {
+    groupIds.push(activeGroupId)
+  }
 
-  if (targetOrders.length === 0) {
+  if (targetOrders.length === 0 && groupIds.length === 0) {
     return {
       success: false,
       code: 'NO_ACTIVE_ORDER',
@@ -1732,12 +1936,27 @@ async function adminUpdateTablePeople(payload) {
       peopleCount,
       updateTime: db.serverDate()
     }
-  })))
+  })).concat(groupIds.map(groupId => db.collection('tableGroup').doc(groupId).update({
+    data: {
+      peopleCount,
+      updateTime: db.serverDate()
+    }
+  }).catch(() => db.collection('tableGroup').doc(groupId).set({
+    data: {
+      tableGroupId: groupId,
+      primaryTable: tableRef,
+      tables: [tableRef],
+      status: 'active',
+      peopleCount,
+      updateTime: db.serverDate()
+    }
+  })))))
 
   return {
     success: true,
     data: {
       updated: targetOrders.length,
+      updatedGroups: groupIds.length,
       peopleCount
     }
   }
@@ -1772,9 +1991,20 @@ async function adminMergeTables(payload) {
     }
   }
 
+  const activeTableGroups = await listActiveTableGroups()
+  const matchedTableGroups = activeTableGroups.filter(group => {
+    const refs = getTableGroupRefs(group)
+    return refs.some(groupRef => mergeRefs.some(ref => isSameAdminTableRef(groupRef, ref)))
+  })
+  matchedTableGroups.forEach(group => {
+    getTableGroupRefs(group).forEach(ref => {
+      refMap[ref.tableKey] = ref
+    })
+  })
+  const allMergeRefs = Object.keys(refMap).map(key => refMap[key])
   const activeOrderMap = {}
 
-  for (const ref of mergeRefs) {
+  for (const ref of allMergeRefs) {
     const orders = await getSingleAdminTableOrders(ref.areaKey, ref.tableNumber)
     const activeOrders = orders.filter(order => !isAdminPaidOrder(order))
     activeOrders.forEach(order => {
@@ -1801,16 +2031,8 @@ async function adminMergeTables(payload) {
     activeOrders = Object.keys(activeOrderMap).map(key => activeOrderMap[key])
   }
 
-  if (activeOrders.length === 0) {
-    return {
-      success: false,
-      code: 'NO_ACTIVE_ORDER',
-      message: 'no active order'
-    }
-  }
-
   const tableMap = {}
-  mergeRefs.forEach(ref => {
+  allMergeRefs.forEach(ref => {
     tableMap[ref.tableKey] = ref
   })
   getMergedTablesFromOrders(activeOrders, primaryRef).forEach(ref => {
@@ -1819,7 +2041,7 @@ async function adminMergeTables(payload) {
   const mergedTables = Object.keys(tableMap)
     .map(key => tableMap[key])
     .sort((a, b) => a.tableKey.localeCompare(b.tableKey))
-  const existingGroupId = groupIds[0] || ''
+  const existingGroupId = groupIds[0] || getTableGroupId(matchedTableGroups[0]) || ''
   const tableGroupId = existingGroupId || `merge_${primaryRef.tableKey}_${Date.now()}`
   const updateData = {
     tableGroupId,
@@ -1842,6 +2064,18 @@ async function adminMergeTables(payload) {
       updateTime: db.serverDate()
     }
   })
+
+  const inactiveGroupIds = matchedTableGroups
+    .map(group => getTableGroupId(group))
+    .filter(groupId => groupId && groupId !== tableGroupId)
+  await Promise.all(inactiveGroupIds.map(groupId => db.collection('tableGroup').doc(groupId).set({
+    data: {
+      tableGroupId: groupId,
+      status: 'inactive',
+      mergedInto: tableGroupId,
+      updateTime: db.serverDate()
+    }
+  })))
 
   return {
     success: true,
@@ -1983,6 +2217,12 @@ async function adminTransferTable(payload) {
 
   await Promise.all(updates)
 
+  const sourceSharedCartTableNumbers = getSharedCartTableNumbersForAdminRef(sourceRef)
+  const sourceSharedCartResults = []
+  for (const sourceTableNumber of sourceSharedCartTableNumbers) {
+    sourceSharedCartResults.push(await clearSharedCartSessionByTableNumber(sourceTableNumber, transferTime))
+  }
+
   if (groupIds.length > 0) {
     await Promise.all(groupIds.map(groupId => db.collection('tableGroup').doc(groupId).set({
       data: {
@@ -2000,7 +2240,9 @@ async function adminTransferTable(payload) {
       from: sourceRef,
       to: targetRef,
       updatedOrders: sourceOrders.length,
-      tableNumber: targetTableNumber
+      tableNumber: targetTableNumber,
+      sourceSharedCartRemoved: sourceSharedCartResults.reduce((sum, item) => sum + Number(item.removed || 0), 0),
+      sourceSharedCartTables: sourceSharedCartTableNumbers
     }
   }
 }
@@ -2056,6 +2298,22 @@ async function adminFinishTableCheckout(payload) {
     }
   })))
 
+  const groupIds = Array.from(new Set(targetOrders.map(order => String(order.tableGroupId || '').trim()).filter(Boolean)))
+  await Promise.all(groupIds.map(groupId => db.collection('tableGroup').doc(groupId).update({
+    data: {
+      status: 'inactive',
+      finishedAt: checkoutTime,
+      updateTime: db.serverDate()
+    }
+  }).catch(() => db.collection('tableGroup').doc(groupId).set({
+    data: {
+      tableGroupId: groupId,
+      status: 'inactive',
+      finishedAt: checkoutTime,
+      updateTime: db.serverDate()
+    }
+  }))))
+
   const sharedCartClearResult = await clearCheckoutSharedCarts(targetOrders, payload, checkoutTime)
 
   return {
@@ -2067,6 +2325,96 @@ async function adminFinishTableCheckout(payload) {
       paymentMethod: checkoutSummary.paymentMethod,
       sharedCartRemoved: sharedCartClearResult.removed,
       sharedCartTables: sharedCartClearResult.tableNumbers
+    }
+  }
+}
+
+async function adminClearTable(payload) {
+  const areaKey = String(payload.areaKey || 'normal').trim() || 'normal'
+  const tableNumber = padTableNumber(payload.tableNumber)
+  const tableRef = getAdminTableRef(areaKey, tableNumber)
+
+  if (!tableRef) {
+    return {
+      success: false,
+      code: 'TABLE_NOT_FOUND',
+      message: 'table not found'
+    }
+  }
+
+  const orders = await getAdminTableOrders({ areaKey, tableNumber })
+  const unclearedOrders = orders.filter(order => order.tableCleared !== true)
+  const activeGroup = await getActiveTableGroupForRef(tableRef)
+  const activeSession = await getActiveTableSessionForRef(tableRef)
+  const clearRefMap = {
+    [tableRef.tableKey]: tableRef
+  }
+  getTableGroupRefs(activeGroup).forEach(ref => {
+    clearRefMap[ref.tableKey] = ref
+  })
+  unclearedOrders.forEach(order => {
+    const orderRef = getOrderTableRef(order)
+    if (orderRef) clearRefMap[orderRef.tableKey] = orderRef
+    normalizeAdminTableRefs(order.tableGroupTables).forEach(ref => {
+      clearRefMap[ref.tableKey] = ref
+    })
+  })
+  const clearRefs = Object.keys(clearRefMap).map(key => clearRefMap[key])
+
+  if (unclearedOrders.length === 0 && !activeGroup && !activeSession) {
+    return {
+      success: false,
+      code: 'NO_TABLE_STATE',
+      message: '该桌暂无需要清除的状态'
+    }
+  }
+
+  const clearedAt = new Date()
+  await Promise.all(unclearedOrders.map(order => db.collection('order').doc(order._id).update({
+    data: {
+      tableCleared: true,
+      tableClearedAt: clearedAt,
+      checkoutStatus: order.checkoutStatus || 'cleared',
+      updateTime: db.serverDate()
+    }
+  })))
+
+  const groupIds = Array.from(new Set(unclearedOrders.map(order => String(order.tableGroupId || '').trim()).filter(Boolean)))
+  const activeGroupId = getTableGroupId(activeGroup)
+  if (activeGroupId && groupIds.indexOf(activeGroupId) === -1) {
+    groupIds.push(activeGroupId)
+  }
+
+  await Promise.all(groupIds.map(groupId => db.collection('tableGroup').doc(groupId).update({
+    data: {
+      status: 'inactive',
+      clearedAt,
+      updateTime: db.serverDate()
+    }
+  }).catch(() => db.collection('tableGroup').doc(groupId).set({
+    data: {
+      tableGroupId: groupId,
+      status: 'inactive',
+      clearedAt,
+      updateTime: db.serverDate()
+    }
+  }))))
+
+  const sharedCartTableNumbers = Array.from(new Set(clearRefs.reduce((list, ref) => {
+    return list.concat(getSharedCartTableNumbersForAdminRef(ref))
+  }, [])))
+  const sharedCartResults = []
+  for (const cartTableNumber of sharedCartTableNumbers) {
+    sharedCartResults.push(await clearSharedCartSessionByTableNumber(cartTableNumber, clearedAt))
+  }
+
+  return {
+    success: true,
+    data: {
+      clearedOrders: unclearedOrders.length,
+      clearedGroups: groupIds.length,
+      sharedCartRemoved: sharedCartResults.reduce((sum, item) => sum + Number(item.removed || 0), 0),
+      sharedCartTables: sharedCartTableNumbers
     }
   }
 }
@@ -2752,6 +3100,20 @@ function normalizeTableNumber(tableNumber) {
   return String(tableNumber || '').trim()
 }
 
+const TABLE_SESSION_STALE_MS = 12 * 60 * 60 * 1000
+
+function getTableSessionTimeValue(session) {
+  return getTimeValue(session && (session.updateTime || session.createTime)) ||
+    getTimeValue(session && (session.createTime || session.updateTime))
+}
+
+function isActiveTableSession(session) {
+  if (!session) return false
+  if (session.status === 'finished' || session.checkoutStatus === 'finished') return false
+  const time = getTableSessionTimeValue(session)
+  return !time || Date.now() - time <= TABLE_SESSION_STALE_MS
+}
+
 function getSharedCartSessionId(tableNumber) {
   const safeTable = encodeURIComponent(tableNumber).replace(/%/g, '_')
   return `table_${safeTable}`
@@ -2890,7 +3252,9 @@ async function joinSharedCart(payload) {
   const oldSession = oldSessionRes.data
 
   if (oldSession) {
-    const shouldResetSession = oldSession.status === 'finished' || oldSession.checkoutStatus === 'finished'
+    const shouldResetSession = oldSession.status === 'finished' ||
+      oldSession.checkoutStatus === 'finished' ||
+      !isActiveTableSession(oldSession)
     const updateData = {
       tableNumber,
       status: 'ordering',
@@ -4048,6 +4412,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.merge') return adminMergeTables(payload)
   if (action === 'admin.table.transfer') return adminTransferTable(payload)
   if (action === 'admin.table.finishCheckout') return adminFinishTableCheckout(payload)
+  if (action === 'admin.table.clear') return adminClearTable(payload)
   if (action === 'admin.table.sendKitchen') return adminSendTableToKitchen(payload)
   if (action === 'admin.table.sendKitchenItems') return adminSendKitchenItems(payload)
   if (action === 'admin.table.urgeKitchenItems') return adminUrgeKitchenItems(payload)

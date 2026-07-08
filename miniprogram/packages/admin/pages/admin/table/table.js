@@ -38,7 +38,15 @@ const UI = {
   reservationArrivedSuccess: '\u5df2\u6807\u8bb0\u5230\u5e97',
   reservationCancelSuccess: '\u5df2\u53d6\u6d88\u9884\u7ea6',
   reservationUpdateFailed: '\u9884\u7ea6\u5904\u7406\u5931\u8d25',
-  reservationSelectFirst: '\u8bf7\u5148\u9009\u62e9\u9884\u7ea6'
+  reservationSelectFirst: '\u8bf7\u5148\u9009\u62e9\u9884\u7ea6',
+  clearTable: '\u6e05\u53f0',
+  clearModeTip: '\u8bf7\u70b9\u9009\u9700\u8981\u6e05\u53f0\u7684\u684c\u53f0',
+  clearSelectFirst: '\u8bf7\u5148\u70b9\u9009\u9700\u8981\u6e05\u53f0\u7684\u684c\u53f0',
+  clearConfirmTitle: '\u786e\u8ba4\u6e05\u53f0',
+  clearConfirmPrefix: '\u786e\u5b9a\u5c06',
+  clearConfirmSuffix: '\u6062\u590d\u4e3a\u7a7a\u684c\u5e76\u6e05\u9664\u62fc\u684c\u5173\u7cfb\u5417',
+  clearSuccess: '\u5df2\u6e05\u53f0',
+  clearFailed: '\u6e05\u53f0\u5931\u8d25'
 }
 
 const TABLE_DETAIL_PAGE = '/packages/admin/pages/admin/tableDetail/tableDetail'
@@ -131,9 +139,11 @@ function isSameTable(left, right) {
     left.tableNumber === right.tableNumber
 }
 
-function formatTable(item, selectedMap = {}, mergeSource = null) {
+function formatTable(item, selectedMap = {}, mergeSource = null, clearSelectedTable = null) {
   const status = STATUS[item.status] || STATUS.empty
   const tableKey = item.tableKey || `${item.areaKey}-${item.tableNumber}`
+  const mergedTables = Array.isArray(item.mergedTables) ? item.mergedTables : []
+  const hasMergedTable = !!item.tableGroupId || mergedTables.length > 1
   return {
     ...item,
     tableKey,
@@ -142,8 +152,10 @@ function formatTable(item, selectedMap = {}, mergeSource = null) {
     priceText: formatPrice(item.totalPrice),
     peopleText: `${Number(item.peopleCount || 0)}/${Number(item.maxPeople || 0)}`,
     diningTimeText: getDiningTime(item.scannedAt, item.finishedAt),
+    hasMergedTable,
     mergeSelected: !!selectedMap[tableKey],
-    mergeSource: isSameTable(item, mergeSource)
+    mergeSource: isSameTable(item, mergeSource),
+    clearSelected: isSameTable(item, clearSelectedTable)
   }
 }
 
@@ -223,7 +235,10 @@ Page({
     selectedMergeTableCount: 0,
     merging: false,
     reservationReminders: [],
-    selectedReservationReminderId: ''
+    selectedReservationReminderId: '',
+    clearMode: false,
+    selectedClearTable: null,
+    clearingTable: false
   },
 
   onLoad() {
@@ -416,21 +431,39 @@ Page({
   refreshTables() {
     const selectedMap = this.data.selectedMergeTableMap || {}
     const mergeSource = this.data.mergeSource || null
+    const clearSelectedTable = this.data.selectedClearTable || null
     this.setData({
       tableSections: (this.rawTables || []).map(section => ({
         ...section,
-        tables: (section.tables || []).map(table => formatTable(table, selectedMap, mergeSource))
+        tables: (section.tables || []).map(table => formatTable(table, selectedMap, mergeSource, clearSelectedTable))
       }))
     })
   },
 
   syncTransferState() {
-    const transferSource = wx.getStorageSync('adminTableTransfer') || null
+    const transferSource = this.getStoredTransferSource()
     this.setData({
       transferMode: !!(transferSource && transferSource.tableNumber),
       transferSource,
       transferSourceText: transferSource && transferSource.label || ''
     })
+  },
+
+  getStoredTransferSource() {
+    try {
+      return wx.getStorageSync('adminTableTransfer') || null
+    } catch (err) {
+      console.error('读取转台状态失败', err)
+      return null
+    }
+  },
+
+  getActiveTransferSource() {
+    const currentSource = this.data.transferSource || null
+    if (currentSource && currentSource.tableNumber) {
+      return currentSource
+    }
+    return this.getStoredTransferSource()
   },
 
   cancelTransfer() {
@@ -443,7 +476,7 @@ Page({
   },
 
   syncMergeState() {
-    const mergeSource = wx.getStorageSync('adminTableMerge') || null
+    const mergeSource = this.getStoredMergeSource()
     const mergeMode = !!(mergeSource && mergeSource.tableNumber)
     const mergeSourceKey = mergeMode ? `${mergeSource.areaKey}-${mergeSource.tableNumber}-${mergeSource.createTime || ''}` : ''
     const shouldKeepSelected = mergeMode && mergeSourceKey === this.data.mergeSourceKey
@@ -455,6 +488,23 @@ Page({
       selectedMergeTableMap: shouldKeepSelected ? (this.data.selectedMergeTableMap || {}) : {},
       selectedMergeTableCount: shouldKeepSelected ? Object.keys(this.data.selectedMergeTableMap || {}).length : 0
     })
+  },
+
+  getStoredMergeSource() {
+    try {
+      return wx.getStorageSync('adminTableMerge') || null
+    } catch (err) {
+      console.error('读取拼桌状态失败', err)
+      return null
+    }
+  },
+
+  getActiveMergeSource() {
+    const currentSource = this.data.mergeSource || null
+    if (currentSource && currentSource.tableNumber) {
+      return currentSource
+    }
+    return this.getStoredMergeSource()
   },
 
   cancelMerge() {
@@ -489,6 +539,86 @@ Page({
     wx.navigateTo({
       url: `${TABLE_DETAIL_PAGE}?${this.buildTableQuery(data)}`
     })
+  },
+
+  selectClearTable(data) {
+    const selectedClearTable = {
+      areaKey: data.areaKey,
+      areaName: data.area,
+      tableNumber: data.table,
+      tableKey: data.tableKey,
+      label: `${data.area}${data.table}${UI.tableUnit}`
+    }
+
+    if (isSameTable(this.data.selectedClearTable, selectedClearTable)) {
+      this.setData({ selectedClearTable: null })
+    } else {
+      this.setData({ selectedClearTable })
+    }
+    this.refreshTables()
+  },
+
+  async confirmClearTable() {
+    if (this.data.clearingTable) return
+    if (!this.data.clearMode) {
+      this.setData({
+        clearMode: true,
+        selectedClearTable: null
+      })
+      this.refreshTables()
+      wx.showToast({
+        title: UI.clearModeTip,
+        icon: 'none'
+      })
+      return
+    }
+
+    const table = this.data.selectedClearTable || {}
+    if (!table.tableNumber) {
+      this.setData({
+        clearMode: false,
+        selectedClearTable: null
+      })
+      this.refreshTables()
+      return
+    }
+
+    const confirmed = await new Promise(resolve => {
+      wx.showModal({
+        title: UI.clearConfirmTitle,
+        content: `${UI.clearConfirmPrefix}${table.label || ''}${UI.clearConfirmSuffix}`,
+        confirmText: UI.clearTable,
+        cancelText: '\u53d6\u6d88',
+        success: res => resolve(res.confirm === true),
+        fail: () => resolve(false)
+      })
+    })
+    if (!confirmed) return
+
+    try {
+      this.setData({ clearingTable: true })
+      await apiClient.call('admin.table.clear', {
+        areaKey: table.areaKey,
+        tableNumber: table.tableNumber
+      })
+      this.setData({
+        clearMode: false,
+        selectedClearTable: null
+      })
+      wx.showToast({
+        title: UI.clearSuccess,
+        icon: 'success'
+      })
+      await this.loadTables(true)
+    } catch (err) {
+      console.error('clear table failed', err)
+      wx.showToast({
+        title: err.message || UI.clearFailed,
+        icon: 'none'
+      })
+    } finally {
+      this.setData({ clearingTable: false })
+    }
   },
 
   async transferToTable(data) {
@@ -558,8 +688,8 @@ Page({
     }
   },
 
-  toggleMergeTable(data) {
-    const source = this.data.mergeSource || {}
+  toggleMergeTable(data, activeSource = null) {
+    const source = activeSource || this.getActiveMergeSource() || {}
     if (isSameTable({
       areaKey: data.areaKey,
       tableNumber: data.table
@@ -670,15 +800,37 @@ Page({
 
   openTable(e) {
     const data = e.currentTarget.dataset || {}
-    if (this.data.transferMode) {
+    const transferSource = this.getActiveTransferSource()
+    if (this.data.transferMode && transferSource && transferSource.tableNumber) {
       this.transferToTable(data)
       return
     }
-    if (this.data.mergeMode) {
-      this.toggleMergeTable(data)
+    const mergeSource = this.getActiveMergeSource()
+    if (this.data.mergeMode || (mergeSource && mergeSource.tableNumber)) {
+      if (!this.data.mergeMode && mergeSource && mergeSource.tableNumber) {
+        const mergeSourceKey = `${mergeSource.areaKey}-${mergeSource.tableNumber}-${mergeSource.createTime || ''}`
+        this.setData({
+          mergeMode: true,
+          mergeSource,
+          mergeSourceText: mergeSource.label || '',
+          mergeSourceKey
+        })
+      }
+      this.toggleMergeTable(data, mergeSource)
+      return
+    }
+    if (this.data.clearMode) {
+      this.selectClearTable(data)
       return
     }
 
+    if (this.data.clearMode || this.data.selectedClearTable) {
+      this.setData({
+        clearMode: false,
+        selectedClearTable: null
+      })
+      this.refreshTables()
+    }
     this.navigateToTable(data)
   }
 })

@@ -21,6 +21,8 @@ const CATEGORY_NAMES = [
 ]
 
 const CAMPING_CATEGORY_NAMES = [
+  '\u70e4\u67b6',
+  '\u9732\u8425\u7528\u54c1',
   '\u5f20\u5357\u62db\u724c',
   '\u660e\u661f\u70e4\u8089',
   '\u5305\u8089\u642d\u5b50',
@@ -637,6 +639,89 @@ function copyCampingCategory(categoryName) {
 }
 
 const CAMPING_DISH_SEEDS = {
+  '\u70e4\u67b6': [
+    {
+      name: '\u78b3\u70e4\u67b6',
+      price: 50,
+      sort: 1,
+      needSpec: false,
+      description: '\u914d\u8db3\u91cf\u78b3\uff0c\u9700\u8981\u5f52\u8fd8',
+      quantityMode: 'single',
+      maxOrderCount: 1,
+      freeThreshold: 188,
+      exclusiveGroup: 'camping_grill',
+      returnRequired: true
+    },
+    {
+      name: '\u5361\u5f0f\u7089',
+      price: 50,
+      sort: 2,
+      needSpec: false,
+      description: '\u914d\u8db3\u91cf\u6c14\u74f6\uff0c\u9700\u8981\u5f52\u8fd8',
+      quantityMode: 'single',
+      maxOrderCount: 1,
+      freeThreshold: 188,
+      exclusiveGroup: 'camping_grill',
+      returnRequired: true
+    },
+    {
+      name: '\u7535\u70e4\u76d8',
+      price: 50,
+      sort: 3,
+      needSpec: false,
+      description: '\u4e0d\u9700\u8981\u6362',
+      quantityMode: 'single',
+      maxOrderCount: 1,
+      freeThreshold: 188,
+      exclusiveGroup: 'camping_grill',
+      returnRequired: true
+    }
+  ],
+  '\u9732\u8425\u7528\u54c1': [
+    {
+      name: '\u4e00\u6b21\u6027\u7897',
+      price: 0,
+      sort: 1,
+      needSpec: false
+    },
+    {
+      name: '\u7b77\u5b50',
+      price: 0,
+      sort: 2,
+      needSpec: false
+    },
+    {
+      name: '\u676f\u5b50',
+      price: 0,
+      sort: 3,
+      needSpec: false
+    },
+    {
+      name: '\u6905\u5b50',
+      price: 0,
+      sort: 4,
+      needSpec: false,
+      description: '\u9700\u8981\u5f52\u8fd8',
+      returnRequired: true
+    },
+    {
+      name: '\u684c\u5b50',
+      price: 0,
+      sort: 5,
+      needSpec: false,
+      description: '\u9700\u8981\u5f52\u8fd8',
+      returnRequired: true
+    },
+    {
+      name: '\u5927\u74f6\u996e\u6599',
+      price: 0,
+      sort: 6,
+      needSpec: false,
+      description: '\u6839\u636e\u83dc\u54c1\u6570\u91cf\u63d0\u4f9b',
+      quantityMode: 'single',
+      maxOrderCount: 1
+    }
+  ],
   '\u5f20\u5357\u62db\u724c': copyCampingCategory('\u5f20\u5357\u62db\u724c'),
   '\u660e\u661f\u70e4\u8089': copyCampingCategory('\u660e\u661f\u70e4\u8089'),
   '\u5305\u8089\u642d\u5b50': [
@@ -850,6 +935,11 @@ async function syncDishes(category, menuConfig) {
       status: 1,
       needSpec: dish.needSpec !== false,
       minOrderCount: dish.minOrderCount || 1,
+      maxOrderCount: dish.maxOrderCount || 0,
+      quantityMode: dish.quantityMode || '',
+      exclusiveGroup: dish.exclusiveGroup || '',
+      freeThreshold: dish.freeThreshold || 0,
+      returnRequired: !!dish.returnRequired,
       flavorTitle: dish.flavorTitle || '\u53e3\u5473',
       flavorOptions: dish.flavorOptions || ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'],
       flavorNote: dish.flavorNote || '',

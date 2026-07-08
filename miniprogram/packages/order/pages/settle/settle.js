@@ -195,7 +195,11 @@ Page({
           })
         }
 
-        const subtotal = (item.info.price * item.count).toFixed(2)
+        const linePrice = item.displayPrice !== undefined ? Number(item.displayPrice) : Number(item.info.price || 0)
+        const subtotalValue = item.subtotal !== undefined
+          ? Number(item.subtotal || 0)
+          : linePrice * Number(item.count || 0)
+        const subtotal = subtotalValue.toFixed(2)
         orderGoodsCount += Number(item.count) || 0
 
         const displayTags = tagsArray.map(tag => String(tag).replace(/^备注[:：]/, ''))
@@ -204,11 +208,13 @@ Page({
           dishId: item.dishId || item.info._id,
           dishName: item.info.name,
           dishImage: item.info.image,
-          price: item.info.price,
+          price: linePrice,
+          originalPrice: item.originalPrice !== undefined ? item.originalPrice : item.info.price,
           count: item.count,
           tags: displayTags,
           tagText: displayTags.join('、'),
-          subtotal
+          subtotal,
+          freeByThreshold: !!item.freeByThreshold
         })
       }
 
@@ -504,16 +510,39 @@ Page({
     wx.navigateBack()
   },
 
-  checkoutOrder() {
+  confirmSubmittedOrder() {
     if (!this.data.orderSubmitted) {
       return
     }
 
-    wx.showModal({
-      title: '订单已提交',
-      content: '请联系店员结账。',
-      showCancel: false,
-      confirmText: '知道了'
+    this.clearActiveOrderSession()
+    wx.reLaunch({
+      url: '/pages/covertest/covertest'
+    })
+  },
+
+  clearActiveOrderSession() {
+    try {
+      const session = wx.getStorageSync('activeOrderSession')
+      if (!session) return
+
+      const currentRootOrderId = this.data.appendToOrderId || this.data.submittedOrderId
+      const sameScene = session.orderScene === this.data.orderScene
+      const sameOrder = !currentRootOrderId || session.rootOrderId === currentRootOrderId
+
+      if (sameScene && sameOrder) {
+        wx.removeStorageSync('activeOrderSession')
+      }
+    } catch (err) {
+      console.error('清理当前订单会话失败', err)
+    }
+
+    this.setData({
+      activeOrderSession: null,
+      appendToOrderId: '',
+      isAddOnOrder: false,
+      addOnIndex: 0,
+      previousOrderCards: []
     })
   },
 

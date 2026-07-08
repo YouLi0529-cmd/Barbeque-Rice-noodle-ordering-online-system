@@ -1,57 +1,46 @@
 // components/avatarNicknameModal/avatarNicknameModal.js
 const apiClient = require('../../utils/apiClient')
+
+// 开发阶段用于模拟手机号授权。正式发布前改为 false，并确认 phone.getNumber 可用。
 const USE_TEST_PHONE = true
 const TEST_PHONE_NUMBER = '13800000000'
 
 Component({
-  /**
-   * 组件的属性列表
-   */
   properties: {
     showAvaModal: {
       type: Boolean,
-      value: false,
+      value: false
     },
     loadingGif: {
       type: String,
-      value: '/images/orderloadinggif-transparent.gif',
+      value: '/images/orderloadinggif-transparent.gif'
     },
     titleText: {
       type: String,
-      value: '授权手机号完成下单',
+      value: '授权微信手机号完成下单'
     },
     descText: {
       type: String,
-      value: '授权后将用会员卡号记录您的订单信息，无需单独设置昵称。',
+      value: '授权后将用会员卡号记录您的订单信息，无需单独设置昵称。'
     },
     confirmText: {
       type: String,
-      value: '授权并提交',
+      value: '授权并提交'
     }
   },
 
-  /**
-   * 组件的初始数据
-   */
   data: {
     avatarUrl: null,
     nickName: null,
     phoneNumber: null,
     phoneCode: null,
-    realPhoneNumber: null, // 真实的手机号（用于提交）
-    saving: false,
+    realPhoneNumber: null,
+    saving: false
   },
 
-  /**
-   * 组件的方法列表
-   */
   methods: {
-    /**
-     * 阻止页面滑动
-     */
-    catchtouchmove() { },
+    catchtouchmove() {},
 
-    /** 获取昵称信息 */
     bindblur(res) {
       const value = res.detail.value
       this.setData({
@@ -59,7 +48,6 @@ Component({
       })
     },
 
-    /** 获取手机号 */
     async getphonenumber(e) {
       if (this.data.saving) {
         return
@@ -75,58 +63,50 @@ Component({
         return
       }
 
-      console.log('手机号授权结果：', e.detail)
-      if (e.detail.code) {
-        // 获取成功，调用云函数解密
-        try {
-          this.setData({
-            saving: true
-          })
-          
-          const phoneResult = apiClient.isEnabled()
-            ? await apiClient.call('phone.getNumber', { code: e.detail.code })
-            : (await wx.cloud.callFunction({
-              name: 'getPhoneNumber',
-              data: { code: e.detail.code }
-            })).result
-          
-          if (phoneResult && phoneResult.success && phoneResult.phoneNumber) {
-            const phoneNumber = phoneResult.phoneNumber
-            // 格式化显示手机号（中间4位用*代替，保护隐私）
-           // const displayPhone = phoneNumber.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')
-            
-            this.setData({
-              phoneNumber: phoneNumber,
-              phoneCode: e.detail.code,
-              realPhoneNumber: phoneNumber // 保存真实手机号用于提交
-            })
-            
-            await this.saveUserInfo()
-          } else {
-            const errorMsg = phoneResult?.message || '获取手机号失败，请重试'
-            throw new Error(errorMsg)
-          }
-        } catch (err) {
-          this.setData({
-            saving: false
-          })
-          console.error('解密手机号失败', err)
-          wx.showToast({
-            title: err.message || '获取手机号失败',
-            icon: 'none'
-          })
-        }
-      } else {
+      if (!e.detail || !e.detail.code) {
         wx.showToast({
           title: '获取手机号失败',
+          icon: 'none'
+        })
+        return
+      }
+
+      try {
+        this.setData({
+          saving: true
+        })
+
+        const phoneResult = apiClient.isEnabled()
+          ? await apiClient.call('phone.getNumber', { code: e.detail.code })
+          : (await wx.cloud.callFunction({
+            name: 'getPhoneNumber',
+            data: { code: e.detail.code }
+          })).result
+
+        if (!phoneResult || !phoneResult.success || !phoneResult.phoneNumber) {
+          throw new Error(phoneResult?.message || '获取手机号失败，请重试')
+        }
+
+        const phoneNumber = phoneResult.phoneNumber
+        this.setData({
+          phoneNumber,
+          phoneCode: e.detail.code,
+          realPhoneNumber: phoneNumber
+        })
+
+        await this.saveUserInfo()
+      } catch (err) {
+        this.setData({
+          saving: false
+        })
+        console.error('获取手机号失败', err)
+        wx.showToast({
+          title: err.message || '获取手机号失败',
           icon: 'none'
         })
       }
     },
 
-    /**
-     * 保存用户信息
-     */
     async saveUserInfo() {
       const {
         avatarUrl,
@@ -168,7 +148,7 @@ Component({
           throw new Error(profileResult?.error || profileResult?.message || '保存用户信息失败')
         }
 
-        const user = profileResult.data.user
+        const user = profileResult.data && profileResult.data.user
         app.globalData.userInfo = user
 
         wx.showToast({
@@ -176,15 +156,13 @@ Component({
           icon: 'success'
         })
 
-        // 通知父组件更新
-        this.triggerEvent("saved", {
+        this.triggerEvent('saved', {
           avatarUrl: avatarUrlForSave,
-          nickName: user.nickName,
+          nickName: user && user.nickName,
           phoneNumber: phone,
           user
         })
 
-        // 关闭弹窗
         this.closeModalTap()
       } catch (err) {
         this.setData({
@@ -198,16 +176,10 @@ Component({
       }
     },
 
-    /**
-     * 设置信息按钮点击监听（保留用于兼容）
-     */
     setBtnTap() {
       this.saveUserInfo()
     },
 
-    /**
-     * 关闭弹窗
-     */
     closeModalTap() {
       this.setData({
         showAvaModal: false,
@@ -218,7 +190,7 @@ Component({
         realPhoneNumber: null,
         saving: false
       })
-      this.triggerEvent("closed")
-    },
+      this.triggerEvent('closed')
+    }
   }
 })

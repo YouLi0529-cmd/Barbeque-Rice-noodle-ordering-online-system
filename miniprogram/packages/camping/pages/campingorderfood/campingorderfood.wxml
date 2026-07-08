@@ -1,4 +1,4 @@
-﻿<!--packages/camping/pages/campingorderfood/campingorderfood.wxml-->
+<!--packages/camping/pages/campingorderfood/campingorderfood.wxml-->
 <wxs module="tagHelper" src="../../../../utils/tagHelper.wxs"></wxs>
 <view class="page">
   <view class="top-safe-bg" style="height: {{statusBarHeight}}px;"></view>
@@ -44,13 +44,17 @@
 
   <!-- 轮播公告 -->
   <view class="notice-wrapper" wx:if="{{noticeList.length > 0}}">
-    <van-notice-bar 
+    <van-notice-bar
+      class="notice-component"
+      custom-class="notice-bar"
       left-icon="volume-o"
+      color="#7A4A1F"
+      background="transparent"
       text="{{noticeText}}"
-      scrollable
+      scrollable="{{true}}"
+      speed="{{22}}"
     />
   </view>
-
   <!-- 主内容区 -->
   <view class="main-content">
     <!-- 左侧分类菜单 -->
@@ -89,8 +93,9 @@
                 <view class="action-btn reduce" wx:if="{{item.cartCount > 0}}" bindtap="reduceDishFromCart" data-goods="{{item}}">
                   <text class="minus-icon"></text>
                 </view>
-                <view class="goods-count" wx:if="{{item.cartCount > 0}}" bindtap="editDishCountFromList" data-goods="{{item}}">{{item.cartCount}}</view>
-                <view class="action-btn add" bindtap="addDishToCartDirect" data-goods="{{item}}">
+                <view class="goods-count fixed-count" wx:if="{{item.cartCount > 0 && (item.maxOrderCount == 1 || item.quantityMode == 'single')}}">{{item.cartCount}}</view>
+                <view class="goods-count" wx:elif="{{item.cartCount > 0}}" bindtap="editDishCountFromList" data-goods="{{item}}">{{item.cartCount}}</view>
+                <view class="action-btn add" wx:if="{{!(item.cartCount > 0 && (item.maxOrderCount == 1 || item.quantityMode == 'single'))}}" bindtap="addDishToCartDirect" data-goods="{{item}}">
                   <text class="plus-icon"></text>
                 </view>
               </view>
@@ -140,8 +145,9 @@
                   <view class="action-btn reduce" wx:if="{{item.cartCount > 0}}" bindtap="reduceDishFromCart" data-goods="{{item}}">
                     <text class="minus-icon"></text>
                   </view>
-                  <view class="goods-count" wx:if="{{item.cartCount > 0}}" bindtap="editDishCountFromList" data-goods="{{item}}">{{item.cartCount}}</view>
-                  <view class="action-btn add" bindtap="addDishToCartDirect" data-goods="{{item}}">
+                  <view class="goods-count fixed-count" wx:if="{{item.cartCount > 0 && (item.maxOrderCount == 1 || item.quantityMode == 'single')}}">{{item.cartCount}}</view>
+                  <view class="goods-count" wx:elif="{{item.cartCount > 0}}" bindtap="editDishCountFromList" data-goods="{{item}}">{{item.cartCount}}</view>
+                  <view class="action-btn add" wx:if="{{!(item.cartCount > 0 && (item.maxOrderCount == 1 || item.quantityMode == 'single'))}}" bindtap="addDishToCartDirect" data-goods="{{item}}">
                     <text class="plus-icon"></text>
                   </view>
                 </view>
@@ -196,19 +202,21 @@
           <view class="cart-goods-detail">
             <view class="cart-goods-name">{{item.info.name}}</view>
             <view class="cart-goods-tags" wx:if="{{item.tagLabels && item.tagLabels.length > 0}}">
-              <text class="tag-text" wx:for="{{item.tagLabels}}" wx:key="index" wx:for-item="tagVal">
-                {{tagVal}}
-              </text>
+              <view class="tag-text" wx:for="{{item.tagLabels}}" wx:key="index" wx:for-item="tagVal">{{tagVal}}</view>
             </view>
-            <view class="cart-goods-price">¥{{item.info.price}} × {{item.count}}</view>
+            <view class="cart-goods-price">
+              <text wx:if="{{item.freeByThreshold}}">满188免费</text>
+              <text wx:else>¥{{item.displayPriceText || item.info.price}} × {{item.count}}</text>
+            </view>
           </view>
         </view>
         <view class="cart-goods-actions">
           <view class="action-btn reduce" bindtap="reduceFromCart" data-id="{{index}}">
             <text class="minus-icon"></text>
           </view>
-          <view class="cart-count" bindtap="editCartItemCount" data-id="{{index}}">{{item.count}}</view>
-          <view class="action-btn add" bindtap="addToCartFromCart" data-id="{{index}}">
+          <view class="cart-count fixed-count" wx:if="{{item.info.maxOrderCount == 1 || item.info.quantityMode == 'single'}}">{{item.count}}</view>
+          <view class="cart-count" wx:else bindtap="editCartItemCount" data-id="{{index}}">{{item.count}}</view>
+          <view class="action-btn add" wx:if="{{!(item.info.maxOrderCount == 1 || item.info.quantityMode == 'single')}}" bindtap="addToCartFromCart" data-id="{{index}}">
             <text class="plus-icon"></text>
           </view>
         </view>

@@ -60,19 +60,20 @@
 
         <scroll-view class="bill-groups" scroll-y wx:else>
           <view class="bill-group">
-            <view
-              class="dish-row {{item.selected ? 'dish-row-active' : ''}}"
-              wx:for="{{goodsList}}"
-              wx:key="key"
-              data-key="{{item.key}}"
-              bindtap="toggleGoodsSelection"
-            >
-              <view class="dish-main">
-                <view class="dish-name">{{item.name}}</view>
-                <view class="dish-tags" wx:if="{{item.optionText}}">{{item.optionText}}</view>
+            <view wx:for="{{goodsList}}" wx:key="key">
+              <view class="dish-group-title" wx:if="{{item.showGroupTitle}}">{{item.groupTitle}}</view>
+              <view
+                class="dish-row {{item.selected ? 'dish-row-active' : ''}}"
+                data-key="{{item.key}}"
+                bindtap="toggleGoodsSelection"
+              >
+                <view class="dish-main">
+                  <view class="dish-name">{{item.name}}</view>
+                  <view class="dish-tags" wx:if="{{item.optionText}}">{{item.optionText}}</view>
+                </view>
+                <view class="dish-count">x{{item.count}}</view>
+                <view class="dish-price">{{ui.moneySymbol}}{{item.subtotalText}}</view>
               </view>
-              <view class="dish-count">x{{item.count}}</view>
-              <view class="dish-price">{{ui.moneySymbol}}{{item.subtotalText}}</view>
             </view>
           </view>
         </scroll-view>

@@ -1,4 +1,4 @@
-﻿// packages/order/pages/index/index.js
+// packages/order/pages/index/index.js
 const app = getApp()
 const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()
@@ -73,14 +73,21 @@ Page({
   refreshCustomNav() {
     const navOptions = getCustomNavOptions()
     const searchRowHeight = 38
+    const topLift = Math.round(navOptions.navContentHeight * 0.3)
+    const navContentTop = Math.max(0, navOptions.navContentTop - topLift)
+    const searchRowTop = Math.max(
+      navContentTop + navOptions.navContentHeight + 4,
+      navOptions.navBarHeight + 8 - topLift
+    )
+
     this.setData({
       ...navOptions,
+      navContentTop,
       searchRowHeight,
-      searchRowTop: navOptions.navBarHeight + 8,
-      shopNavTotalHeight: navOptions.navBarHeight + searchRowHeight + 16
+      searchRowTop,
+      shopNavTotalHeight: searchRowTop + searchRowHeight + 8
     })
   },
-
   showActionLoading(text = '加载中') {
     this.setData({
       actionLoading: true,
