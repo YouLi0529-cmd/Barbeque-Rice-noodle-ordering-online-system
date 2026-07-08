@@ -25,6 +25,7 @@ const UI = {
   noSelectedUrgeDish: '\u8bf7\u5148\u9009\u62e9\u8981\u50ac\u83dc\u7684\u83dc\u54c1\u6216\u83dc\u5355',
   urge: '\u50ac\u83dc',
   moveDish: '\u8f6c\u83dc',
+  editDish: '\u4fee\u6539',
   refundDish: '\u9000\u83dc',
   giftDish: '\u8d60\u83dc',
   mergeTable: '\u62fc\u684c',
@@ -59,6 +60,7 @@ const UI = {
   giftConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u5728\u672c\u6b21\u8ba2\u5355\u4e2d\u6309 0 \u5143\u7ed3\u7b97\u5417',
   sendKitchenConfirmTitle: '\u53d1\u9001\u540e\u53a8',
   sendKitchenConfirmContent: '\u786e\u5b9a\u53d1\u9001\u9009\u4e2d\u83dc\u54c1\u5230\u540e\u53a8\u5417',
+  paidOrderCannotSendKitchen: '\u5df2\u7ed3\u8d26\u83dc\u54c1\u4e0d\u80fd\u53d1\u9001\u540e\u53a8',
   urgeSuccess: '\u5df2\u50ac\u83dc',
   urgeConfirmTitle: '\u786e\u8ba4\u50ac\u83dc',
   urgeConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u91cd\u65b0\u53d1\u9001\u7ed9\u540e\u53a8\u6253\u5370\u5417',
@@ -83,7 +85,15 @@ const UI = {
   discountInputPlaceholder: '\u8bf7\u8f93\u5165\u6298\u6263\uff0c\u5982 8.8\uff0c0\u4e3a\u514d\u5355',
   discountCancel: '\u53d6\u6d88',
   discountConfirm: '\u786e\u5b9a',
-  discountInvalid: '\u8bf7\u8f93\u5165 0-10 \u4e4b\u95f4\u7684\u6298\u6263'
+  discountInvalid: '\u8bf7\u8f93\u5165 0-10 \u4e4b\u95f4\u7684\u6298\u6263',
+  editDishTitle: '\u4fee\u6539\u83dc\u54c1',
+  editDishOptionsLabel: '\u53e3\u5473/\u9009\u9879',
+  editDishRemarkLabel: '\u5907\u6ce8',
+  editDishOptionsPlaceholder: '\u591a\u4e2a\u9009\u9879\u7528\u987f\u53f7\u9694\u5f00',
+  editDishRemarkPlaceholder: '\u8bf7\u8f93\u5165\u5907\u6ce8',
+  editDishSingleOnly: '\u4fee\u6539\u65f6\u53ea\u80fd\u9009\u4e00\u4e2a\u83dc\u54c1',
+  editDishSuccess: '\u5df2\u4fee\u6539',
+  editDishFailed: '\u4fee\u6539\u5931\u8d25'
 }
 
 const STATUS = {
@@ -108,6 +118,7 @@ const STATUS = {
 const DISH_ACTIONS = [
   UI.urge,
   UI.moveDish,
+  UI.editDish,
   UI.refundDish,
   UI.giftDish,
   UI.reprintGuestBill,
@@ -216,6 +227,8 @@ function normalizeBillGroups(groups) {
       ...goodsItem,
       rowId: `${groupId}-${goodsItem.dishId || 'dish'}-${goodsIndex}`,
       tagText: goodsItem.tagText || (Array.isArray(goodsItem.tags) ? goodsItem.tags.join('\u3001') : ''),
+      remarkText: goodsItem.remark ? `\u5907\u6ce8\uff1a${goodsItem.remark}` : '',
+      kitchenSent: goodsItem.kitchenSent === true || goodsItem.kitchenStatus === 'sent',
       subtotalText: goodsItem.subtotalText || formatPrice(goodsItem.subtotal)
     })) : []
 
@@ -223,6 +236,10 @@ function normalizeBillGroups(groups) {
       ...group,
       id: groupId,
       title: group.title || `\u70b9\u9910\u5355${index + 1}`,
+      canSendKitchen: group.canSendKitchen !== false &&
+        group.status !== 'paid' &&
+        group.status !== 'completed' &&
+        group.statusText !== '\u5df2\u652f\u4ed8',
       goods,
       goodsCount: Number(group.goodsCount || goods.reduce((sum, item) => sum + (Number(item.count) || 0), 0)),
       finalPriceText: group.finalPriceText || formatPrice(group.finalPrice)
@@ -336,6 +353,12 @@ Page({
     sendingKitchen: false,
     urgingKitchen: false,
     savingPeople: false,
+    savingDishEdit: false,
+    showEditDishDialog: false,
+    editDishTarget: null,
+    editDishTitle: '',
+    editDishOptionsInput: '',
+    editDishRemark: '',
     checkingOut: false
   },
 
@@ -420,7 +443,8 @@ Page({
           rowId: dish.rowId,
           groupId: group.id,
           dishIndex,
-          dishName: dish.dishName
+          dishName: dish.dishName,
+          canSendKitchen: group.canSendKitchen !== false
         })
       })
     })
@@ -434,13 +458,45 @@ Page({
       rowId: dish.rowId,
       groupId: group.id,
       dishIndex,
-      dishName: dish.dishName
+      dishName: dish.dishName,
+      canSendKitchen: group.canSendKitchen !== false
     }))
   },
 
   getSelectedDishItems(selectedMap = this.data.selectedDishMap) {
     const map = selectedMap || {}
     return this.getDishRecords().filter(item => map[item.rowId])
+  },
+
+  getDishByRecord(record) {
+    if (!record) return null
+    const group = (this.data.billGroups || []).find(item => item.id === record.groupId)
+    if (!group || !Array.isArray(group.goods)) return null
+    const dish = group.goods[record.dishIndex]
+    if (!dish) return null
+    return {
+      group,
+      dish
+    }
+  },
+
+  getDishEditOptionsText(dish) {
+    const remark = String(dish && dish.remark || '').trim()
+    return (Array.isArray(dish && dish.tags) ? dish.tags : [])
+      .filter(tag => {
+        const text = String(tag || '').trim()
+        if (!text) return false
+        if (text === remark) return false
+        return text.indexOf('\u5907\u6ce8\uff1a') !== 0 && text.indexOf('\u5907\u6ce8:') !== 0
+      })
+      .join('\u3001')
+  },
+
+  parseEditDishOptions(value) {
+    return String(value || '')
+      .split(/[\u3001\uff0c,\n]/)
+      .map(item => item.trim())
+      .filter(Boolean)
   },
 
   applySelectedDishMap(selectedMap) {
@@ -918,6 +974,10 @@ Page({
       await this.urgeSelectedDish()
       return
     }
+    if (action === UI.editDish) {
+      this.openEditDishDialog()
+      return
+    }
     if (action === UI.refundDish) {
       await this.refundSelectedDish()
       return
@@ -999,6 +1059,106 @@ Page({
       paymentMethod: value,
       paySummary: buildPaySummary(this.data.table.totalPrice, value, this.data.discountType, this.data.discountValue)
     })
+  },
+
+  openEditDishDialog() {
+    const selectedItems = this.getSelectedDishItems()
+    if (selectedItems.length !== 1) {
+      wx.showToast({
+        title: selectedItems.length > 1 ? UI.editDishSingleOnly : UI.selectDishFirst,
+        icon: 'none'
+      })
+      return
+    }
+
+    const selected = selectedItems[0]
+    const detail = this.getDishByRecord(selected)
+    if (!detail) {
+      wx.showToast({
+        title: UI.selectDishFirst,
+        icon: 'none'
+      })
+      return
+    }
+
+    const dish = detail.dish
+    this.setData({
+      showEditDishDialog: true,
+      editDishTarget: {
+        orderId: selected.groupId,
+        dishIndex: selected.dishIndex
+      },
+      editDishTitle: dish.dishName || selected.dishName || '',
+      editDishOptionsInput: this.getDishEditOptionsText(dish),
+      editDishRemark: dish.remark || ''
+    })
+  },
+
+  closeEditDishDialog() {
+    if (this.data.savingDishEdit) return
+    this.setData({
+      showEditDishDialog: false,
+      editDishTarget: null,
+      editDishTitle: '',
+      editDishOptionsInput: '',
+      editDishRemark: ''
+    })
+  },
+
+  stopEditDishDialogTap() {},
+
+  onEditDishOptionsInput(event) {
+    this.setData({
+      editDishOptionsInput: event.detail.value
+    })
+  },
+
+  onEditDishRemarkInput(event) {
+    this.setData({
+      editDishRemark: event.detail.value
+    })
+  },
+
+  async confirmEditDishDialog() {
+    if (this.data.savingDishEdit) return
+    const target = this.data.editDishTarget || {}
+
+    try {
+      this.setData({ savingDishEdit: true })
+      await apiClient.call('admin.table.updateDish', {
+        orderId: target.orderId,
+        dishIndex: target.dishIndex,
+        tags: this.parseEditDishOptions(this.data.editDishOptionsInput),
+        remark: this.data.editDishRemark
+      })
+      wx.showToast({
+        title: UI.editDishSuccess,
+        icon: 'success'
+      })
+      this.setData({
+        savingDishEdit: false,
+        showEditDishDialog: false,
+        editDishTarget: null,
+        editDishTitle: '',
+        editDishOptionsInput: '',
+        editDishRemark: '',
+        selectedDishRowId: '',
+        selectedDishName: '',
+        selectedDishIndex: -1,
+        selectedDishMap: {},
+        selectedDishCount: 0,
+        selectedDishText: UI.noSelectedDish,
+        selectedGroupId: ''
+      })
+      await this.loadDetail(true)
+    } catch (err) {
+      console.error('edit selected dish failed', err)
+      this.setData({ savingDishEdit: false })
+      wx.showToast({
+        title: err.message || UI.editDishFailed,
+        icon: 'none'
+      })
+    }
   },
 
   async refundSelectedDish() {
@@ -1178,6 +1338,14 @@ Page({
       })
       return
     }
+    if (selectedItems.some(item => item.canSendKitchen === false)) {
+      wx.showToast({
+        title: UI.paidOrderCannotSendKitchen,
+        icon: 'none'
+      })
+      await this.loadDetail(true)
+      return
+    }
 
     const confirmed = await new Promise(resolve => {
       wx.showModal({
@@ -1218,8 +1386,13 @@ Page({
       await this.loadDetail(true)
     } catch (err) {
       console.error('send table orders to kitchen failed', err)
+      if (err.code === 'ORDER_PAID' || /paid order/.test(err.message || '')) {
+        await this.loadDetail(true)
+      }
       wx.showToast({
-        title: err.message || '\u53d1\u9001\u5931\u8d25',
+        title: err.code === 'ORDER_PAID' || /paid order/.test(err.message || '')
+          ? UI.paidOrderCannotSendKitchen
+          : err.message || '\u53d1\u9001\u5931\u8d25',
         icon: 'none'
       })
     } finally {

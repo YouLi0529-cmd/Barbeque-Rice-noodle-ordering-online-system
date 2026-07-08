@@ -774,6 +774,11 @@ Page({
     }
   },
 
+  getDefaultOption(options) {
+    const list = Array.isArray(options) ? options : []
+    return list.find(option => String(option || '').indexOf('正常') >= 0) || list[0] || ''
+  },
+
   showCampingFreeBucketTip() {
     wx.showToast({
       title: '满188元免费提供桶和碳',
@@ -788,9 +793,10 @@ Page({
     const flavorOptions = goods.flavorOptions && goods.flavorOptions.length
       ? goods.flavorOptions
       : ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3']
+    const defaultFlavor = this.getDefaultOption(flavorOptions)
     const optionGroups = (goods.optionGroups || []).map(group => ({
       ...group,
-      selectedOption: group.options && group.options.length ? group.options[0] : ''
+      selectedOption: this.getDefaultOption(group.options)
     }))
     
     // 初始化标签选择状态，多选标签初始化为数组
@@ -811,10 +817,10 @@ Page({
         tags: []
       },
       selectedTags: {
-        flavor: flavorOptions[0],
+        flavor: defaultFlavor,
         ...optionGroups.reduce((result, group) => {
           if (group.id && group.options && group.options.length) {
-            result[group.id] = group.options[0]
+            result[group.id] = group.selectedOption
           }
           return result
         }, {}),

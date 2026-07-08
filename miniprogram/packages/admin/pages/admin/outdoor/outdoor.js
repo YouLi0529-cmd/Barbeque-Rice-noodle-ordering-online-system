@@ -181,6 +181,7 @@ function normalizeGoods(order, selectedGoodsMap = {}, options = {}) {
       count,
       optionText: getGoodsOptions(item),
       subtotalText: formatPrice(total),
+      kitchenSent: item.kitchenSent === true || item.kitchenStatus === 'sent',
       selected: !!selectedGoodsMap[key]
     }
   })

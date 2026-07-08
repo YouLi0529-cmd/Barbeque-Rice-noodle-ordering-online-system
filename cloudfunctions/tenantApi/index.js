@@ -504,6 +504,26 @@ async function createOrder(payload) {
     }
   }
 
+  if (orderScene !== 'camping') {
+    const sharedSessionId = String(payload.sharedSessionId || getSharedCartSessionId(tableNumber)).trim()
+    const sessionRes = await db.collection('tableOrderSession').doc(sharedSessionId).get()
+    const session = sessionRes.data
+    if (!isActiveTableSession(session)) {
+      return {
+        success: false,
+        code: 'TABLE_SESSION_CLOSED',
+        message: '本桌订单已结账，请重新扫码开台'
+      }
+    }
+    if (!buildSharedCartPeopleState(session).peopleConfirmed) {
+      return {
+        success: false,
+        code: 'TABLE_PEOPLE_REQUIRED',
+        message: '请先确认用餐人数'
+      }
+    }
+  }
+
   const linkedTableGroup = !isAddOnOrder && orderScene !== 'camping'
     ? await getActiveTableGroupSnapshotForTableNumber(tableNumber)
     : {}
@@ -1416,6 +1436,8 @@ function summarizeAdminTable(table, orders, tableGroup, tableSession) {
   let finishedAt = 0
   let peopleCount = Number(tableGroup && tableGroup.peopleCount || 0)
   const hasActiveSession = isActiveTableSession(tableSession)
+  const sessionPeopleState = buildSharedCartPeopleState(tableSession)
+  const hasConfirmedSession = hasActiveSession && sessionPeopleState.peopleConfirmed
 
   activeOrders.forEach(order => {
     const rootOrderId = order.rootOrderId || order._id
@@ -1441,19 +1463,20 @@ function summarizeAdminTable(table, orders, tableGroup, tableSession) {
     peopleCount = Math.max(peopleCount, Number(order.peopleCount || 0))
   })
 
+  const sessionPeopleCount = sessionPeopleState.peopleCount
+  if (!peopleCount && sessionPeopleCount > 0) {
+    peopleCount = sessionPeopleCount
+  }
   if (!peopleCount && activeOrders.length > 0) {
     peopleCount = Math.max(1, userIds.length)
   }
-  if (!peopleCount && hasActiveSession) {
-    peopleCount = Math.max(1, Array.isArray(tableSession.memberOpenids) ? tableSession.memberOpenids.length : 0)
-  }
-  if (!scannedAt && hasActiveSession) {
-    scannedAt = getTimeValue(tableSession.createTime || tableSession.updateTime)
+  if (!scannedAt && hasConfirmedSession) {
+    scannedAt = getTimeValue(tableSession.peopleConfirmedAt || tableSession.createTime || tableSession.updateTime)
   }
 
   const status = activeOrders.length > 0
     ? getAdminTableStatus(activeOrders)
-    : (hasActiveSession ? 'submitted' : 'empty')
+    : (hasConfirmedSession ? 'submitted' : 'empty')
 
   return {
     ...table,
@@ -1534,6 +1557,7 @@ function formatAdminGoods(goods) {
       ? item.subtotal
       : Number(item.price || 0) * count)
     const tags = normalizeTags(item.tags)
+    const remark = String(item.remark || item.note || '').trim()
     if ((item.isGift === true || item.giftDish === true) && tags.indexOf('赠菜') === -1) {
       tags.push('赠菜')
     }
@@ -1549,6 +1573,7 @@ function formatAdminGoods(goods) {
       subtotalText: String(subtotal),
       tags,
       tagText: tags.join('、'),
+      remark,
       isGift: item.isGift === true || item.giftDish === true,
       kitchenSent: item.kitchenSent === true,
       kitchenStatus: item.kitchenStatus || ''
@@ -1755,7 +1780,8 @@ function buildAdminBillGroups(orders) {
       finalPrice,
       finalPriceText: String(finalPrice),
       kitchenPrinted: order.kitchenPrinted === true,
-      frontDeskConfirmed: order.frontDeskConfirmed === true
+      frontDeskConfirmed: order.frontDeskConfirmed === true,
+      canSendKitchen: !isAdminPaidOrder(order) && isKitchenPrintableOrder(order)
     }
   })
 }
@@ -3096,6 +3122,132 @@ async function adminGiftDishes(payload) {
   }
 }
 
+async function adminUpdateTableDish(payload) {
+  const orderId = String(payload.orderId || payload.groupId || '').trim()
+  const dishIndex = Math.floor(Number(payload.dishIndex))
+  if (!orderId) {
+    return {
+      success: false,
+      code: 'ORDER_ID_REQUIRED',
+      message: 'order id required'
+    }
+  }
+  if (!Number.isInteger(dishIndex) || dishIndex < 0) {
+    return {
+      success: false,
+      code: 'DISH_INDEX_REQUIRED',
+      message: 'dish index required'
+    }
+  }
+
+  const orderRes = await db.collection('order').doc(orderId).get()
+  const order = orderRes.data
+  if (!order || !isAdminTableOrder(order)) {
+    return {
+      success: false,
+      code: 'ORDER_NOT_FOUND',
+      message: 'order not found'
+    }
+  }
+  if (isAdminPaidOrder(order)) {
+    return {
+      success: false,
+      code: 'ORDER_PAID',
+      message: 'paid order cannot update dish here'
+    }
+  }
+
+  const goods = Array.isArray(order.goods) ? order.goods : []
+  const item = goods[dishIndex]
+  if (!item) {
+    return {
+      success: false,
+      code: 'DISH_NOT_FOUND',
+      message: 'dish not found'
+    }
+  }
+
+  const count = Number(item.count || 0)
+  const tags = normalizeTags(payload.tags)
+  const remark = String(payload.remark || '').trim().slice(0, 50)
+  const editTime = new Date()
+  const originalPrice = roundMoney(item.originalPrice !== undefined ? item.originalPrice : item.price || 0)
+  const price = roundMoney(item.price || 0)
+  const subtotal = item.isGift === true || item.giftDish === true
+    ? 0
+    : roundMoney(price * count)
+  const originalSubtotal = roundMoney(originalPrice * count)
+  const previous = {
+    count: Number(item.count || 0),
+    tags: normalizeTags(item.tags),
+    remark: item.remark || item.note || '',
+    subtotal: roundMoney(item.subtotal !== undefined
+      ? item.subtotal
+      : Number(item.price || 0) * Number(item.count || 0))
+  }
+
+  const nextGoods = goods.map((goodsItem, index) => {
+    if (index !== dishIndex) return goodsItem
+    return {
+      ...goodsItem,
+      count,
+      tags,
+      remark,
+      note: remark,
+      originalPrice,
+      originalSubtotal,
+      subtotal,
+      adminEdited: true,
+      adminEditedAt: editTime
+    }
+  })
+  const totalPrice = roundMoney(nextGoods.reduce((sum, goodsItem) => {
+    const itemCount = Number(goodsItem.count || 0)
+    const itemSubtotal = goodsItem.subtotal !== undefined
+      ? Number(goodsItem.subtotal || 0)
+      : Number(goodsItem.price || 0) * itemCount
+    return sum + itemSubtotal
+  }, 0))
+
+  const editLog = {
+    type: 'dish_update',
+    dishIndex,
+    dishId: item.dishId || '',
+    dishName: item.dishName || item.name || '',
+    previous,
+    next: {
+      count,
+      tags,
+      remark,
+      subtotal
+    },
+    createTime: editTime
+  }
+
+  await db.collection('order').doc(orderId).update({
+    data: {
+      goods: nextGoods,
+      totalPrice,
+      finalPrice: totalPrice,
+      dishEditLogs: [
+        ...(Array.isArray(order.dishEditLogs) ? order.dishEditLogs : []),
+        editLog
+      ],
+      updateTime: db.serverDate()
+    }
+  })
+
+  return {
+    success: true,
+    data: {
+      orderId,
+      dishIndex,
+      totalPrice,
+      item: nextGoods[dishIndex]
+    }
+  }
+}
+
 function normalizeTableNumber(tableNumber) {
   return String(tableNumber || '').trim()
 }
@@ -3181,6 +3333,9 @@ async function clearSharedCartSessionByTableNumber(tableNumber, finishedAt) {
         status: 'finished',
         checkoutStatus: 'finished',
         memberOpenids: [],
+        peopleCount: 0,
+        peopleConfirmed: false,
+        peopleConfirmedAt: null,
         finishedAt,
         updateTime: db.serverDate()
       }
@@ -3191,6 +3346,79 @@ async function clearSharedCartSessionByTableNumber(tableNumber, finishedAt) {
     tableNumber: normalizedTableNumber,
     sessionId,
     removed: (res.data || []).length
+  }
+}
+
+async function clearSharedCartItemsBySessionId(sessionId) {
+  const res = await db.collection('tableCartItem')
+    .where({
+      sessionId,
+      deleted: _.neq(true)
+    })
+    .limit(200)
+    .get()
+
+  await Promise.all((res.data || []).map(item => {
+    return db.collection('tableCartItem').doc(item._id).remove()
+  }))
+
+  return (res.data || []).length
+}
+
+async function autoClearPaidTableOrdersForNewSession(tableNumber, clearedAt) {
+  const parsed = parseAdminTableNumber(tableNumber)
+  if (!parsed) {
+    return {
+      clearedOrders: 0,
+      clearedGroups: 0
+    }
+  }
+
+  const orders = await getAdminTableOrders({
+    areaKey: parsed.areaKey,
+    tableNumber: parsed.tableNumber
+  })
+  const paidOrders = (orders || []).filter(order => {
+    return isAdminPaidOrder(order) && order.tableCleared !== true
+  })
+
+  if (paidOrders.length === 0) {
+    return {
+      clearedOrders: 0,
+      clearedGroups: 0
+    }
+  }
+
+  await Promise.all(paidOrders.map(order => db.collection('order').doc(order._id).update({
+    data: {
+      tableCleared: true,
+      tableClearedAt: clearedAt,
+      updateTime: db.serverDate()
+    }
+  })))
+
+  const groupIds = Array.from(new Set(paidOrders
+    .map(order => String(order.tableGroupId || '').trim())
+    .filter(Boolean)))
+
+  await Promise.all(groupIds.map(groupId => db.collection('tableGroup').doc(groupId).update({
+    data: {
+      status: 'inactive',
+      clearedAt,
+      updateTime: db.serverDate()
+    }
+  }).catch(() => db.collection('tableGroup').doc(groupId).set({
+    data: {
+      tableGroupId: groupId,
+      status: 'inactive',
+      clearedAt,
+      updateTime: db.serverDate()
+    }
+  }))))
+
+  return {
+    clearedOrders: paidOrders.length,
+    clearedGroups: groupIds.length
   }
 }
 
@@ -3217,6 +3445,31 @@ function getSharedCartDocId(sessionId, cartKey) {
 function normalizeSharedCartCount(count) {
   const value = Math.floor(Number(count) || 0)
   return value > 0 ? value : 0
+}
+
+function getSharedCartPeopleCount(session) {
+  const value = Math.floor(Number(session && session.peopleCount || 0))
+  return value > 0 ? value : 0
+}
+
+function buildSharedCartPeopleState(session) {
+  const peopleCount = getSharedCartPeopleCount(session)
+  const peopleConfirmed = peopleCount > 0 && (!session || session.peopleConfirmed !== false)
+  return {
+    peopleCount,
+    peopleConfirmed,
+    peopleRequired: !peopleConfirmed
+  }
+}
+
+function buildSharedCartSessionState(session) {
+  const sessionActive = isActiveTableSession(session)
+  return {
+    sessionActive,
+    sessionClosed: !session || !sessionActive,
+    sessionStatus: String(session && session.status || ''),
+    checkoutStatus: String(session && session.checkoutStatus || '')
+  }
 }
 
 function normalizeSharedCartItem(item) {
@@ -3250,6 +3503,11 @@ async function joinSharedCart(payload) {
   const sessionRef = db.collection('tableOrderSession').doc(sessionId)
   const oldSessionRes = await sessionRef.get()
   const oldSession = oldSessionRes.data
+  let nextSession = oldSession
+  let clearedForNewSession = {
+    clearedOrders: 0,
+    clearedGroups: 0
+  }
 
   if (oldSession) {
     const shouldResetSession = oldSession.status === 'finished' ||
@@ -3265,26 +3523,52 @@ async function joinSharedCart(payload) {
     }
     if (shouldResetSession) {
       updateData.createTime = db.serverDate()
+      updateData.peopleCount = 0
+      updateData.peopleConfirmed = false
+      updateData.peopleConfirmedAt = null
+      await clearSharedCartItemsBySessionId(sessionId)
+      clearedForNewSession = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date())
     }
     await sessionRef.update({
       data: updateData
     })
+    nextSession = shouldResetSession
+      ? {
+        tableNumber,
+        status: 'ordering',
+        peopleCount: 0,
+        peopleConfirmed: false
+      }
+      : oldSession
   } else {
     await sessionRef.set({
       data: {
         tableNumber,
         status: 'ordering',
+        peopleCount: 0,
+        peopleConfirmed: false,
+        peopleConfirmedAt: null,
         memberOpenids: [auth.data.openid],
         createTime: db.serverDate(),
         updateTime: db.serverDate()
       }
     })
+    clearedForNewSession = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date())
+    nextSession = {
+      tableNumber,
+      status: 'ordering',
+      peopleCount: 0,
+      peopleConfirmed: false
+    }
   }
 
   return {
     success: true,
     sessionId,
-    tableNumber
+    tableNumber,
+    ...buildSharedCartPeopleState(nextSession),
+    ...buildSharedCartSessionState(nextSession),
+    clearedForNewSession
   }
 }
 
@@ -3302,6 +3586,17 @@ async function getSharedCart(payload) {
     }
   }
 
+  const sessionRes = await db.collection('tableOrderSession').doc(sessionId).get()
+  const sessionState = buildSharedCartSessionState(sessionRes.data)
+  if (sessionState.sessionClosed) {
+    return {
+      success: true,
+      items: [],
+      ...buildSharedCartPeopleState(sessionRes.data),
+      ...sessionState
+    }
+  }
+
   const res = await db.collection('tableCartItem')
     .where({
       sessionId,
@@ -3312,7 +3607,93 @@ async function getSharedCart(payload) {
 
   return {
     success: true,
-    items: res.data || []
+    items: res.data || [],
+    ...buildSharedCartPeopleState(sessionRes.data),
+    ...sessionState
+  }
+}
+
+async function setSharedCartPeople(payload) {
+  const auth = await getAuthSession(payload)
+  if (!auth.success) return auth
+
+  const tableNumber = normalizeTableNumber(payload.tableNumber)
+  const sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
+  const peopleCount = Math.floor(Number(payload.peopleCount || 0))
+  if (!sessionId || !tableNumber) {
+    return {
+      success: false,
+      code: 'SESSION_REQUIRED',
+      message: 'shared cart session required'
+    }
+  }
+  if (!Number.isInteger(peopleCount) || peopleCount < 1 || peopleCount > 99) {
+    return {
+      success: false,
+      code: 'PEOPLE_COUNT_INVALID',
+      message: 'people count invalid'
+    }
+  }
+
+  const sessionRef = db.collection('tableOrderSession').doc(sessionId)
+  const oldSessionRes = await sessionRef.get()
+  const oldSession = oldSessionRes.data
+  const oldPeopleState = buildSharedCartPeopleState(oldSession)
+
+  if (oldSession && !isActiveTableSession(oldSession)) {
+    return {
+      success: false,
+      code: 'SESSION_CLOSED',
+      message: '本桌订单已结账，请重新扫码开台'
+    }
+  }
+
+  if (oldSession && isActiveTableSession(oldSession) && oldPeopleState.peopleConfirmed) {
+    await sessionRef.update({
+      data: {
+        memberOpenids: _.addToSet(auth.data.openid),
+        updateTime: db.serverDate()
+      }
+    })
+    return {
+      success: true,
+      sessionId,
+      tableNumber,
+      alreadyConfirmed: true,
+      ...oldPeopleState
+    }
+  }
+
+  const data = {
+    tableNumber,
+    status: 'ordering',
+    checkoutStatus: '',
+    finishedAt: null,
+    peopleCount,
+    peopleConfirmed: true,
+    peopleConfirmedAt: db.serverDate(),
+    memberOpenids: oldSession ? _.addToSet(auth.data.openid) : [auth.data.openid],
+    updateTime: db.serverDate()
+  }
+
+  if (oldSession) {
+    await sessionRef.update({ data })
+  } else {
+    await sessionRef.set({
+      data: {
+        ...data,
+        createTime: db.serverDate()
+      }
+    })
+  }
+
+  return {
+    success: true,
+    sessionId,
+    tableNumber,
+    peopleCount,
+    peopleConfirmed: true,
+    peopleRequired: false
   }
 }
 
@@ -3335,6 +3716,16 @@ async function patchSharedCart(payload) {
   if (operations.length === 0) {
     return {
       success: true
+    }
+  }
+
+  const sessionRef = db.collection('tableOrderSession').doc(sessionId)
+  const sessionRes = await sessionRef.get()
+  if (!isActiveTableSession(sessionRes.data)) {
+    return {
+      success: false,
+      code: 'SESSION_CLOSED',
+      message: '本桌订单已结账，请重新扫码开台'
     }
   }
 
@@ -3388,7 +3779,7 @@ async function patchSharedCart(payload) {
     }
   })
 
-  await db.collection('tableOrderSession').doc(sessionId).update({
+  await sessionRef.update({
     data: {
       tableNumber,
       memberOpenids: _.addToSet(auth.data.openid),
@@ -4421,6 +4812,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.refundDish') return adminRefundDish(payload)
   if (action === 'admin.table.refundDishes') return adminRefundDishes(payload)
   if (action === 'admin.table.giftDishes') return adminGiftDishes(payload)
+  if (action === 'admin.table.updateDish') return adminUpdateTableDish(payload)
   if (action === 'admin.collection.list') return adminCollectionList(payload)
   if (action === 'admin.collection.save') return adminCollectionSave(payload)
   if (action === 'admin.collection.update') return adminCollectionUpdate(payload)
@@ -4437,6 +4829,7 @@ async function handleAction(action, payload) {
   if (action === 'order.cancel') return cancelUserOrder(payload)
   if (action === 'sharedCart.join') return joinSharedCart(payload)
   if (action === 'sharedCart.get') return getSharedCart(payload)
+  if (action === 'sharedCart.setPeople') return setSharedCartPeople(payload)
   if (action === 'sharedCart.patch') return patchSharedCart(payload)
   if (action === 'sharedCart.clear') return clearSharedCart(payload)
   if (action === 'orderDraft.save') return saveOrderDraft(payload)

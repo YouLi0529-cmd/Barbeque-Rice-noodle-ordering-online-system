@@ -324,6 +324,41 @@
   </view>
 
   <!-- 用户授权组件 -->
+  <view class="people-modal-mask" wx:if="{{showPeopleModal}}" catchtouchmove="stopPropagation">
+    <view class="people-modal" catchtap="stopPropagation">
+      <view class="people-modal-title">请选择用餐人数</view>
+      <view class="people-modal-desc">确认人数后开始点单</view>
+      <view class="people-options">
+        <view
+          class="people-option {{selectedPeopleMode === 'preset' && selectedPeopleCount === item ? 'active' : ''}}"
+          wx:for="{{peopleOptions}}"
+          wx:key="*this"
+          data-count="{{item}}"
+          bindtap="selectPeopleOption"
+        >{{item}}人</view>
+        <view
+          class="people-option custom {{selectedPeopleMode === 'custom' ? 'active' : ''}}"
+          bindtap="chooseCustomPeople"
+        >自定义</view>
+      </view>
+      <view class="people-custom-row" wx:if="{{selectedPeopleMode === 'custom'}}">
+        <input
+          class="people-custom-input"
+          type="number"
+          value="{{customPeopleInput}}"
+          maxlength="2"
+          placeholder="输入人数"
+          bindinput="onCustomPeopleInput"
+        />
+        <text class="people-custom-unit">人</text>
+      </view>
+      <view class="people-modal-tip" wx:if="{{peopleModalTip}}">{{peopleModalTip}}</view>
+      <view class="people-confirm-btn {{selectedPeopleCount > 0 ? 'active' : ''}}" bindtap="confirmPeopleCount">
+        {{peopleConfirming ? '确认中...' : '确定'}}
+      </view>
+    </view>
+  </view>
+
   <view class="action-loading-layer" wx:if="{{actionLoading}}" catchtouchmove="catchActionLoadingMove">
     <view class="action-loading-card">
       <image class="action-loading-img" src="{{actionLoadingGif}}" mode="aspectFit"></image>

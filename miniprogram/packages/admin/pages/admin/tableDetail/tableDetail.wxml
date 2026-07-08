@@ -74,8 +74,12 @@
                 <view class="dish-check {{dish.selected ? 'dish-check-active' : ''}}"></view>
               </view>
               <view class="dish-main">
-                <view class="dish-name">{{dish.dishName}}</view>
+                <view class="dish-name">
+                  <text class="dish-name-text">{{dish.dishName}}</text>
+                  <text class="dish-sent-tag" wx:if="{{dish.kitchenSent}}">已发送</text>
+                </view>
                 <view class="dish-tags" wx:if="{{dish.tagText}}">{{dish.tagText}}</view>
+                <view class="dish-tags" wx:if="{{dish.remarkText}}">{{dish.remarkText}}</view>
               </view>
               <view class="dish-count">x{{dish.count}}</view>
               <view class="dish-price">{{ui.moneySymbol}}{{dish.subtotalText}}</view>
@@ -196,6 +200,37 @@
       <view class="people-actions">
         <view class="people-action cancel" bindtap="closePeopleDialog">{{ui.discountCancel}}</view>
         <view class="people-action confirm" bindtap="confirmPeopleDialog">{{ui.discountConfirm}}</view>
+      </view>
+    </view>
+  </view>
+  <view class="edit-dish-mask" wx:if="{{showEditDishDialog}}" catchtap="closeEditDishDialog">
+    <view class="edit-dish-dialog" catchtap="stopEditDishDialogTap">
+      <view class="edit-dish-title">{{ui.editDishTitle}}</view>
+      <view class="edit-dish-name">{{editDishTitle}}</view>
+      <view class="edit-dish-form">
+        <view class="edit-dish-field">
+          <view class="edit-dish-label">{{ui.editDishOptionsLabel}}</view>
+          <input
+            class="edit-dish-input"
+            value="{{editDishOptionsInput}}"
+            placeholder="{{ui.editDishOptionsPlaceholder}}"
+            bindinput="onEditDishOptionsInput"
+          />
+        </view>
+        <view class="edit-dish-field">
+          <view class="edit-dish-label">{{ui.editDishRemarkLabel}}</view>
+          <input
+            class="edit-dish-input"
+            maxlength="50"
+            value="{{editDishRemark}}"
+            placeholder="{{ui.editDishRemarkPlaceholder}}"
+            bindinput="onEditDishRemarkInput"
+          />
+        </view>
+      </view>
+      <view class="edit-dish-actions">
+        <view class="edit-dish-action cancel" bindtap="closeEditDishDialog">{{ui.discountCancel}}</view>
+        <view class="edit-dish-action confirm" bindtap="confirmEditDishDialog">{{ui.discountConfirm}}</view>
       </view>
     </view>
   </view>

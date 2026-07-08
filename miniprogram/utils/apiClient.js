@@ -76,7 +76,11 @@ function call(action, data = {}) {
           return
         }
 
-        reject(new Error(result.message || `request failed: ${res.statusCode}`))
+        const error = new Error(result.message || `request failed: ${res.statusCode}`)
+        error.code = result.code || ''
+        error.data = result
+        error.statusCode = res.statusCode
+        reject(error)
       },
       fail(err) {
         reject(err)

@@ -59,6 +59,17 @@ Page({
     sharedSessionId: '',
     sharedCartReady: false,
     sharedCartWatchReady: false,
+    orderSessionClosed: false,
+    showPeopleModal: false,
+    peopleOptions: [1, 2, 3, 4, 5, 6, 7, 8],
+    selectedPeopleCount: 0,
+    selectedPeopleMode: '',
+    customPeopleInput: '',
+    sharedPeopleCount: 0,
+    sharedPeopleConfirmed: false,
+    pendingSettleAfterPeopleConfirm: false,
+    peopleConfirming: false,
+    peopleModalTip: '',
     // 菜品分页
     goodsPage: 0,
     goodsPageSize: 20,
@@ -144,6 +155,8 @@ Page({
     this.loadUserInfo()
     if (this.data.tableNumber && !this.data.sharedSessionId) {
       this.initSharedCart(this.data.tableNumber)
+    } else if (this.data.sharedSessionId) {
+      this.fetchSharedCart(false)
     }
   },
 
@@ -159,6 +172,177 @@ Page({
 
   isSharedCartMode() {
     return !!(this.data.tableNumber && this.data.sharedSessionId)
+  },
+
+  isSharedSessionClosed(result = {}) {
+    return result.sessionClosed === true ||
+      result.code === 'SESSION_CLOSED' ||
+      result.code === 'TABLE_SESSION_CLOSED'
+  },
+
+  handleSharedSessionClosed(message = '本桌订单已结账，请重新扫码开台') {
+    this.stopSharedCartSync()
+    this.updateCart({}, { skipSync: true })
+    this.setData({
+      tableNumber: '',
+      sharedSessionId: '',
+      sharedCartReady: false,
+      sharedCartWatchReady: false,
+      orderSessionClosed: true,
+      sharedPeopleCount: 0,
+      sharedPeopleConfirmed: false,
+      showPeopleModal: false,
+      showTagModal: false,
+      showCart: false,
+      currentDish: null,
+      pendingSettleAfterPeopleConfirm: false,
+      peopleModalTip: ''
+    })
+    wx.showModal({
+      title: '本桌已结账',
+      content: message,
+      showCancel: false
+    })
+  },
+
+  applySharedPeopleState(result = {}) {
+    const peopleCount = Math.floor(Number(result.peopleCount || 0))
+    const peopleConfirmed = peopleCount > 0 && result.peopleConfirmed !== false
+    if (!peopleConfirmed && this.data.sharedPeopleConfirmed) {
+      return
+    }
+    const nextData = {
+      sharedPeopleCount: peopleConfirmed ? peopleCount : 0,
+      sharedPeopleConfirmed: peopleConfirmed,
+      showPeopleModal: !!(this.data.tableNumber && !peopleConfirmed),
+      peopleModalTip: peopleConfirmed ? '' : this.data.peopleModalTip
+    }
+
+    if (peopleConfirmed) {
+      nextData.selectedPeopleCount = peopleCount
+      nextData.selectedPeopleMode = peopleCount >= 1 && peopleCount <= 8 ? 'preset' : 'custom'
+      nextData.customPeopleInput = peopleCount >= 1 && peopleCount <= 8 ? '' : String(peopleCount)
+    }
+
+    this.setData(nextData, () => {
+      if (peopleConfirmed && this.data.pendingSettleAfterPeopleConfirm) {
+        this.setData({
+          pendingSettleAfterPeopleConfirm: false
+        }, () => this.navigateToSettle())
+      }
+    })
+  },
+
+  requirePeopleBeforeOrder() {
+    if (this.data.orderSessionClosed) {
+      wx.showModal({
+        title: '本桌已结账',
+        content: '如需继续点单，请重新扫码开台',
+        showCancel: false
+      })
+      return false
+    }
+
+    if (!this.data.tableNumber || this.data.sharedPeopleConfirmed) {
+      return true
+    }
+
+    this.setData({
+      showPeopleModal: true,
+      peopleModalTip: '请先选择用餐人数'
+    })
+    return false
+  },
+
+  selectPeopleOption(e) {
+    const count = Math.floor(Number(e.currentTarget.dataset.count || 0))
+    if (!count) return
+    this.setData({
+      selectedPeopleCount: count,
+      selectedPeopleMode: 'preset',
+      customPeopleInput: '',
+      peopleModalTip: ''
+    })
+  },
+
+  chooseCustomPeople() {
+    this.setData({
+      selectedPeopleMode: 'custom',
+      selectedPeopleCount: 0,
+      customPeopleInput: '',
+      peopleModalTip: ''
+    })
+  },
+
+  onCustomPeopleInput(e) {
+    const value = String((e.detail && e.detail.value) || '').replace(/[^\d]/g, '').slice(0, 2)
+    this.setData({
+      selectedPeopleMode: 'custom',
+      customPeopleInput: value,
+      selectedPeopleCount: Math.floor(Number(value || 0)),
+      peopleModalTip: ''
+    })
+  },
+
+  async confirmPeopleCount() {
+    if (this.data.peopleConfirming) return
+
+    const peopleCount = Math.floor(Number(this.data.selectedPeopleCount || 0))
+    if (!peopleCount || peopleCount < 1 || peopleCount > 99) {
+      this.setData({
+        peopleModalTip: '请选择或输入正确人数'
+      })
+      return
+    }
+
+    if (!this.data.tableNumber) {
+      this.setData({
+        peopleModalTip: '缺少桌号，请重新扫码'
+      })
+      return
+    }
+
+    this.setData({
+      peopleConfirming: true,
+      peopleModalTip: ''
+    })
+
+    try {
+      const result = apiClient.isEnabled()
+        ? await apiClient.call('sharedCart.setPeople', {
+          action: 'setPeople',
+          sessionId: this.data.sharedSessionId,
+          tableNumber: this.data.tableNumber,
+          peopleCount
+        })
+        : (await wx.cloud.callFunction({
+          name: 'sharedCart',
+          data: {
+            action: 'setPeople',
+            sessionId: this.data.sharedSessionId,
+            tableNumber: this.data.tableNumber,
+            peopleCount
+          }
+        })).result || {}
+
+      if (!result.success) {
+        throw new Error(result.message || '确认人数失败')
+      }
+
+      this.applySharedPeopleState({
+        peopleCount: result.peopleCount || peopleCount,
+        peopleConfirmed: result.peopleConfirmed !== false
+      })
+    } catch (err) {
+      console.error('确认用餐人数失败', err)
+      this.setData({
+        peopleModalTip: err.message || '确认失败，请重试'
+      })
+    } finally {
+      this.setData({
+        peopleConfirming: false
+      })
+    }
   },
 
   async initSharedCart(tableNumber) {
@@ -194,8 +378,10 @@ Page({
       this.setData({
         tableNumber: currentTable,
         sharedSessionId: result.sessionId,
-        sharedCartReady: true
+        sharedCartReady: true,
+        orderSessionClosed: false
       })
+      this.applySharedPeopleState(result)
 
       await this.fetchSharedCart(false)
       if (localCartBeforeJoin) {
@@ -312,6 +498,11 @@ Page({
       if (!result.success) {
         throw new Error(result.message || '同步购物车失败')
       }
+      if (this.isSharedSessionClosed(result)) {
+        this.handleSharedSessionClosed('本桌订单已结账，请重新扫码开台')
+        return
+      }
+      this.applySharedPeopleState(result)
       this.applySharedCartDocs(result.items || [])
     } catch (err) {
       console.error('拉取共同点单购物车失败', err)
@@ -398,6 +589,12 @@ Page({
 
     request.catch(err => {
       console.error('同步共同点单购物车失败', err)
+      if (err.code === 'SESSION_CLOSED' ||
+          err.code === 'TABLE_SESSION_CLOSED' ||
+          /已结账|重新扫码|session closed/i.test(err.message || '')) {
+        this.handleSharedSessionClosed(err.message || '本桌订单已结账，请重新扫码开台')
+        return
+      }
       this.startSharedCartFallback()
       wx.showToast({ title: '同步稍慢，正在重试', icon: 'none' })
     })
@@ -1087,16 +1284,24 @@ Page({
     }
   },
 
+  getDefaultOption(options) {
+    const list = Array.isArray(options) ? options : []
+    return list.find(option => String(option || '').indexOf('正常') >= 0) || list[0] || ''
+  },
+
   // 添加到购物车 - 显示标签选择弹窗
   addToCart(e) {
+    if (!this.requirePeopleBeforeOrder()) return
+
     const goods = e.currentTarget.dataset.goods
     const specAddOriginPoint = this.getTapPoint(e)
     const flavorOptions = goods.flavorOptions && goods.flavorOptions.length
       ? goods.flavorOptions
       : ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3']
+    const defaultFlavor = this.getDefaultOption(flavorOptions)
     const optionGroups = (goods.optionGroups || []).map(group => ({
       ...group,
-      selectedOption: group.options && group.options.length ? group.options[0] : ''
+      selectedOption: this.getDefaultOption(group.options)
     }))
     
     // 初始化标签选择状态，多选标签初始化为数组
@@ -1117,10 +1322,10 @@ Page({
         tags: []
       },
       selectedTags: {
-        flavor: flavorOptions[0],
+        flavor: defaultFlavor,
         ...optionGroups.reduce((result, group) => {
           if (group.id && group.options && group.options.length) {
-            result[group.id] = group.options[0]
+            result[group.id] = group.selectedOption
           }
           return result
         }, {}),
@@ -1144,6 +1349,8 @@ Page({
 
   // 确认添加到购物车
   confirmAddToCart(e) {
+    if (!this.requirePeopleBeforeOrder()) return
+
     const { currentDish, selectedTags, modalDishCount } = this.data
     const cart = { ...this.data.cart }
     
@@ -1246,6 +1453,8 @@ Page({
 
   // 从菜品列表直接添加到购物车（无标签版本）
   addDishToCartDirect(e) {
+    if (!this.requirePeopleBeforeOrder()) return
+
     const goods = e.currentTarget.dataset.goods
     if (goods.needSpec !== false) {
       this.addToCart(e)
@@ -1817,6 +2026,12 @@ Page({
     }
 
     // 有桌码，跳转到结算页面
+    if (!this.requirePeopleBeforeOrder()) {
+      this.setData({
+        pendingSettleAfterPeopleConfirm: true
+      })
+      return
+    }
     this.navigateToSettle()
   },
 
@@ -1937,8 +2152,25 @@ Page({
         if (tableNumber) {
           this.setData({
             tableNumber: tableNumber
-          }, () => {
-            this.navigateToSettle()
+          }, async () => {
+            try {
+              await this.initSharedCart(tableNumber)
+              if (this.data.sharedPeopleConfirmed) {
+                this.navigateToSettle()
+              } else {
+                this.setData({
+                  pendingSettleAfterPeopleConfirm: true,
+                  showPeopleModal: true,
+                  peopleModalTip: '请先选择用餐人数'
+                })
+              }
+            } catch (err) {
+              console.error('扫码开台失败', err)
+              wx.showToast({
+                title: err.message || '开台失败',
+                icon: 'none'
+              })
+            }
           })
         } else {
           wx.showToast({

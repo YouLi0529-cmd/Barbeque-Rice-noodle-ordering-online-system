@@ -287,12 +287,27 @@ page {
 }
 
 .dish-name {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
   color: #2C1A12;
   font-size: 10rpx;
   font-weight: 900;
+}
+
+.dish-name-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dish-sent-tag {
+  flex: 0 0 auto;
+  margin-left: 4rpx;
+  color: rgba(138, 85, 38, 0.72);
+  font-size: 7rpx;
+  font-weight: 800;
 }
 
 .dish-tags {
@@ -542,6 +557,7 @@ page {
 }
 .discount-mask,
 .people-mask,
+.edit-dish-mask,
 .merge-mask {
   position: fixed;
   left: 0;
@@ -565,12 +581,54 @@ page {
   box-sizing: border-box;
 }
 
+.edit-dish-dialog {
+  width: 320rpx;
+  padding: 14rpx;
+  border-radius: 14rpx;
+  background: #FFFFFF;
+  box-shadow: 0 12rpx 28rpx rgba(58, 36, 24, 0.22);
+  box-sizing: border-box;
+}
+
 .discount-title,
 .people-title {
   color: #2C1A12;
   font-size: 15rpx;
   font-weight: 900;
   text-align: center;
+}
+
+.edit-dish-title {
+  color: #2C1A12;
+  font-size: 14rpx;
+  font-weight: 900;
+  text-align: center;
+}
+
+.edit-dish-name {
+  margin-top: 5rpx;
+  color: rgba(58, 36, 24, 0.58);
+  font-size: 9rpx;
+  font-weight: 800;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edit-dish-form {
+  margin-top: 10rpx;
+}
+
+.edit-dish-field {
+  margin-top: 8rpx;
+}
+
+.edit-dish-label {
+  margin-bottom: 4rpx;
+  color: rgba(58, 36, 24, 0.66);
+  font-size: 8rpx;
+  font-weight: 900;
 }
 
 .discount-input,
@@ -586,12 +644,30 @@ page {
   box-sizing: border-box;
 }
 
+.edit-dish-input {
+  height: 28rpx;
+  padding: 0 9rpx;
+  border-radius: 8rpx;
+  background: #FFF7EC;
+  color: #2C1A12;
+  font-size: 10rpx;
+  font-weight: 800;
+  box-sizing: border-box;
+}
+
 .discount-actions,
 .people-actions {
   margin-top: 14rpx;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10rpx;
+}
+
+.edit-dish-actions {
+  margin-top: 12rpx;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8rpx;
 }
 
 .discount-action,
@@ -605,14 +681,34 @@ page {
   font-weight: 900;
 }
 
+.edit-dish-action {
+  height: 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8rpx;
+  font-size: 10rpx;
+  font-weight: 900;
+}
+
 .discount-action.cancel,
 .people-action.cancel {
   color: #6B4B34;
   background: #FFF7EC;
 }
 
+.edit-dish-action.cancel {
+  color: #6B4B34;
+  background: #FFF7EC;
+}
+
 .discount-action.confirm,
 .people-action.confirm {
+  color: #FFF7EC;
+  background: #B15B18;
+}
+
+.edit-dish-action.confirm {
   color: #FFF7EC;
   background: #B15B18;
 }

@@ -64,6 +64,35 @@ function normalizeCount(count) {
   return value > 0 ? value : 0
 }
 
+function getPeopleCount(session) {
+  const value = Math.floor(Number(session && session.peopleCount || 0))
+  return value > 0 ? value : 0
+}
+
+function buildPeopleState(session) {
+  const peopleCount = getPeopleCount(session)
+  const peopleConfirmed = peopleCount > 0 && (!session || session.peopleConfirmed !== false)
+  return {
+    peopleCount,
+    peopleConfirmed,
+    peopleRequired: !peopleConfirmed
+  }
+}
+
+function isSessionClosed(session) {
+  return !!session && (session.status === 'finished' || session.checkoutStatus === 'finished')
+}
+
+function buildSessionState(session) {
+  const sessionClosed = isSessionClosed(session)
+  return {
+    sessionActive: !!session && !sessionClosed,
+    sessionClosed: !session || sessionClosed,
+    sessionStatus: String(session && session.status || ''),
+    checkoutStatus: String(session && session.checkoutStatus || '')
+  }
+}
+
 function normalizeItem(item) {
   const info = item && item.info && typeof item.info === 'object'
     ? { ...item.info }
@@ -83,36 +112,95 @@ async function joinSession(openid, tableNumber) {
   const sessionRef = db.collection('tableOrderSession').doc(sessionId)
   const oldSessionRes = await sessionRef.get()
   const oldSession = oldSessionRes.data
+  let nextSession = oldSession
 
   if (oldSession) {
+    const shouldResetSession = oldSession.status === 'finished' ||
+      oldSession.checkoutStatus === 'finished'
+    const updateData = {
+      tableNumber,
+      status: 'ordering',
+      checkoutStatus: '',
+      finishedAt: null,
+      memberOpenids: shouldResetSession ? [openid] : _.addToSet(openid),
+      updateTime: db.serverDate()
+    }
+    if (shouldResetSession) {
+      updateData.createTime = db.serverDate()
+      updateData.peopleCount = 0
+      updateData.peopleConfirmed = false
+      updateData.peopleConfirmedAt = null
+      await clearCartItemsBySessionId(sessionId)
+    }
     await sessionRef.update({
-      data: {
+      data: updateData
+    })
+    nextSession = shouldResetSession
+      ? {
         tableNumber,
         status: 'ordering',
-        memberOpenids: _.addToSet(openid),
-        updateTime: db.serverDate()
+        peopleCount: 0,
+        peopleConfirmed: false
       }
-    })
+      : oldSession
   } else {
     await sessionRef.set({
       data: {
         tableNumber,
         status: 'ordering',
+        peopleCount: 0,
+        peopleConfirmed: false,
+        peopleConfirmedAt: null,
         memberOpenids: [openid],
         createTime: db.serverDate(),
         updateTime: db.serverDate()
       }
     })
+    nextSession = {
+      tableNumber,
+      status: 'ordering',
+      peopleCount: 0,
+      peopleConfirmed: false
+    }
   }
 
   return {
     success: true,
     sessionId,
-    tableNumber
+    tableNumber,
+    ...buildPeopleState(nextSession),
+    ...buildSessionState(nextSession)
   }
 }
 
+async function clearCartItemsBySessionId(sessionId) {
+  const res = await db.collection('tableCartItem')
+    .where({
+      sessionId,
+      deleted: _.neq(true)
+    })
+    .limit(CART_LIMIT)
+    .get()
+
+  await Promise.all((res.data || []).map(item => {
+    return db.collection('tableCartItem').doc(item._id).remove()
+  }))
+
+  return (res.data || []).length
+}
+
 async function getCartItems(sessionId) {
+  const sessionRes = await db.collection('tableOrderSession').doc(sessionId).get()
+  const sessionState = buildSessionState(sessionRes.data)
+  if (sessionState.sessionClosed) {
+    return {
+      success: true,
+      items: [],
+      ...buildPeopleState(sessionRes.data),
+      ...sessionState
+    }
+  }
+
   const res = await db.collection('tableCartItem')
     .where({
       sessionId,
@@ -123,7 +211,90 @@ async function getCartItems(sessionId) {
 
   return {
     success: true,
-    items: res.data || []
+    items: res.data || [],
+    ...buildPeopleState(sessionRes.data),
+    ...sessionState
+  }
+}
+
+async function setPeople(openid, event) {
+  const tableNumber = normalizeTableNumber(event.tableNumber)
+  const sessionId = String(event.sessionId || (tableNumber ? getSessionId(tableNumber) : '')).trim()
+  const peopleCount = Math.floor(Number(event.peopleCount || 0))
+
+  if (!sessionId || !tableNumber) {
+    return {
+      success: false,
+      message: '缺少桌台信息'
+    }
+  }
+
+  if (!Number.isInteger(peopleCount) || peopleCount < 1 || peopleCount > 99) {
+    return {
+      success: false,
+      message: '人数不正确'
+    }
+  }
+
+  const sessionRef = db.collection('tableOrderSession').doc(sessionId)
+  const oldSessionRes = await sessionRef.get()
+  const oldSession = oldSessionRes.data
+  const oldPeopleState = buildPeopleState(oldSession)
+
+  if (buildSessionState(oldSession).sessionClosed) {
+    return {
+      success: false,
+      code: 'SESSION_CLOSED',
+      message: '本桌订单已结账，请重新扫码开台'
+    }
+  }
+
+  if (oldSession && oldPeopleState.peopleConfirmed && oldSession.status !== 'finished' && oldSession.checkoutStatus !== 'finished') {
+    await sessionRef.update({
+      data: {
+        memberOpenids: _.addToSet(openid),
+        updateTime: db.serverDate()
+      }
+    })
+    return {
+      success: true,
+      sessionId,
+      tableNumber,
+      alreadyConfirmed: true,
+      ...oldPeopleState
+    }
+  }
+
+  const data = {
+    tableNumber,
+    status: 'ordering',
+    checkoutStatus: '',
+    finishedAt: null,
+    peopleCount,
+    peopleConfirmed: true,
+    peopleConfirmedAt: db.serverDate(),
+    memberOpenids: oldSession ? _.addToSet(openid) : [openid],
+    updateTime: db.serverDate()
+  }
+
+  if (oldSession) {
+    await sessionRef.update({ data })
+  } else {
+    await sessionRef.set({
+      data: {
+        ...data,
+        createTime: db.serverDate()
+      }
+    })
+  }
+
+  return {
+    success: true,
+    sessionId,
+    tableNumber,
+    peopleCount,
+    peopleConfirmed: true,
+    peopleRequired: false
   }
 }
 
@@ -142,6 +313,16 @@ async function patchCart(openid, event) {
   if (operations.length === 0) {
     return {
       success: true
+    }
+  }
+
+  const sessionRef = db.collection('tableOrderSession').doc(sessionId)
+  const sessionRes = await sessionRef.get()
+  if (buildSessionState(sessionRes.data).sessionClosed) {
+    return {
+      success: false,
+      code: 'SESSION_CLOSED',
+      message: '本桌订单已结账，请重新扫码开台'
     }
   }
 
@@ -195,7 +376,7 @@ async function patchCart(openid, event) {
     }
   })
 
-  await db.collection('tableOrderSession').doc(sessionId).update({
+  await sessionRef.update({
     data: {
       tableNumber,
       memberOpenids: _.addToSet(openid),
@@ -262,6 +443,14 @@ exports.main = async (event) => {
 
     if (action === 'patch') {
       return await patchCart(openid, {
+        ...event,
+        sessionId,
+        tableNumber
+      })
+    }
+
+    if (action === 'setPeople') {
+      return await setPeople(openid, {
         ...event,
         sessionId,
         tableNumber

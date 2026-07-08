@@ -1541,6 +1541,128 @@ page {
   box-shadow: 0 10rpx 22rpx rgba(181, 123, 39, 0.22);
 }
 
+.people-modal-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.46);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.people-modal {
+  width: 100%;
+  padding: 44rpx 36rpx calc(34rpx + env(safe-area-inset-bottom));
+  border-radius: 42rpx 42rpx 0 0;
+  background: #fffaf1;
+  box-sizing: border-box;
+  box-shadow: 0 -18rpx 46rpx rgba(60, 38, 20, 0.18);
+}
+
+.people-modal-title {
+  color: #2f241b;
+  font-size: 34rpx;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.people-modal-desc {
+  margin-top: 8rpx;
+  color: #8a7a6a;
+  font-size: 24rpx;
+}
+
+.people-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18rpx;
+  margin-top: 34rpx;
+}
+
+.people-option {
+  width: calc((100% - 54rpx) / 4);
+  flex: 0 0 calc((100% - 54rpx) / 4);
+  height: 74rpx;
+  border-radius: 18rpx;
+  border: 2rpx solid #e6dfd5;
+  background: #ffffff;
+  color: #5d5145;
+  font-size: 27rpx;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.people-option.active {
+  border-color: #d8b47e;
+  background: #f5e7d5;
+  color: #5f3d20;
+  box-shadow: 0 8rpx 18rpx rgba(181, 123, 39, 0.12);
+}
+
+.people-option.custom {
+  width: calc((50% - 9rpx));
+  flex-basis: calc((50% - 9rpx));
+}
+
+.people-custom-row {
+  height: 78rpx;
+  margin-top: 24rpx;
+  padding: 0 24rpx;
+  border-radius: 18rpx;
+  border: 2rpx solid rgba(216, 180, 126, 0.72);
+  background: rgba(255, 255, 255, 0.86);
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.people-custom-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  color: #2f241b;
+  font-size: 30rpx;
+}
+
+.people-custom-unit {
+  color: #8a6a42;
+  font-size: 26rpx;
+}
+
+.people-modal-tip {
+  min-height: 34rpx;
+  margin-top: 18rpx;
+  color: #b45f2a;
+  font-size: 24rpx;
+  line-height: 1.4;
+}
+
+.people-confirm-btn {
+  height: 86rpx;
+  margin-top: 26rpx;
+  border-radius: 999rpx;
+  background: #ead7b9;
+  color: rgba(95, 61, 32, 0.62);
+  font-size: 30rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.people-confirm-btn.active {
+  background: linear-gradient(135deg, #e4b95f 0%, #d49a35 100%);
+  color: #fffaf1;
+  box-shadow: 0 10rpx 22rpx rgba(181, 123, 39, 0.22);
+}
+
 .action-loading-layer {
   position: fixed;
   left: 0;

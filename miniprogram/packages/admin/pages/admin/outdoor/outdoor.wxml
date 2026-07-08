@@ -68,7 +68,10 @@
                 bindtap="toggleGoodsSelection"
               >
                 <view class="dish-main">
-                  <view class="dish-name">{{item.name}}</view>
+                  <view class="dish-name">
+                    <text class="dish-name-text">{{item.name}}</text>
+                    <text class="dish-sent-tag" wx:if="{{item.kitchenSent}}">已发送</text>
+                  </view>
                   <view class="dish-tags" wx:if="{{item.optionText}}">{{item.optionText}}</view>
                 </view>
                 <view class="dish-count">x{{item.count}}</view>

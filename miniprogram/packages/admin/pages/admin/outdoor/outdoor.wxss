@@ -1074,12 +1074,27 @@ page {
 }
 
 .dish-name {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
   color: #2C1A12;
   font-size: 10rpx;
   font-weight: 900;
+}
+
+.dish-name-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dish-sent-tag {
+  flex: 0 0 auto;
+  margin-left: 4rpx;
+  color: rgba(138, 85, 38, 0.72);
+  font-size: 7rpx;
+  font-weight: 800;
 }
 
 .dish-tags {
