@@ -188,6 +188,45 @@
   text-align: center;
 }
 
+.image-upload-box {
+  position: relative;
+  width: 168rpx;
+  height: 132rpx;
+  overflow: hidden;
+  border-radius: 12rpx;
+  border: 2rpx dashed rgba(154, 100, 42, 0.36);
+  background: #FFF1DC;
+}
+
+.image-upload-preview,
+.image-upload-empty {
+  width: 100%;
+  height: 100%;
+}
+
+.image-upload-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(58, 36, 24, 0.52);
+  font-size: 22rpx;
+  font-weight: 800;
+}
+
+.image-upload-action {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 36rpx;
+  line-height: 36rpx;
+  text-align: center;
+  color: #3A2418;
+  background: rgba(241, 196, 107, 0.92);
+  font-size: 20rpx;
+  font-weight: 900;
+}
+
 .dish-status {
   position: absolute;
   right: 8rpx;
@@ -374,6 +413,136 @@
   color: rgba(58, 36, 24, 0.76);
   font-size: 25rpx;
   font-weight: 900;
+}
+
+.spec-preview {
+  margin-top: 8rpx;
+  padding: 18rpx;
+  border-radius: 18rpx;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1rpx solid rgba(201, 154, 74, 0.28);
+  box-shadow: 0 10rpx 24rpx rgba(58, 36, 24, 0.06);
+}
+
+.spec-preview-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-bottom: 14rpx;
+}
+
+.spec-preview-title {
+  flex: none;
+  color: #3A2418;
+  font-size: 24rpx;
+  font-weight: 900;
+}
+
+.spec-preview-tip {
+  color: rgba(58, 36, 24, 0.46);
+  font-size: 20rpx;
+  line-height: 1.3;
+}
+
+.spec-template-section {
+  padding: 14rpx;
+  border-radius: 16rpx;
+  background: rgba(255, 247, 236, 0.72);
+}
+
+.spec-template-title {
+  color: rgba(58, 36, 24, 0.72);
+  font-size: 21rpx;
+  font-weight: 900;
+}
+
+.spec-template-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 10rpx;
+}
+
+.spec-template-chip {
+  height: 46rpx;
+  padding: 0 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  color: #7A6659;
+  background: #FFFFFF;
+  border: 1rpx solid rgba(58, 36, 24, 0.1);
+  font-size: 21rpx;
+  font-weight: 900;
+}
+
+.spec-template-chip.active {
+  color: #3A2418;
+  background: #F1C46B;
+  border-color: rgba(154, 100, 42, 0.36);
+}
+
+.spec-custom-editor {
+  margin-top: 14rpx;
+  padding: 14rpx;
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.spec-preview-divider {
+  height: 1rpx;
+  margin: 16rpx 0 6rpx;
+  background: rgba(58, 36, 24, 0.08);
+}
+
+.spec-preview-group {
+  margin-top: 14rpx;
+}
+
+.spec-group-title {
+  color: rgba(58, 36, 24, 0.76);
+  font-size: 22rpx;
+  font-weight: 900;
+}
+
+.spec-option-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 10rpx;
+}
+
+.spec-option {
+  padding: 8rpx 18rpx;
+  border-radius: 999rpx;
+  color: #6F451F;
+  background: #FFF7EC;
+  border: 1rpx solid rgba(201, 154, 74, 0.36);
+  font-size: 21rpx;
+  font-weight: 800;
+}
+
+.spec-note {
+  margin-top: 8rpx;
+  color: rgba(58, 36, 24, 0.52);
+  font-size: 20rpx;
+  line-height: 1.35;
+}
+
+.spec-remark-row {
+  height: 54rpx;
+  margin-top: 16rpx;
+  padding: 0 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 14rpx;
+  color: rgba(58, 36, 24, 0.54);
+  background: rgba(255, 247, 236, 0.84);
+  font-size: 21rpx;
+  font-weight: 800;
 }
 
 .modal-footer {
@@ -702,9 +871,105 @@ page {
   font-size: 10rpx;
 }
 
+.image-upload-box {
+  width: 118rpx;
+  height: 90rpx;
+  border-radius: 8rpx;
+}
+
+.image-upload-empty {
+  font-size: 12rpx;
+}
+
+.image-upload-action {
+  height: 24rpx;
+  line-height: 24rpx;
+  font-size: 10rpx;
+}
+
 .switch-row {
   height: 44rpx;
   font-size: 13rpx;
+}
+
+.spec-preview {
+  margin-top: 4rpx;
+  padding: 10rpx;
+  border-radius: 8rpx;
+}
+
+.spec-preview-header {
+  gap: 8rpx;
+  margin-bottom: 8rpx;
+}
+
+.spec-preview-title {
+  font-size: 12rpx;
+}
+
+.spec-preview-tip {
+  font-size: 10rpx;
+}
+
+.spec-template-section {
+  padding: 7rpx;
+  border-radius: 8rpx;
+}
+
+.spec-template-title {
+  font-size: 10rpx;
+}
+
+.spec-template-list {
+  gap: 5rpx;
+  margin-top: 5rpx;
+}
+
+.spec-template-chip {
+  height: 23rpx;
+  padding: 0 9rpx;
+  font-size: 10rpx;
+}
+
+.spec-custom-editor {
+  margin-top: 7rpx;
+  padding: 7rpx;
+  border-radius: 8rpx;
+}
+
+.spec-preview-divider {
+  margin: 8rpx 0 3rpx;
+}
+
+.spec-preview-group {
+  margin-top: 8rpx;
+}
+
+.spec-group-title {
+  font-size: 11rpx;
+}
+
+.spec-option-list {
+  gap: 5rpx;
+  margin-top: 5rpx;
+}
+
+.spec-option {
+  padding: 4rpx 9rpx;
+  font-size: 10rpx;
+}
+
+.spec-note {
+  margin-top: 4rpx;
+  font-size: 10rpx;
+}
+
+.spec-remark-row {
+  height: 28rpx;
+  margin-top: 8rpx;
+  padding: 0 9rpx;
+  border-radius: 7rpx;
+  font-size: 10rpx;
 }
 
 .modal-footer {

@@ -414,6 +414,23 @@ Page({
   },
 
   // 加载指定分类的菜品
+  isValidDishImage(image) {
+    const value = String(image || '').trim()
+    if (!value || value === '<URL>') return false
+    return /^(https?:\/\/|\/)/i.test(value)
+  },
+
+  normalizeGoodsItem(goods) {
+    const image = String(goods && goods.image || '').trim()
+    const hasImage = this.isValidDishImage(image)
+    return {
+      ...goods,
+      image: hasImage ? image : '',
+      hasImage,
+      cartCount: this.getDishCartCount(goods._id)
+    }
+  },
+
   async loadGoods(menuId, append = false, showLoading = true) {
     if (!menuId) return
     if (this.data.goodsLoading) return
@@ -449,10 +466,7 @@ Page({
       
       // 为每个菜品添加购物车数量
       const list = goodsRes.data || []
-      const mapped = list.map(goods => {
-        goods.cartCount = this.getDishCartCount(goods._id)
-        return goods
-      })
+      const mapped = list.map(goods => this.normalizeGoodsItem(goods))
       
       this.setData({
         goodsList: append ? this.data.goodsList.concat(mapped) : mapped,
@@ -489,10 +503,7 @@ Page({
         .limit(100)
         .get()
 
-    const goods = (goodsRes.data || []).map(item => ({
-      ...item,
-      cartCount: this.getDishCartCount(item._id)
-    }))
+    const goods = (goodsRes.data || []).map(item => this.normalizeGoodsItem(item))
 
     return {
       id: category._id,
@@ -751,10 +762,7 @@ Page({
 
       if (this.searchToken !== token) return
 
-      const searchGoodsList = (res.data || []).map(item => ({
-        ...item,
-        cartCount: this.getDishCartCount(item._id)
-      }))
+      const searchGoodsList = (res.data || []).map(item => this.normalizeGoodsItem(item))
 
       this.setData({
         searchGoodsList,

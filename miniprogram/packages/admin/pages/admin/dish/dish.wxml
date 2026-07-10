@@ -147,7 +147,11 @@
         </view>
         <view class="form-item">
           <view class="form-label">{{ui.image}}</view>
-          <input class="form-input" placeholder="{{ui.inputImage}}" value="{{currentDish.image}}" data-field="image" bindinput="onDishInput" />
+          <view class="image-upload-box" bindtap="chooseDishImage">
+            <image wx:if="{{currentDish.imagePreview}}" class="image-upload-preview" src="{{currentDish.imagePreview}}" mode="aspectFill"></image>
+            <view wx:else class="image-upload-empty">{{ui.uploadImage}}</view>
+            <view class="image-upload-action">{{currentDish.imagePreview ? ui.changeImage : ui.uploadImage}}</view>
+          </view>
           <view class="form-tip">{{ui.imageTip}}</view>
         </view>
         <view class="switch-row">
@@ -157,6 +161,53 @@
         <view class="switch-row">
           <text>{{ui.needPopup}}</text>
           <switch checked="{{currentDish.needPopup}}" bindchange="onDishNeedPopupChange" color="#C99A4A" />
+        </view>
+        <view class="spec-preview" wx:if="{{currentDish.needPopup}}">
+          <view class="spec-preview-header">
+            <text class="spec-preview-title">{{ui.specPreviewTitle}}</text>
+            <text class="spec-preview-tip">{{ui.specPreviewTip}}</text>
+          </view>
+          <view class="spec-template-section">
+            <view class="spec-template-title">{{ui.specTemplate}}</view>
+            <view class="spec-template-list">
+              <view
+                wx:for="{{specTemplates}}"
+                wx:key="value"
+                class="spec-template-chip {{currentDish.specTemplate === item.value ? 'active' : ''}}"
+                data-template="{{item.value}}"
+                bindtap="selectSpecTemplate"
+              >{{item.label}}</view>
+            </view>
+          </view>
+          <view class="spec-custom-editor" wx:if="{{currentDish.specTemplate === 'custom'}}">
+            <view class="form-row">
+              <view class="form-item half">
+                <view class="form-label">{{ui.customSpecTitle}}</view>
+                <input class="form-input" placeholder="{{ui.inputCustomSpecTitle}}" value="{{currentDish.customSpecTitle}}" data-field="customSpecTitle" bindinput="onCustomSpecInput" />
+              </view>
+              <view class="form-item half">
+                <view class="form-label">{{ui.customSpecOptions}}</view>
+                <input class="form-input" placeholder="{{ui.inputCustomSpecOptions}}" value="{{currentDish.customSpecOptionsText}}" data-field="customSpecOptionsText" bindinput="onCustomSpecInput" />
+              </view>
+            </view>
+            <view class="form-tip">{{ui.customSpecOptionsTip}}</view>
+            <view class="form-item">
+              <view class="form-label">{{ui.customSpecNote}}</view>
+              <input class="form-input" placeholder="{{ui.inputCustomSpecNote}}" value="{{currentDish.customSpecNote}}" data-field="customSpecNote" bindinput="onCustomSpecInput" />
+            </view>
+          </view>
+          <view class="spec-preview-divider"></view>
+          <view class="spec-preview-group" wx:for="{{specPreviewGroups}}" wx:key="title">
+            <view class="spec-group-title">{{item.title}}</view>
+            <view class="spec-option-list">
+              <text class="spec-option" wx:for="{{item.options}}" wx:for-item="option" wx:key="*this">{{option}}</text>
+            </view>
+            <view class="spec-note" wx:if="{{item.note}}">{{item.note}}</view>
+          </view>
+          <view class="spec-remark-row">
+            <text>{{ui.specRemark}}</text>
+            <text>{{ui.specRemarkLimit}}</text>
+          </view>
         </view>
       </scroll-view>
       <view class="modal-footer">

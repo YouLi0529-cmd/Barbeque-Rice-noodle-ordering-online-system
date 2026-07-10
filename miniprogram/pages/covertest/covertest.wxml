@@ -21,10 +21,11 @@
   </view>
 
   <view class="floating-contact-btn" hover-class="btn-hover" bindtap="goContact">
-    <view class="phone-icon">
-      <view class="phone-icon-body"></view>
-      <view class="phone-icon-dot"></view>
-    </view>
+    <image
+      class="contact-icon-image"
+      src="/callme.png"
+      mode="aspectFit"
+    />
   </view>
 
   <view class="cover-tabbar">

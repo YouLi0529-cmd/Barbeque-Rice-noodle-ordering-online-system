@@ -27,16 +27,36 @@ const UI = {
   originalPrice: '\u539f\u4ef7',
   unit: '\u5355\u4f4d',
   description: '\u63cf\u8ff0',
-  image: '\u56fe\u7247\u5730\u5740',
+  image: '\u83dc\u54c1\u56fe\u7247',
   sort: '\u6392\u5e8f',
   status: '\u4e0a\u67b6\u72b6\u6001',
-  needPopup: '\u9700\u8981\u89c4\u683c\u5f39\u7a97',
+  needPopup: '\u89c4\u683c\u5f39\u7a97',
+  specTemplate: '\u89c4\u683c\u6a21\u677f',
+  specPreviewTitle: '\u5f39\u7a97\u5185\u5bb9',
+  specPreviewTip: '\u987e\u5ba2\u7aef\u5c06\u6309\u4ee5\u4e0b\u5185\u5bb9\u5c55\u793a',
+  defaultSpecTitle: '\u53e3\u5473',
+  specGroup: '\u9009\u9879',
+  specRemark: '\u83dc\u54c1\u5907\u6ce8',
+  specRemarkLimit: '\u6700\u591a10\u5b57',
+  customSpecTitle: '\u81ea\u5b9a\u4e49\u6807\u9898',
+  customSpecOptions: '\u81ea\u5b9a\u4e49\u9009\u9879',
+  customSpecNote: '\u81ea\u5b9a\u4e49\u8bf4\u660e',
+  inputCustomSpecTitle: '\u8bf7\u8f93\u5165\u6807\u9898',
+  inputCustomSpecOptions: '\u8bf7\u8f93\u5165\u9009\u9879',
+  inputCustomSpecNote: '\u53ef\u9009\u8bf4\u660e\uff0c\u4f1a\u663e\u793a\u5728\u5f39\u7a97\u91cc',
+  customSpecOptionsTip: '\u7528\u987f\u53f7\u5206\u9694\uff0c\u4f8b\u5982\uff1a\u5c11\u82a5\u672b\u3001\u6b63\u5e38\u82a5\u672b',
   inputCategoryName: '\u8bf7\u8f93\u5165\u5206\u7c7b\u540d\u79f0',
   inputDishName: '\u8bf7\u8f93\u5165\u83dc\u54c1\u540d\u79f0',
   inputPrice: '\u8bf7\u8f93\u5165\u4ef7\u683c',
   inputUnit: '\u4f8b\u5982\uff1a\u4efd',
   inputDescription: '\u8bf7\u8f93\u5165\u63cf\u8ff0',
-  inputImage: '\u53ef\u586b\u5199\u56fe\u7247 URL \u6216 fileID',
+  uploadImage: '\u4e0a\u4f20\u56fe\u7247',
+  changeImage: '\u66f4\u6362\u56fe\u7247',
+  imageUploading: '\u4e0a\u4f20\u4e2d...',
+  imageUploaded: '\u56fe\u7247\u5df2\u4e0a\u4f20',
+  imageUploadFailed: '\u56fe\u7247\u4e0a\u4f20\u5931\u8d25',
+  imageTooLarge: '\u56fe\u7247\u9700\u5c0f\u4e8e1MB',
+  imageInvalid: '\u4ec5\u652f\u6301 jpg/png/webp',
   inputSort: '\u6570\u5b57\u8d8a\u5c0f\u8d8a\u9760\u524d',
   loading: '\u52a0\u8f7d\u4e2d...',
   saving: '\u4fdd\u5b58\u4e2d...',
@@ -57,7 +77,7 @@ const UI = {
   searchResult: '\u641c\u7d22\u7ed3\u679c',
   emptySearch: '\u672a\u627e\u5230\u83dc\u54c1',
   clearSearch: '\u6e05\u7a7a',
-  imageTip: '\u56fe\u7247\u4e0a\u4f20\u5df2\u4ece\u65e7\u4e91\u73af\u5883\u79fb\u9664\uff0c\u6682\u65f6\u8bf7\u586b\u5199\u56fe\u7247\u5730\u5740\u3002'
+  imageTip: '\u4ec5\u652f\u6301 jpg/png/webp\uff0c\u538b\u7f29\u540e\u9700\u5c0f\u4e8e1MB\u3002'
 }
 
 const DEFAULT_CATEGORY = {
@@ -76,13 +96,70 @@ const DEFAULT_DISH = {
   categoryId: '',
   categoryName: '',
   image: '',
+  imagePreview: '',
+  imageFileID: '',
   unit: '\u4efd',
   status: 1,
   sort: 0,
   needPopup: false,
+  needSpec: false,
+  specTemplate: 'spicy',
+  flavorTitle: '\u53e3\u5473',
+  flavorOptions: [],
+  flavorNote: '',
+  optionGroups: [],
+  customSpecTitle: '\u53e3\u5473',
+  customSpecOptionsText: '',
+  customSpecNote: '',
   tags: [],
   options: []
 }
+
+const MAX_IMAGE_SIZE = 1024 * 1024
+const ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp']
+const DEFAULT_SPEC_OPTIONS = ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3']
+const SPEC_TEMPLATES = [
+  {
+    label: '\u9ed8\u8ba4\u8fa3\u5ea6',
+    value: 'spicy',
+    title: '\u53e3\u5473',
+    options: DEFAULT_SPEC_OPTIONS,
+    note: ''
+  },
+  {
+    label: '\u7cd6\u5ea6',
+    value: 'sugar',
+    title: '\u7cd6\u5ea6',
+    options: ['\u65e0\u7cd6', '\u5fae\u7cd6', '\u6b63\u5e38\u7cd6'],
+    note: '\u65e0\u7cd6\u6307\u7684\u662f\u4e0d\u989d\u5916\u52a0\u7cd6'
+  },
+  {
+    label: '\u70ed\u5ea6',
+    value: 'heat',
+    title: '\u70ed\u5ea6',
+    options: ['\u51b7', '\u70ed'],
+    note: ''
+  },
+  {
+    label: '\u7cd6\u5ea6+\u70ed\u5ea6',
+    value: 'sugarHeat',
+    title: '\u7cd6\u5ea6',
+    options: ['\u65e0\u7cd6', '\u5fae\u7cd6', '\u6b63\u5e38\u7cd6'],
+    note: '\u65e0\u7cd6\u6307\u7684\u662f\u4e0d\u989d\u5916\u52a0\u7cd6',
+    optionGroups: [
+      {
+        id: 'temperature',
+        title: '\u70ed\u5ea6',
+        options: ['\u51b7', '\u70ed'],
+        note: ''
+      }
+    ]
+  },
+  {
+    label: '\u81ea\u5b9a\u4e49',
+    value: 'custom'
+  }
+]
 
 function showToast(title, icon = 'none') {
   wx.showToast({ title, icon })
@@ -91,6 +168,161 @@ function showToast(title, icon = 'none') {
 function toNumber(value, fallback = 0) {
   const number = Number(value)
   return Number.isFinite(number) ? number : fallback
+}
+
+function getFileExtension(filePath = '') {
+  const cleanPath = String(filePath || '').split('?')[0].split('#')[0]
+  const match = cleanPath.match(/\.([a-z0-9]+)$/i)
+  return match ? match[1].toLowerCase() : ''
+}
+
+function getDishNeedPopup(dish = {}) {
+  if (Object.prototype.hasOwnProperty.call(dish, 'needSpec')) {
+    return dish.needSpec !== false
+  }
+  if (Object.prototype.hasOwnProperty.call(dish, 'needPopup')) {
+    return dish.needPopup === true
+  }
+  return true
+}
+
+function normalizeOptionList(options) {
+  if (!Array.isArray(options)) return []
+  return options
+    .map(option => String(option || '').trim())
+    .filter(Boolean)
+}
+
+function splitSpecOptionsText(value) {
+  return String(value || '')
+    .split(/(?:\u3001|,|\uff0c|\s)+/)
+    .map(option => option.trim())
+    .filter(Boolean)
+}
+
+function formatSpecOptionsText(options) {
+  return normalizeOptionList(options).join('\u3001')
+}
+
+function getSpecTemplate(templateValue) {
+  return SPEC_TEMPLATES.find(item => item.value === templateValue) || SPEC_TEMPLATES[0]
+}
+
+function guessSpecTemplateByCategory(categoryName = '') {
+  const name = String(categoryName || '')
+  if (
+    name.indexOf('\u8d35\u5dde\u51b0\u6d46') >= 0 ||
+    name.indexOf('\u96ea\u51b0') >= 0 ||
+    name.indexOf('\u751c\u54c1\u996e\u6599') >= 0
+  ) {
+    return 'sugar'
+  }
+  return 'spicy'
+}
+
+function getDishSpecTemplate(dish = {}, categoryName = '') {
+  if (dish.specTemplate) return dish.specTemplate
+
+  const title = String(dish.flavorTitle || '').trim()
+  const options = normalizeOptionList(dish.flavorOptions)
+  const optionGroups = Array.isArray(dish.optionGroups) ? dish.optionGroups : []
+  const hasHeatGroup = optionGroups.some(group => {
+    const groupTitle = String(group.title || group.name || '').trim()
+    return groupTitle.indexOf('\u70ed\u5ea6') >= 0
+  })
+
+  if (title.indexOf('\u7cd6') >= 0 && hasHeatGroup) return 'sugarHeat'
+  if (title.indexOf('\u7cd6') >= 0) return 'sugar'
+  if (title.indexOf('\u70ed') >= 0) return 'heat'
+  if (title && title !== UI.defaultSpecTitle) return 'custom'
+  if (options.length && formatSpecOptionsText(options) !== formatSpecOptionsText(DEFAULT_SPEC_OPTIONS)) {
+    return 'custom'
+  }
+
+  return guessSpecTemplateByCategory(categoryName || dish.categoryName)
+}
+
+function getCustomSpecFields(dish = {}) {
+  const options = normalizeOptionList(dish.flavorOptions)
+  const customOptions = options.length ? options : DEFAULT_SPEC_OPTIONS
+  return {
+    customSpecTitle: String(dish.customSpecTitle || dish.flavorTitle || UI.defaultSpecTitle).trim() || UI.defaultSpecTitle,
+    customSpecOptionsText: String(dish.customSpecOptionsText || formatSpecOptionsText(customOptions)).trim(),
+    customSpecNote: String(dish.customSpecNote || dish.flavorNote || '').trim()
+  }
+}
+
+function cloneOptionGroups(optionGroups) {
+  return (Array.isArray(optionGroups) ? optionGroups : []).map(group => ({
+    ...group,
+    options: normalizeOptionList(group.options)
+  })).filter(group => group.options.length)
+}
+
+function applySpecTemplateToDish(dish = {}, templateValue = 'spicy') {
+  const template = getSpecTemplate(templateValue)
+  const next = {
+    ...dish,
+    specTemplate: template.value
+  }
+
+  if (template.value === 'custom') {
+    const customFields = getCustomSpecFields(next)
+    const customOptions = splitSpecOptionsText(customFields.customSpecOptionsText)
+    const options = customOptions.length ? customOptions : DEFAULT_SPEC_OPTIONS
+    return {
+      ...next,
+      ...customFields,
+      customSpecOptionsText: customFields.customSpecOptionsText,
+      flavorTitle: customFields.customSpecTitle || UI.defaultSpecTitle,
+      flavorOptions: options,
+      flavorNote: customFields.customSpecNote || '',
+      optionGroups: []
+    }
+  }
+
+  return {
+    ...next,
+    customSpecTitle: template.title,
+    customSpecOptionsText: formatSpecOptionsText(template.options),
+    customSpecNote: template.note || '',
+    flavorTitle: template.title,
+    flavorOptions: [...template.options],
+    flavorNote: template.note || '',
+    optionGroups: cloneOptionGroups(template.optionGroups)
+  }
+}
+
+function prepareDishSpecForEditor(dish = {}, categoryName = '') {
+  const templateValue = getDishSpecTemplate(dish, categoryName)
+  return applySpecTemplateToDish({
+    ...dish,
+    ...getCustomSpecFields(dish)
+  }, templateValue)
+}
+
+function buildSpecPreviewGroups(dish = {}) {
+  const groups = []
+  const flavorOptions = normalizeOptionList(dish.flavorOptions)
+  const mainOptions = flavorOptions.length ? flavorOptions : DEFAULT_SPEC_OPTIONS
+  groups.push({
+    title: String(dish.flavorTitle || UI.defaultSpecTitle).trim() || UI.defaultSpecTitle,
+    options: mainOptions,
+    note: String(dish.flavorNote || '').trim()
+  })
+
+  const optionGroups = Array.isArray(dish.optionGroups) ? dish.optionGroups : []
+  optionGroups.forEach((group, index) => {
+    const options = normalizeOptionList(group.options)
+    if (!options.length) return
+    groups.push({
+      title: String(group.title || group.name || `${UI.specGroup}${index + 1}`).trim(),
+      options,
+      note: String(group.note || '').trim()
+    })
+  })
+
+  return groups
 }
 
 Page({
@@ -113,7 +345,9 @@ Page({
     currentCategory: { ...DEFAULT_CATEGORY },
     showDishModal: false,
     editDishMode: false,
-    currentDish: { ...DEFAULT_DISH }
+    currentDish: { ...DEFAULT_DISH },
+    specPreviewGroups: [],
+    specTemplates: SPEC_TEMPLATES
   },
 
   onLoad() {
@@ -373,25 +607,39 @@ Page({
       return
     }
 
+    const currentDish = prepareDishSpecForEditor({
+      ...DEFAULT_DISH,
+      categoryId: currentCategory._id,
+      categoryName: currentCategory.name,
+      menuType: this.data.currentMenuType,
+      sort: this.data.dishes.length
+    }, currentCategory.name)
+
     this.setData({
       showDishModal: true,
       editDishMode: false,
-      currentDish: {
-        ...DEFAULT_DISH,
-        categoryId: currentCategory._id,
-        categoryName: currentCategory.name,
-        menuType: this.data.currentMenuType,
-        sort: this.data.dishes.length
-      }
+      currentDish,
+      specPreviewGroups: buildSpecPreviewGroups(currentDish)
     })
   },
 
   showEditDishModal(e) {
     const dish = e.currentTarget.dataset.dish
+    const currentDish = prepareDishSpecForEditor({
+      ...DEFAULT_DISH,
+      ...dish,
+      image: dish.imageFileID || dish.image || '',
+      imagePreview: dish.image || dish.imageFileID || '',
+      imageFileID: dish.imageFileID || '',
+      needPopup: getDishNeedPopup(dish),
+      needSpec: getDishNeedPopup(dish)
+    }, dish.categoryName)
+
     this.setData({
       showDishModal: true,
       editDishMode: true,
-      currentDish: { ...DEFAULT_DISH, ...dish }
+      currentDish,
+      specPreviewGroups: buildSpecPreviewGroups(currentDish)
     })
   },
 
@@ -410,13 +658,173 @@ Page({
   },
 
   onDishNeedPopupChange(e) {
-    this.setData({ 'currentDish.needPopup': !!e.detail.value })
+    const needPopup = !!e.detail.value
+    let currentDish = {
+      ...this.data.currentDish,
+      needPopup,
+      needSpec: needPopup
+    }
+    if (needPopup) {
+      currentDish = applySpecTemplateToDish(currentDish, currentDish.specTemplate || 'spicy')
+    }
+    this.setData({
+      currentDish,
+      specPreviewGroups: buildSpecPreviewGroups(currentDish)
+    })
+  },
+
+  selectSpecTemplate(e) {
+    const templateValue = e.currentTarget.dataset.template
+    const currentDish = applySpecTemplateToDish({
+      ...this.data.currentDish,
+      needPopup: true,
+      needSpec: true
+    }, templateValue)
+
+    this.setData({
+      currentDish,
+      specPreviewGroups: buildSpecPreviewGroups(currentDish)
+    })
+  },
+
+  onCustomSpecInput(e) {
+    const field = e.currentTarget.dataset.field
+    if (!field) return
+
+    const currentDish = applySpecTemplateToDish({
+      ...this.data.currentDish,
+      [field]: e.detail.value,
+      specTemplate: 'custom',
+      needPopup: true,
+      needSpec: true
+    }, 'custom')
+
+    this.setData({
+      currentDish,
+      specPreviewGroups: buildSpecPreviewGroups(currentDish)
+    })
+  },
+
+  chooseDishImage() {
+    if (!wx.chooseMedia) {
+      wx.chooseImage({
+        count: 1,
+        sizeType: ['compressed'],
+        sourceType: ['album', 'camera'],
+        success: async res => {
+          const filePath = res.tempFilePaths && res.tempFilePaths[0]
+          if (!filePath) return
+
+          try {
+            await this.uploadDishImage(filePath)
+          } catch (err) {
+            wx.hideLoading()
+            console.error('upload dish image failed', err)
+            showToast(err.message || UI.imageUploadFailed)
+          }
+        }
+      })
+      return
+    }
+
+    wx.chooseMedia({
+      count: 1,
+      mediaType: ['image'],
+      sourceType: ['album', 'camera'],
+      success: async res => {
+        const file = res.tempFiles && res.tempFiles[0]
+        if (!file || !file.tempFilePath) return
+
+        try {
+          await this.uploadDishImage(file.tempFilePath, file.size || 0)
+        } catch (err) {
+          wx.hideLoading()
+          console.error('upload dish image failed', err)
+          showToast(err.message || UI.imageUploadFailed)
+        }
+      }
+    })
+  },
+
+  getFileInfo(filePath) {
+    return new Promise((resolve, reject) => {
+      wx.getFileInfo({
+        filePath,
+        success: resolve,
+        fail: reject
+      })
+    })
+  },
+
+  compressImage(filePath) {
+    return new Promise(resolve => {
+      wx.compressImage({
+        src: filePath,
+        quality: 72,
+        success: res => resolve(res.tempFilePath || filePath),
+        fail: () => resolve(filePath)
+      })
+    })
+  },
+
+  readFileBase64(filePath) {
+    return new Promise((resolve, reject) => {
+      wx.getFileSystemManager().readFile({
+        filePath,
+        encoding: 'base64',
+        success: res => resolve(res.data || ''),
+        fail: reject
+      })
+    })
+  },
+
+  async uploadDishImage(filePath, originalSize = 0) {
+    const ext = getFileExtension(filePath)
+    if (ext && !ALLOWED_IMAGE_EXTENSIONS.includes(ext)) {
+      showToast(UI.imageInvalid)
+      return
+    }
+
+    wx.showLoading({ title: UI.imageUploading })
+
+    const compressTarget = ext === 'webp' ? filePath : await this.compressImage(filePath)
+    const fileInfo = await this.getFileInfo(compressTarget)
+    const finalSize = fileInfo.size || originalSize || 0
+    if (finalSize > MAX_IMAGE_SIZE) {
+      wx.hideLoading()
+      showToast(UI.imageTooLarge)
+      return
+    }
+
+    const fileBase64 = await this.readFileBase64(compressTarget)
+    const currentDish = this.data.currentDish || {}
+    const result = await apiClient.call('admin.dish.uploadImage', {
+      dishId: currentDish._id || '',
+      dishName: currentDish.name || '',
+      fileBase64
+    })
+    const data = result.data || {}
+
+    wx.hideLoading()
+    this.setData({
+      'currentDish.image': data.fileID || '',
+      'currentDish.imageFileID': data.fileID || '',
+      'currentDish.imagePreview': data.image || compressTarget
+    })
+    showToast(UI.imageUploaded, 'success')
+
+    if (currentDish._id && !this.data.showDishModal) {
+      await this.loadDishes()
+    }
   },
 
   async saveDish() {
     const currentDish = this.data.currentDish || {}
     const dish = {
       ...currentDish,
+      image: currentDish.imageFileID || currentDish.image || '',
+      needPopup: currentDish.needPopup === true,
+      needSpec: currentDish.needPopup === true,
       menuType: this.data.currentMenuType,
       categoryId: currentDish.categoryId || this.data.currentCategoryId,
       categoryName: currentDish.categoryName || this.getCurrentCategoryName(),

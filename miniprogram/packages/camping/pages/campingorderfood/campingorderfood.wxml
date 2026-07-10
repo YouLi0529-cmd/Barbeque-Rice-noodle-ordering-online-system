@@ -79,7 +79,8 @@
 
       <block wx:elif="{{isSearching}}">
         <view class="goods-item" wx:for="{{searchGoodsList}}" wx:for-item="item" wx:key="_id">
-          <image class="goods-image" src="{{item.image}}" mode="aspectFill"></image>
+          <image wx:if="{{item.hasImage}}" class="goods-image" src="{{item.image}}" mode="aspectFill"></image>
+          <view wx:else class="goods-image goods-image-placeholder"></view>
           <view class="goods-info">
             <view class="goods-name">{{item.name}}</view>
             <view class="goods-desc" wx:if="{{item.description || item.desc}}">{{item.description || item.desc}}</view>
@@ -131,7 +132,8 @@
             <view class="divider-line right"></view>
           </view>
           <view class="goods-item" wx:for="{{section.goods}}" wx:for-item="item" wx:key="_id">
-            <image class="goods-image" src="{{item.image}}" mode="aspectFill"></image>
+            <image wx:if="{{item.hasImage}}" class="goods-image" src="{{item.image}}" mode="aspectFill"></image>
+            <view wx:else class="goods-image goods-image-placeholder"></view>
             <view class="goods-info">
               <view class="goods-name">{{item.name}}</view>
               <view class="goods-desc" wx:if="{{item.description || item.desc}}">{{item.description || item.desc}}</view>
@@ -198,7 +200,8 @@
     <scroll-view class="cart-content" scroll-y>
       <view class="cart-goods-item" wx:for="{{cart}}" wx:for-item="item" wx:key="index">
         <view class="cart-goods-info">
-          <image class="cart-goods-image" src="{{item.info.image}}" mode="aspectFill"></image>
+          <image wx:if="{{item.info.hasImage}}" class="cart-goods-image" src="{{item.info.image}}" mode="aspectFill"></image>
+          <view wx:else class="cart-goods-image cart-goods-image-placeholder"></view>
           <view class="cart-goods-detail">
             <view class="cart-goods-name">{{item.info.name}}</view>
             <view class="cart-goods-tags" wx:if="{{item.tagLabels && item.tagLabels.length > 0}}">
@@ -244,7 +247,8 @@
   <view class="modal-mask" wx:if="{{showTagModal}}" catchtap="closeTagModal">
     <view class="spec-modal" catchtap="stopPropagation">
       <view class="spec-product-card">
-        <image class="spec-product-image" src="{{currentDish.image}}" mode="aspectFill"></image>
+        <image wx:if="{{currentDish.hasImage}}" class="spec-product-image" src="{{currentDish.image}}" mode="aspectFill"></image>
+        <view wx:else class="spec-product-image spec-product-image-placeholder"></view>
         <view class="spec-product-info">
           <view class="spec-product-name">{{currentDish.name}}</view>
           <view class="spec-product-desc" wx:if="{{currentDish.description || currentDish.desc}}">{{currentDish.description || currentDish.desc}}</view>

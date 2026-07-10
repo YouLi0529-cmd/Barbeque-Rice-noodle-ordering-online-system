@@ -15,6 +15,12 @@ const DEFAULT_TENANT_ID = 'zhangnan'
 const ACTIVE_STATUS = 'active'
 const SESSION_EXPIRE_DAYS = 7
 const DRAFT_EXPIRE_MS = 24 * 60 * 60 * 1000
+const MAX_DISH_IMAGE_SIZE = 1024 * 1024
+const DISH_IMAGE_TYPES = {
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp'
+}
 const PRINTER_IDS = {
   FRONT: 'qian1',
   RAW: 'sheng2',
@@ -3948,6 +3954,467 @@ function getLimit(payload, fallback = 20, max = 100) {
   return Math.min(Math.max(value, 1), max)
 }
 
+const DEFAULT_DISH_IMAGE_FILES = [
+  '一碗包谷粑.jpg',
+  '伊比利亚茴香黑猪肉.jpg',
+  '凉拌鲫鱼.jpg',
+  '包浆豆腐.jpg',
+  '咖喱鸡柳.jpg',
+  '咸蛋黄虾球.jpg',
+  '土豆片.jpg',
+  '嫩滑牛肉片.jpg',
+  '小薄饼.jpg',
+  '手工苕皮.jpg',
+  '烤榴莲.jpg',
+  '甜肠.jpg',
+  '芝士年糕.jpg',
+  '菠萝什锦炒饭.jpg',
+  '葱心豆干.jpg',
+  '蒜香口蘑.jpg',
+  '素菜拼盘.jpg',
+  '薄切五花肉.jpg',
+  '金针菇.jpg',
+  '韭菜.jpg',
+  '鱼排.jpg',
+  '鲜虾.jpg',
+  '黄金蛋炒饭.jpg',
+  '齐齐哈尔拌牛肉.jpg'
+]
+
+const DEFAULT_DISH_IMAGE_BASE_URL = 'cloud://zhrcloud-d1gsjuhij11024f72.7a68-zhrcloud-d1gsjuhij11024f72-1449718669/dish pic'
+
+const DISH_IMAGE_NAME_ALIASES = {
+  '蒜香口蘑': ['蒜蓉口蘑']
+}
+
+function stripImageExtension(value) {
+  return String(value || '').replace(/\.(png|jpe?g|webp|gif|bmp|avif)$/i, '')
+}
+
+function getImageBaseName(value) {
+  const raw = String(value || '').split('?')[0].split('#')[0]
+  const normalized = raw.replace(/\\/g, '/')
+  const segments = normalized.split('/').filter(Boolean)
+  const name = segments.length ? segments[segments.length - 1] : normalized
+
+  try {
+    return decodeURIComponent(name)
+  } catch (err) {
+    return name
+  }
+}
+
+function normalizeDishImageKey(value) {
+  return stripImageExtension(value)
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[·•._\-—、，,。/\\|]/g, '')
+    .replace(/[\[\]【】]/g, '')
+    .toLowerCase()
+}
+
+function joinDishImageUrl(baseUrl, fileName, encodeFileName = true) {
+  const base = String(baseUrl || '').trim().replace(/[\\/]+$/, '')
+  const name = String(fileName || '').trim()
+  if (!base || !name) return ''
+  const shouldEncode = encodeFileName && !isCloudFileID(base)
+  return `${base}/${shouldEncode ? encodeURI(name) : name}`
+}
+
+function normalizeDishImageEntry(entry, payload = {}) {
+  const baseUrl = payload.imageBaseUrl || payload.baseUrl || payload.imagePrefix || DEFAULT_DISH_IMAGE_BASE_URL
+  const encodeFileName = payload.encodeFileName !== false
+
+  if (typeof entry === 'string') {
+    const fileName = getImageBaseName(entry)
+    const isDirectImage = /^(https?:\/\/|cloud:\/\/|\/)/i.test(entry)
+    const image = isDirectImage ? entry : joinDishImageUrl(baseUrl, fileName, encodeFileName)
+    const rawDishName = stripImageExtension(fileName)
+
+    return {
+      fileName,
+      image,
+      dishNames: DISH_IMAGE_NAME_ALIASES[rawDishName] || [rawDishName]
+    }
+  }
+
+  const fileName = getImageBaseName(entry.fileName || entry.name || entry.path || entry.url || entry.fileID || entry.image || '')
+  const rawDishName = String(entry.dishName || stripImageExtension(fileName)).trim()
+  const image = String(entry.image || entry.url || entry.fileID || '').trim() || joinDishImageUrl(baseUrl, fileName, encodeFileName)
+
+  return {
+    fileName,
+    image,
+    dishNames: Array.isArray(entry.dishNames) && entry.dishNames.length
+      ? entry.dishNames.map(name => String(name || '').trim()).filter(Boolean)
+      : (DISH_IMAGE_NAME_ALIASES[rawDishName] || [rawDishName])
+  }
+}
+
+function isCloudFileID(value) {
+  return /^cloud:\/\//i.test(String(value || '').trim())
+}
+
+async function resolveDishImageUrls(list = []) {
+  const dishes = (list || []).map(item => ({ ...item }))
+  const fileIDs = Array.from(new Set(dishes
+    .map(item => String(item.image || '').trim())
+    .filter(isCloudFileID)))
+
+  if (fileIDs.length === 0) {
+    return dishes
+  }
+
+  try {
+    const res = await cloud.getTempFileURL({
+      fileList: fileIDs
+    })
+    const tempMap = (res.fileList || []).reduce((map, item) => {
+      if (item && item.fileID && item.tempFileURL) {
+        map[item.fileID] = item.tempFileURL
+      }
+      return map
+    }, {})
+
+    return dishes.map(item => {
+      const image = String(item.image || '').trim()
+      if (!isCloudFileID(image)) return item
+      return {
+        ...item,
+        imageFileID: image,
+        image: tempMap[image] || ''
+      }
+    })
+  } catch (err) {
+    console.error('resolve dish image urls failed', err)
+    return dishes.map(item => {
+      const image = String(item.image || '').trim()
+      if (!isCloudFileID(image)) return item
+      return {
+        ...item,
+        imageFileID: image,
+        image: ''
+      }
+    })
+  }
+}
+
+function getDishNeedPopup(dish = {}) {
+  if (Object.prototype.hasOwnProperty.call(dish, 'needSpec')) {
+    return dish.needSpec !== false
+  }
+  if (Object.prototype.hasOwnProperty.call(dish, 'needPopup')) {
+    return dish.needPopup === true
+  }
+  return true
+}
+
+function normalizeStringArray(list = []) {
+  if (!Array.isArray(list)) return []
+  return list
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+}
+
+function normalizeSpecOptionGroups(optionGroups = []) {
+  if (!Array.isArray(optionGroups)) return []
+  return optionGroups
+    .map((group, index) => {
+      const options = normalizeStringArray(group.options)
+      if (!options.length) return null
+      return {
+        id: String(group.id || `group_${index + 1}`).trim(),
+        title: String(group.title || group.name || '').trim(),
+        options,
+        note: String(group.note || '').trim()
+      }
+    })
+    .filter(Boolean)
+}
+
+function normalizeDishSpecFields(dish = {}) {
+  const needPopup = getDishNeedPopup(dish)
+  return {
+    ...dish,
+    needPopup,
+    needSpec: needPopup
+  }
+}
+
+async function normalizeDishListForClient(list = []) {
+  const data = await resolveDishImageUrls(list)
+  return data.map(item => normalizeDishSpecFields(item))
+}
+
+async function getAllDishesForImageMatch(menuType) {
+  const limit = 100
+  const all = []
+  let page = 0
+
+  while (true) {
+    let query = db.collection('dish')
+    if (menuType) {
+      query = query.where({
+        menuType: getMenuTypeWhere(menuType)
+      })
+    }
+
+    const res = await query
+      .skip(page * limit)
+      .limit(limit)
+      .get()
+
+    const data = res.data || []
+    all.push(...data)
+    if (data.length < limit) break
+    page += 1
+  }
+
+  return all
+}
+
+async function getDishesForImageMatch(menuType, dishNames = []) {
+  const names = Array.from(new Set((dishNames || [])
+    .map(name => String(name || '').trim())
+    .filter(Boolean)))
+
+  if (names.length === 0) {
+    return []
+  }
+
+  const where = {
+    name: _.in(names)
+  }
+
+  if (menuType) {
+    where.menuType = getMenuTypeWhere(menuType)
+  }
+
+  const res = await db.collection('dish')
+    .where(where)
+    .limit(100)
+    .get()
+
+  return res.data || []
+}
+
+async function adminMatchDishImages(payload) {
+  const allImages = Array.isArray(payload.images) && payload.images.length
+    ? payload.images
+    : DEFAULT_DISH_IMAGE_FILES
+  const imageOffset = Math.max(0, Math.floor(Number(payload.imageOffset || payload.offset || 0)))
+  const batchSize = Math.min(Math.max(Math.floor(Number(payload.batchSize || payload.limit || 5)), 1), 10)
+  const images = allImages.slice(imageOffset, imageOffset + batchSize)
+  const menuType = payload.menuType ? getMenuType(payload.menuType) : ''
+  const overwrite = payload.overwrite !== false
+  const dryRun = payload.dryRun === true
+  const entries = images.map(image => normalizeDishImageEntry(image, payload))
+  const entryDishNames = entries.reduce((result, entry) => {
+    return result.concat(entry.dishNames || [])
+  }, [])
+  const dishList = await getDishesForImageMatch(menuType, entryDishNames)
+  const matched = []
+  const unmatched = []
+  let updated = 0
+  let skipped = 0
+
+  const dishGroups = dishList.reduce((groups, dish) => {
+    const key = normalizeDishImageKey(dish.name)
+    if (!key) return groups
+    if (!groups[key]) groups[key] = []
+    groups[key].push(dish)
+    return groups
+  }, {})
+
+  for (const entry of entries) {
+    const targetKeys = Array.from(new Set((entry.dishNames || []).map(normalizeDishImageKey).filter(Boolean)))
+    const dishes = targetKeys.reduce((result, key) => result.concat(dishGroups[key] || []), [])
+
+    if (!entry.image || dishes.length === 0) {
+      unmatched.push({
+        fileName: entry.fileName,
+        image: entry.image,
+        dishNames: entry.dishNames || []
+      })
+      continue
+    }
+
+    for (const dish of dishes) {
+      const shouldUpdate = overwrite || !dish.image
+      if (!shouldUpdate) {
+        skipped += 1
+        matched.push({
+          fileName: entry.fileName,
+          dishId: dish._id,
+          dishName: dish.name,
+          image: dish.image,
+          skipped: true
+        })
+        continue
+      }
+
+      if (!dryRun) {
+        await db.collection('dish').doc(dish._id).update({
+          data: {
+            image: entry.image,
+            imageFileName: entry.fileName,
+            updateTime: db.serverDate()
+          }
+        })
+      }
+
+      updated += 1
+      matched.push({
+        fileName: entry.fileName,
+        dishId: dish._id,
+        dishName: dish.name,
+        image: entry.image,
+        dryRun
+      })
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      matched,
+      unmatched,
+      updated,
+      skipped,
+      dryRun,
+      imageOffset,
+      batchSize,
+      nextImageOffset: imageOffset + images.length,
+      hasMore: imageOffset + images.length < allImages.length,
+      totalImages: allImages.length
+    }
+  }
+}
+
+function getImageTypeFromBuffer(buffer) {
+  if (!buffer || buffer.length < 12) return null
+
+  if (
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff
+  ) {
+    return {
+      ext: 'jpg',
+      contentType: DISH_IMAGE_TYPES.jpg
+    }
+  }
+
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47
+  ) {
+    return {
+      ext: 'png',
+      contentType: DISH_IMAGE_TYPES.png
+    }
+  }
+
+  if (
+    buffer.slice(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.slice(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return {
+      ext: 'webp',
+      contentType: DISH_IMAGE_TYPES.webp
+    }
+  }
+
+  return null
+}
+
+function sanitizeCloudPathName(value, fallback = 'dish') {
+  const name = String(value || '').trim()
+    .replace(/[\\/:*?"<>|#%&{}$!@+=`~]/g, '')
+    .replace(/\s+/g, '-')
+    .slice(0, 40)
+
+  return name || fallback
+}
+
+async function adminUploadDishImage(payload) {
+  const tenantId = getTenantId(payload)
+  const dishId = String(payload.dishId || payload._id || '').trim()
+  const dishName = String(payload.dishName || payload.name || '').trim()
+  const base64 = String(payload.fileBase64 || payload.base64 || '').replace(/^data:image\/\w+;base64,/, '')
+
+  if (!base64) {
+    return {
+      success: false,
+      code: 'IMAGE_REQUIRED',
+      message: 'image required'
+    }
+  }
+
+  const fileContent = Buffer.from(base64, 'base64')
+  if (!fileContent.length || fileContent.length > MAX_DISH_IMAGE_SIZE) {
+    return {
+      success: false,
+      code: 'IMAGE_TOO_LARGE',
+      message: 'image must be 1MB or less'
+    }
+  }
+
+  const imageType = getImageTypeFromBuffer(fileContent)
+  if (!imageType) {
+    return {
+      success: false,
+      code: 'IMAGE_TYPE_INVALID',
+      message: 'only jpg/png/webp images are allowed'
+    }
+  }
+
+  const safeTenantId = sanitizeCloudPathName(tenantId, DEFAULT_TENANT_ID)
+  const safeDishName = sanitizeCloudPathName(dishName || dishId || 'dish')
+  const random = crypto.randomBytes(4).toString('hex')
+  const cloudPath = `tenant/${safeTenantId}/dish/${safeDishName}-${Date.now()}-${random}.${imageType.ext}`
+  const uploadRes = await cloud.uploadFile({
+    cloudPath,
+    fileContent
+  })
+  const fileID = uploadRes.fileID || ''
+  let image = ''
+
+  if (fileID) {
+    try {
+      const tempRes = await cloud.getTempFileURL({
+        fileList: [fileID]
+      })
+      image = tempRes.fileList && tempRes.fileList[0] && tempRes.fileList[0].tempFileURL || ''
+    } catch (err) {
+      console.error('get uploaded dish image temp url failed', err)
+    }
+  }
+
+  if (dishId && fileID) {
+    await db.collection('dish').doc(dishId).update({
+      data: {
+        image: fileID,
+        imageFileName: `${safeDishName}.${imageType.ext}`,
+        updateTime: db.serverDate()
+      }
+    })
+  }
+
+  return {
+    success: true,
+    data: {
+      fileID,
+      image,
+      cloudPath,
+      size: fileContent.length,
+      contentType: imageType.contentType
+    }
+  }
+}
+
 async function listCategories(payload) {
   const menuType = getMenuType(payload.menuType)
   const res = await db.collection('dishCategory')
@@ -3996,9 +4463,11 @@ async function listCategoryGoods(payload) {
     .limit(limit)
     .get()
 
+  const data = await normalizeDishListForClient(res.data || [])
+
   return {
     success: true,
-    data: res.data || [],
+    data,
     page,
     limit,
     hasMore: (res.data || []).length === limit
@@ -4034,9 +4503,11 @@ async function searchGoods(payload) {
     .limit(limit)
     .get()
 
+  const data = await normalizeDishListForClient(res.data || [])
+
   return {
     success: true,
-    data: res.data || []
+    data
   }
 }
 
@@ -4235,9 +4706,11 @@ async function adminListDishes(payload) {
       .limit(limit)
       .get()
 
+    const data = await normalizeDishListForClient(res.data || [])
+
     return {
       success: true,
-      data: res.data || []
+      data
     }
   }
 
@@ -4257,15 +4730,20 @@ async function adminListDishes(payload) {
     .limit(limit)
     .get()
 
+  const data = await normalizeDishListForClient(res.data || [])
+
   return {
     success: true,
-    data: res.data || []
+    data
   }
 }
 
 function normalizeAdminDish(payload) {
   const dish = payload.dish || payload
   const menuType = getMenuType(dish.menuType || payload.menuType)
+  const needPopup = getDishNeedPopup(dish)
+  const flavorOptions = normalizeStringArray(dish.flavorOptions)
+  const optionGroups = normalizeSpecOptionGroups(dish.optionGroups)
 
   return {
     ...dish,
@@ -4281,7 +4759,13 @@ function normalizeAdminDish(payload) {
     unit: String(dish.unit || '份').trim() || '份',
     status: dish.status === 0 ? 0 : 1,
     sort: Number(dish.sort || 0),
-    needPopup: dish.needPopup === true
+    needPopup,
+    needSpec: needPopup,
+    specTemplate: String(dish.specTemplate || '').trim(),
+    flavorTitle: String(dish.flavorTitle || '').trim(),
+    flavorOptions,
+    flavorNote: String(dish.flavorNote || '').trim(),
+    optionGroups
   }
 }
 
@@ -4322,6 +4806,12 @@ async function adminSaveDish(payload) {
     status: dish.status,
     sort: dish.sort,
     needPopup: dish.needPopup,
+    needSpec: dish.needSpec,
+    specTemplate: dish.specTemplate,
+    flavorTitle: dish.flavorTitle,
+    flavorOptions: dish.flavorOptions,
+    flavorNote: dish.flavorNote,
+    optionGroups: dish.optionGroups,
     tags: Array.isArray(dish.tags) ? dish.tags : [],
     options: Array.isArray(dish.options) ? dish.options : [],
     updateTime: db.serverDate()
@@ -4797,6 +5287,8 @@ async function handleAction(action, payload) {
   if (action === 'admin.dish.save') return adminSaveDish(payload)
   if (action === 'admin.dish.delete') return adminDeleteDish(payload)
   if (action === 'admin.dish.status') return adminSetDishStatus(payload)
+  if (action === 'admin.dish.matchImages') return adminMatchDishImages(payload)
+  if (action === 'admin.dish.uploadImage') return adminUploadDishImage(payload)
   if (action === 'admin.table.list') return adminListTables(payload)
   if (action === 'admin.table.detail') return adminGetTableDetail(payload)
   if (action === 'admin.table.updatePeople') return adminUpdateTablePeople(payload)
