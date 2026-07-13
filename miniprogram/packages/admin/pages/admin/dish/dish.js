@@ -28,6 +28,9 @@ const UI = {
   unit: '\u5355\u4f4d',
   description: '\u63cf\u8ff0',
   image: '\u83dc\u54c1\u56fe\u7247',
+  printer: '\u6253\u5370\u673a',
+  printerNone: '\u4e0d\u6253\u5370',
+  printerTip: '\u4e0d\u9009\u6253\u5370\u673a\u5219\u4e0d\u53d1\u9001\u540e\u53a8\u6253\u5370',
   sort: '\u6392\u5e8f',
   status: '\u4e0a\u67b6\u72b6\u6001',
   needPopup: '\u89c4\u683c\u5f39\u7a97',
@@ -98,6 +101,10 @@ const DEFAULT_DISH = {
   image: '',
   imagePreview: '',
   imageFileID: '',
+  printerId: '',
+  printerName: '',
+  printerLabel: '\u4e0d\u6253\u5370',
+  printerIndex: 0,
   unit: '\u4efd',
   status: 1,
   sort: 0,
@@ -117,6 +124,12 @@ const DEFAULT_DISH = {
 
 const MAX_IMAGE_SIZE = 1024 * 1024
 const ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp']
+const PRINTER_OPTIONS = [
+  { label: UI.printerNone, value: '', name: '' },
+  { label: '\u751f\u83dc\u6253\u5370\u673a', value: 'sheng2', name: '\u751f\u83dc\u6253\u5370\u673a' },
+  { label: '\u719f\u98df\u6253\u5370\u673a', value: 'shu3', name: '\u719f\u98df\u6253\u5370\u673a' },
+  { label: '\u751c\u54c1\u6253\u5370\u673a', value: 'tian4', name: '\u751c\u54c1\u6253\u5370\u673a' }
+]
 const DEFAULT_SPEC_OPTIONS = ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3']
 const SPEC_TEMPLATES = [
   {
@@ -163,6 +176,25 @@ const SPEC_TEMPLATES = [
 
 function showToast(title, icon = 'none') {
   wx.showToast({ title, icon })
+}
+
+function getPrinterOption(value) {
+  const explicit = PRINTER_OPTIONS.find(item => item.value === value)
+  if (explicit) return explicit
+  return PRINTER_OPTIONS[0]
+}
+
+function normalizeDishPrinterFields(dish = {}) {
+  const printerId = String(dish.printerId || dish.kitchenPrinterId || '').trim()
+  const option = getPrinterOption(printerId)
+  const printerIndex = PRINTER_OPTIONS.findIndex(item => item.value === option.value)
+  return {
+    ...dish,
+    printerId: option.value,
+    printerName: option.name,
+    printerLabel: option.label,
+    printerIndex: printerIndex >= 0 ? printerIndex : 0
+  }
 }
 
 function toNumber(value, fallback = 0) {
@@ -346,7 +378,9 @@ Page({
     showDishModal: false,
     editDishMode: false,
     currentDish: { ...DEFAULT_DISH },
+    showPrinterDropdown: false,
     specPreviewGroups: [],
+    printerOptions: PRINTER_OPTIONS,
     specTemplates: SPEC_TEMPLATES
   },
 
@@ -607,17 +641,18 @@ Page({
       return
     }
 
-    const currentDish = prepareDishSpecForEditor({
+    const currentDish = normalizeDishPrinterFields(prepareDishSpecForEditor({
       ...DEFAULT_DISH,
       categoryId: currentCategory._id,
       categoryName: currentCategory.name,
       menuType: this.data.currentMenuType,
       sort: this.data.dishes.length
-    }, currentCategory.name)
+    }, currentCategory.name))
 
     this.setData({
       showDishModal: true,
       editDishMode: false,
+      showPrinterDropdown: false,
       currentDish,
       specPreviewGroups: buildSpecPreviewGroups(currentDish)
     })
@@ -625,7 +660,7 @@ Page({
 
   showEditDishModal(e) {
     const dish = e.currentTarget.dataset.dish
-    const currentDish = prepareDishSpecForEditor({
+    const currentDish = normalizeDishPrinterFields(prepareDishSpecForEditor({
       ...DEFAULT_DISH,
       ...dish,
       image: dish.imageFileID || dish.image || '',
@@ -633,18 +668,22 @@ Page({
       imageFileID: dish.imageFileID || '',
       needPopup: getDishNeedPopup(dish),
       needSpec: getDishNeedPopup(dish)
-    }, dish.categoryName)
+    }, dish.categoryName))
 
     this.setData({
       showDishModal: true,
       editDishMode: true,
+      showPrinterDropdown: false,
       currentDish,
       specPreviewGroups: buildSpecPreviewGroups(currentDish)
     })
   },
 
   closeDishModal() {
-    this.setData({ showDishModal: false })
+    this.setData({
+      showDishModal: false,
+      showPrinterDropdown: false
+    })
   },
 
   onDishInput(e) {
@@ -670,6 +709,24 @@ Page({
     this.setData({
       currentDish,
       specPreviewGroups: buildSpecPreviewGroups(currentDish)
+    })
+  },
+
+  togglePrinterDropdown() {
+    this.setData({
+      showPrinterDropdown: !this.data.showPrinterDropdown
+    })
+  },
+
+  selectPrinterOption(e) {
+    const index = Number(e.currentTarget.dataset.index || 0)
+    const option = this.data.printerOptions[index] || this.data.printerOptions[0]
+    this.setData({
+      'currentDish.printerId': option.value,
+      'currentDish.printerName': option.name,
+      'currentDish.printerLabel': option.label,
+      'currentDish.printerIndex': index,
+      showPrinterDropdown: false
     })
   },
 
@@ -825,6 +882,8 @@ Page({
       image: currentDish.imageFileID || currentDish.image || '',
       needPopup: currentDish.needPopup === true,
       needSpec: currentDish.needPopup === true,
+      printerId: currentDish.printerId || '',
+      printerName: currentDish.printerName || '',
       menuType: this.data.currentMenuType,
       categoryId: currentDish.categoryId || this.data.currentCategoryId,
       categoryName: currentDish.categoryName || this.getCurrentCategoryName(),
@@ -847,7 +906,10 @@ Page({
       wx.showLoading({ title: UI.saving })
       await apiClient.call('admin.dish.save', { dish })
       wx.hideLoading()
-      this.setData({ showDishModal: false })
+      this.setData({
+        showDishModal: false,
+        showPrinterDropdown: false
+      })
       showToast(UI.saved, 'success')
       if (this.data.isSearching && this.data.searchKeyword.trim()) {
         await this.searchDishes(this.data.searchKeyword)

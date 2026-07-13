@@ -39,6 +39,14 @@ const UI = {
   discountConfirm: '\u786e\u5b9a',
   discountInvalid: '\u8bf7\u8f93\u5165 0-10 \u4e4b\u95f4\u7684\u6298\u6263',
   noSelectedGoods: '\u8bf7\u5148\u9009\u62e9\u83dc\u54c1',
+  noSelectedKitchenGoods: '\u8bf7\u5148\u9009\u62e9\u8981\u53d1\u9001\u7684\u83dc\u54c1',
+  sendKitchenConfirmTitle: '\u53d1\u9001\u540e\u53a8',
+  sendKitchenConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u53d1\u9001\u5230\u540e\u53a8\u5417',
+  sendSuccess: '\u5df2\u53d1\u9001',
+  sendFailed: '\u53d1\u9001\u5931\u8d25',
+  paidOrderCannotSendKitchen: '\u5df2\u652f\u4ed8\u8ba2\u5355\u4e0d\u80fd\u5728\u8fd9\u91cc\u53d1\u9001\u540e\u53a8',
+  paidItemsSkipped: '\u5df2\u8df3\u8fc7\u5df2\u652f\u4ed8\u83dc\u54c1',
+  paidItem: '\u5df2\u652f\u4ed8',
   refundDish: '\u9000\u83dc',
   giftDish: '\u8d60\u83dc',
   reprintGuestBill: '\u8865\u6253\u5ba2\u5355',
@@ -157,6 +165,14 @@ function getGoodsSource(order) {
   return { field: 'goods', goods: [] }
 }
 
+function isPaidOrder(order = {}) {
+  const status = String(order.status || '')
+  return order.payStatus === true ||
+    order.pay_status === true ||
+    status === 'paid' ||
+    status === 'completed'
+}
+
 function normalizeGoods(order, selectedGoodsMap = {}, options = {}) {
   const source = getGoodsSource(order).goods
   if (!Array.isArray(source)) return []
@@ -182,6 +198,7 @@ function normalizeGoods(order, selectedGoodsMap = {}, options = {}) {
       optionText: getGoodsOptions(item),
       subtotalText: formatPrice(total),
       kitchenSent: item.kitchenSent === true || item.kitchenStatus === 'sent',
+      isPaid: isPaidOrder(order),
       selected: !!selectedGoodsMap[key]
     }
   })
@@ -197,6 +214,14 @@ function getStatusText(order) {
   if (order.status === 'paid') return STATUS_TEXT.submitted
   if (order.payStatus === true) return STATUS_TEXT.submitted
   return STATUS_TEXT[order.status] || order.status || '\u5f85\u5904\u7406'
+}
+
+function getStatusClass(order) {
+  if (!order) return ''
+  const statusText = getStatusText(order)
+  if (statusText === STATUS_TEXT.paid || order.status === 'completed') return 'paid'
+  if (statusText === STATUS_TEXT.submitted || order.status === 'submitted' || order.status === 'waiting_pay') return 'submitted'
+  return String(order.status || '').replace(/[^a-zA-Z0-9_-]/g, '') || 'pending'
 }
 
 function getOutdoorPointText(order) {
@@ -363,6 +388,7 @@ function formatOrderItem(order) {
     ...order,
     _displayTitle: getOrderDisplayName(order),
     _displayStatus: getStatusText(order),
+    _statusClass: getStatusClass(order),
     _outdoorPointText: getOutdoorPointText(order),
     _createTimeText: formatTime(order.createTime) || '\u672a\u8bb0\u5f55\u65f6\u95f4',
     _priceText: formatMoney(total),
@@ -377,10 +403,12 @@ Page({
     keyword: '',
     loading: false,
     saving: false,
+    sendingKitchen: false,
     selectedOrderId: '',
     selectedOrder: null,
     orderTitle: '',
     statusText: '',
+    statusClass: '',
     outdoorPointText: '',
     createTimeText: '',
     totalPriceText: '0',
@@ -464,6 +492,7 @@ Page({
         selectedOrderId: '',
         orderTitle: '',
         statusText: '',
+        statusClass: '',
         outdoorPointText: '',
         createTimeText: '',
         totalPriceText: '0',
@@ -494,6 +523,7 @@ Page({
       selectedOrderId: order._id || '',
       orderTitle: getOrderDisplayName(order),
       statusText: getStatusText(order),
+      statusClass: getStatusClass(order),
       outdoorPointText: getOutdoorPointText(order),
       createTimeText: formatTime(order.createTime) || '\u672a\u8bb0\u5f55\u65f6\u95f4',
       totalPriceText: formatPrice(totalPrice),
@@ -584,7 +614,8 @@ Page({
       .filter(item => selectedGoodsMap[item.key])
       .map(item => ({
         sourceOrderId: item.sourceOrderId,
-        sourceIndex: item.sourceIndex
+        sourceIndex: item.sourceIndex,
+        isPaid: item.isPaid === true
       }))
   },
 
@@ -746,11 +777,74 @@ Page({
     })
   },
 
-  sendKitchen() {
-    wx.showToast({
-      title: UI.actionTodo,
-      icon: 'none'
+  async sendKitchen() {
+    if (this.data.sendingKitchen) return
+    const selectedRefs = this.getSelectedGoodsRefs().filter(item => !item.isPaid)
+    if (!selectedRefs.length) {
+      wx.showToast({
+        title: (this.data.selectedGoodsCount || 0) > 0 ? UI.paidOrderCannotSendKitchen : UI.noSelectedKitchenGoods,
+        icon: 'none'
+      })
+      return
+    }
+
+    const confirmed = await new Promise(resolve => {
+      wx.showModal({
+        title: UI.sendKitchenConfirmTitle,
+        content: selectedRefs.length > 1
+          ? `\u786e\u5b9a\u53d1\u9001\u9009\u4e2d\u7684${selectedRefs.length}\u4e2a\u83dc\u54c1\u5230\u540e\u53a8\u5417`
+          : UI.sendKitchenConfirmContent,
+        confirmText: UI.sendKitchen,
+        cancelText: '\u53d6\u6d88',
+        success: res => resolve(res.confirm === true),
+        fail: () => resolve(false)
+      })
     })
+    if (!confirmed) return
+
+    const order = this.data.selectedOrder
+    try {
+      this.setData({ sendingKitchen: true })
+      const res = await apiClient.call('admin.order.sendKitchenItems', {
+        items: selectedRefs.map(item => ({
+          orderId: item.sourceOrderId,
+          dishIndex: item.sourceIndex
+        }))
+      })
+      const sentCount = Number(res && res.data && res.data.sentCount || 0)
+      const skippedPaidCount = Array.isArray(res && res.data && res.data.skippedPaidOrderIds)
+        ? res.data.skippedPaidOrderIds.length
+        : 0
+      wx.showToast({
+        title: sentCount > 0 ? UI.sendSuccess : (skippedPaidCount > 0 ? UI.paidItemsSkipped : UI.actionFailed),
+        icon: sentCount > 0 ? 'success' : 'none'
+      })
+      this.setData({
+        selectedGoodsMap: {},
+        selectedGoodsCount: 0
+      }, () => this.loadList({
+        selectedId: order && (order._rootOrderId || order._id),
+        resetSelection: true,
+        resetPay: false
+      }))
+    } catch (err) {
+      console.error('send outdoor order to kitchen failed', err)
+      wx.showToast({
+        title: err.code === 'ORDER_PAID' || /paid order/.test(err.message || '')
+          ? UI.paidOrderCannotSendKitchen
+          : err.message || UI.sendFailed,
+        icon: 'none'
+      })
+      if (err.code === 'ORDER_PAID' || /paid order/.test(err.message || '')) {
+        this.loadList({
+          selectedId: order && (order._rootOrderId || order._id),
+          resetSelection: true,
+          resetPay: false
+        })
+      }
+    } finally {
+      this.setData({ sendingKitchen: false })
+    }
   },
 
   reprintGuestBill() {

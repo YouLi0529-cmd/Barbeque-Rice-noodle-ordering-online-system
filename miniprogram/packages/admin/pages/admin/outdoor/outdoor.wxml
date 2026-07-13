@@ -20,7 +20,7 @@
       >
         <view class="order-card-head">
           <view class="order-no">{{item._displayTitle}}</view>
-          <view class="order-status">{{item._displayStatus}}</view>
+          <view class="order-status status-{{item._statusClass}}">{{item._displayStatus}}</view>
         </view>
         <view class="order-card-meta">
           <text>{{item._outdoorPointText}}</text>
@@ -43,7 +43,7 @@
         <view class="bill-top" wx:if="{{selectedOrder}}">
           <view class="bill-title-row">
             <view class="panel-title">{{orderTitle}}</view>
-            <view class="status-pill">{{statusText}}</view>
+            <view class="status-pill status-{{statusClass}}">{{statusText}}</view>
           </view>
           <view class="table-meta-row">
             <text>{{outdoorPointText}}</text>
@@ -69,6 +69,7 @@
               >
                 <view class="dish-main">
                   <view class="dish-name">
+                    <text class="dish-paid-tag" wx:if="{{item.isPaid}}">{{ui.paidItem}}</text>
                     <text class="dish-name-text">{{item.name}}</text>
                     <text class="dish-sent-tag" wx:if="{{item.kitchenSent}}">已发送</text>
                   </view>

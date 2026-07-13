@@ -953,6 +953,18 @@ page {
   font-weight: 900;
 }
 
+.outdoor-page .order-status.status-submitted,
+.status-pill.status-submitted {
+  color: #B34932;
+  background: rgba(179, 73, 50, 0.15);
+}
+
+.outdoor-page .order-status.status-paid,
+.status-pill.status-paid {
+  color: #2F7A4D;
+  background: rgba(47, 122, 77, 0.16);
+}
+
 .outdoor-page .order-price {
   color: #B15B18;
   font-size: 10rpx;
@@ -1093,6 +1105,14 @@ page {
   flex: 0 0 auto;
   margin-left: 4rpx;
   color: rgba(138, 85, 38, 0.72);
+  font-size: 7rpx;
+  font-weight: 800;
+}
+
+.dish-paid-tag {
+  flex: 0 0 auto;
+  margin-left: 4rpx;
+  color: rgba(116, 103, 94, 0.72);
   font-size: 7rpx;
   font-weight: 800;
 }

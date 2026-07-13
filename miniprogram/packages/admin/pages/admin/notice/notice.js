@@ -1,8 +1,6 @@
 const apiClient = require('../../../../../utils/apiClient')
 
 const COLLECTION = 'notice'
-const EMPTY_HINT = '公告会显示在顾客点单页搜索栏下方'
-
 const UI = {
   title: '公告管理',
   subtitle: '编辑顾客点单页公告，启用后会显示在堂食和露营点单页',
@@ -15,10 +13,8 @@ const UI = {
   contentPlaceholder: '请输入公告内容',
   sortLabel: '排序',
   sortPlaceholder: '数字越小越靠前',
-  statusLabel: '状态',
-  enabled: '启用',
-  disabled: '停用',
-  previewLabel: '顾客端预览',
+  enabled: '\u542f\u7528',
+  disabled: '\u505c\u7528',
   save: '保存公告',
   delete: '删除公告',
   empty: '暂无公告，点击右上角新增',
@@ -33,16 +29,50 @@ const UI = {
   confirmDeleteContent: '删除后顾客端将不再显示这条公告，确定继续吗？'
 }
 
+function normalizeNoticeTarget(target) {
+  return target === 'camping' ? 'camping' : 'dineIn'
+}
+
+function normalizeNoticeTargets(source) {
+  const rawTargets = Array.isArray(source) ? source : (source ? [source] : [])
+  const targets = rawTargets
+    .map(target => target === 'camping' ? 'camping' : (target === 'dineIn' ? 'dineIn' : ''))
+    .filter(Boolean)
+  const uniqueTargets = Array.from(new Set(targets))
+  return uniqueTargets
+}
+
+function buildTargetMap(targets) {
+  const normalizedTargets = normalizeNoticeTargets(targets)
+  return {
+    dineIn: normalizedTargets.indexOf('dineIn') >= 0,
+    camping: normalizedTargets.indexOf('camping') >= 0
+  }
+}
+
+function getNoticeTargetLabel(targets) {
+  const normalizedTargets = normalizeNoticeTargets(targets)
+  if (!normalizedTargets.length) return '\u672a\u9009\u62e9'
+  return normalizedTargets
+    .map(target => target === 'camping' ? '\u9732\u8425' : '\u5802\u98df')
+    .join('\u3001')
+}
+
 function normalizeNotice(item = {}) {
   const status = Number(item.status) === 0 ? 0 : 1
   const sort = Number(item.sort || 0)
   const content = String(item.content || '')
+  const targets = normalizeNoticeTargets(item.targets || item.target)
 
   return {
     ...item,
     content,
     sort,
     status,
+    target: targets[0],
+    targets,
+    targetMap: buildTargetMap(targets),
+    displayTarget: getNoticeTargetLabel(targets),
     displayStatus: status === 1 ? UI.enabled : UI.disabled,
     statusClass: status === 1 ? 'enabled' : 'disabled',
     displaySort: `排序 ${sort}`,
@@ -52,11 +82,15 @@ function normalizeNotice(item = {}) {
 }
 
 function buildForm(source = {}) {
+  const targets = normalizeNoticeTargets(source.targets || source.target)
   return {
     _id: source._id || '',
     content: String(source.content || ''),
     sort: Number(source.sort || 0),
-    status: Number(source.status) === 0 ? 0 : 1
+    status: Number(source.status) === 0 ? 0 : 1,
+    target: targets[0] || '',
+    targets,
+    targetMap: buildTargetMap(targets)
   }
 }
 
@@ -69,11 +103,11 @@ Page({
     selectedNoticeId: '',
     form: buildForm(),
     contentLength: 0,
-    previewText: EMPTY_HINT,
-    statusOptions: [
-      { label: UI.enabled, value: 1 },
-      { label: UI.disabled, value: 0 }
-    ]
+    targetLabel: '\u53d1\u5e03\u4f4d\u7f6e',
+    targetErrorLabel: '\u8fd8\u672a\u9009\u62e9\u53d1\u5e03\u4f4d\u7f6e',
+    targetError: false,
+    dineInLabel: '\u5802\u98df',
+    campingLabel: '\u9732\u8425'
   },
 
   onLoad() {
@@ -92,7 +126,7 @@ Page({
       form,
       selectedNoticeId: form._id,
       contentLength: form.content.length,
-      previewText: form.content || EMPTY_HINT
+      targetError: false
     }
   },
 
@@ -148,8 +182,7 @@ Page({
     }
     this.setData({
       form,
-      contentLength: content.length,
-      previewText: content || EMPTY_HINT
+      contentLength: content.length
     })
   },
 
@@ -161,13 +194,23 @@ Page({
     this.setData({ form })
   },
 
-  chooseStatus(e) {
-    const status = Number(e.currentTarget.dataset.status) === 0 ? 0 : 1
+  chooseTarget(e) {
+    const target = normalizeNoticeTarget(e.currentTarget.dataset.target)
+    const currentTargets = normalizeNoticeTargets(this.data.form.targets || this.data.form.target)
+    const exists = currentTargets.indexOf(target) >= 0
+    const nextTargets = exists
+      ? currentTargets.filter(item => item !== target)
+      : currentTargets.concat(target)
     const form = {
       ...this.data.form,
-      status
+      target: nextTargets[0] || '',
+      targets: nextTargets,
+      targetMap: buildTargetMap(nextTargets)
     }
-    this.setData({ form })
+    this.setData({
+      form,
+      targetError: false
+    })
   },
 
   buildSaveItem() {
@@ -175,7 +218,9 @@ Page({
     const item = {
       content: String(form.content || '').trim(),
       sort: Number(form.sort || 0),
-      status: Number(form.status) === 0 ? 0 : 1
+      status: Number(form.status) === 0 ? 0 : 1,
+      target: normalizeNoticeTargets(form.targets || form.target)[0] || '',
+      targets: normalizeNoticeTargets(form.targets || form.target)
     }
 
     if (form._id) {
@@ -191,6 +236,11 @@ Page({
 
     if (!item.content) {
       wx.showToast({ title: UI.contentRequired, icon: 'none' })
+      return
+    }
+
+    if (!item.targets.length) {
+      this.setData({ targetError: true })
       return
     }
 

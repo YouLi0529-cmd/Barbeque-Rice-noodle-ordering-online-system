@@ -1,59 +1,41 @@
-<!-- admin simple collection page -->
-<view class="admin-simple-page">
-  <view class="admin-simple-header">
-    <view class="admin-simple-title">{{ui.title}}</view>
-    <view class="admin-simple-actions">
-      <view class="header-btn" bindtap="loadList">{{ui.refresh}}</view>
-      <view class="header-btn primary" wx:if="{{canAdd}}" bindtap="showAddModal">{{ui.add}}</view>
+<view class="table-code-page">
+  <view class="table-code-header">
+    <view>
+      <view class="page-title">{{ui.title}}</view>
+      <view class="page-subtitle">{{ui.subtitle}}</view>
+    </view>
+    <view class="header-actions">
+      <view class="header-action" bindtap="loadList">{{ui.refresh}}</view>
+      <view class="header-action primary {{batchGenerating ? 'disabled' : ''}}" bindtap="generateMissingCodes">
+        {{batchGenerating ? ui.generating : ui.generateMissing}}
+      </view>
     </view>
   </view>
 
-  <view class="search-row" wx:if="{{allowSearch}}">
-    <input class="search-input" placeholder="{{ui.searchPlaceholder}}" value="{{keyword}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="doSearch" />
-    <view class="search-btn" bindtap="doSearch">{{ui.searchPlaceholder}}</view>
-    <view class="clear-btn" bindtap="clearSearch">x</view>
-  </view>
+  <view class="progress-tip" wx:if="{{batchGenerating}}">{{ui.generating}} {{batchProgress}}</view>
 
-  <scroll-view class="admin-list" scroll-y>
-    <view class="admin-card" wx:for="{{list}}" wx:key="_id">
-      <view class="card-head">
-        <view class="card-title">{{item._displayTitle}}</view>
-        <view class="card-status" wx:if="{{item._displayStatus}}">{{item._displayStatus}}</view>
-      </view>
-      <view class="card-subtitle" wx:if="{{item._displaySubtitle}}">{{item._displaySubtitle}}</view>
-      <view class="line-row" wx:for="{{item._displayLines}}" wx:for-item="line" wx:key="key">
-        <text class="line-label">{{line.label}}</text>
-        <text class="line-value">{{line.value}}</text>
-      </view>
-      <view class="card-actions">
-        <view class="mini-btn" wx:if="{{canEdit}}" bindtap="showEditModal" data-item="{{item}}">{{ui.edit}}</view>
-        <view class="mini-btn" wx:for="{{item._actions}}" wx:for-item="act" wx:for-index="actIndex" wx:key="label" bindtap="runAction" data-id="{{item._id}}" data-index="{{actIndex}}">{{act.label}}</view>
-        <view class="mini-btn danger" wx:if="{{canDelete}}" bindtap="deleteItem" data-item="{{item}}">{{ui.delete}}</view>
-      </view>
-    </view>
-
-    <view class="empty-text" wx:if="{{!loading && list.length === 0}}">{{ui.empty}}</view>
-    <view class="empty-text" wx:if="{{loading}}">{{ui.loading}}</view>
-  </scroll-view>
-
-  <view class="modal-mask" wx:if="{{showModal}}" catchtap="closeModal">
-    <view class="modal-dialog" catchtap="stopPropagation">
-      <view class="modal-title">{{editMode ? ui.edit : ui.add}}</view>
-      <scroll-view class="modal-content" scroll-y>
-        <view class="form-item" wx:for="{{formFields}}" wx:key="key">
-          <view class="form-label">{{item.label}}</view>
-          <textarea wx:if="{{item.type === 'textarea'}}" class="form-textarea" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
-          <view wx:elif="{{item.type === 'switch'}}" class="switch-row">
-            <text>{{item.value ? ui.yes : ui.no}}</text>
-            <switch checked="{{item.value}}" data-key="{{item.key}}" bindchange="onFieldSwitch" color="#C99A4A" />
+  <scroll-view class="table-code-scroll" scroll-y>
+    <view class="table-code-section" wx:for="{{sections}}" wx:for-item="section" wx:key="areaKey">
+      <view class="section-title">{{section.name}}</view>
+      <view class="table-code-grid">
+        <view class="table-code-card" wx:for="{{section.tables}}" wx:for-item="table" wx:key="tableKey">
+          <view class="table-name">{{table.tableNumber}}{{ui.tableSuffix}}</view>
+          <image class="table-qr" wx:if="{{table.hasCode}}" src="{{table.qrCodeUrl}}" mode="aspectFit" />
+          <view class="table-qr-placeholder" wx:else>{{ui.notGenerated}}</view>
+          <view class="table-card-actions">
+            <view
+              class="table-action primary {{generatingKey === table.tableKey ? 'disabled' : ''}}"
+              bindtap="generateCode"
+              data-area-key="{{table.areaKey}}"
+              data-table-number="{{table.tableNumber}}"
+              data-table-key="{{table.tableKey}}">
+              {{generatingKey === table.tableKey ? ui.generating : (table.hasCode ? ui.regenerate : ui.generate)}}
+            </view>
+            <view class="table-action" wx:if="{{table.hasCode}}" bindtap="previewCode" data-url="{{table.qrCodeUrl}}">{{ui.preview}}</view>
+            <view class="table-action" wx:if="{{table.hasCode}}" bindtap="saveCode" data-url="{{table.qrCodeUrl}}">{{ui.save}}</view>
           </view>
-          <input wx:else class="form-input" type="{{item.type === 'number' ? 'digit' : 'text'}}" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
         </view>
-      </scroll-view>
-      <view class="modal-footer">
-        <view class="modal-btn cancel" bindtap="closeModal">{{ui.cancel}}</view>
-        <view class="modal-btn confirm" bindtap="saveItem">{{ui.save}}</view>
       </view>
     </view>
-  </view>
+  </scroll-view>
 </view>

@@ -5,7 +5,6 @@
     </view>
     <view class="top-actions">
       <view class="top-btn" bindtap="goBack">{{ui.back}}</view>
-      <view class="top-btn" bindtap="loadList">{{ui.refresh}}</view>
       <view class="top-btn primary" bindtap="createNotice">{{ui.add}}</view>
     </view>
   </view>
@@ -24,6 +23,7 @@
           <view class="notice-item {{selectedNoticeId === item._id ? 'active' : ''}}" wx:for="{{list}}" wx:key="_id" data-id="{{item._id}}" bindtap="selectNotice">
             <view class="notice-item-head">
               <view class="notice-brief">{{item.brief}}</view>
+              <view class="notice-target">{{item.displayTarget}}</view>
               <view class="notice-status {{item.statusClass}}">{{item.displayStatus}}</view>
             </view>
             <view class="notice-meta">{{item.displaySort}}</view>
@@ -34,6 +34,9 @@
           </view>
         </block>
       </scroll-view>
+      <view class="notice-list-footer">
+        <view class="footer-refresh" bindtap="loadList">{{ui.refresh}}</view>
+      </view>
     </view>
 
     <view class="editor-panel">
@@ -49,28 +52,34 @@
           <view class="content-count">{{contentLength}}/120</view>
         </view>
 
+        <view class="target-section">
+          <view class="form-label">{{targetLabel}}</view>
+          <view class="target-options">
+            <view
+              class="target-option {{form.targetMap.dineIn ? 'active' : ''}}"
+              data-target="dineIn"
+              bindtap="chooseTarget"
+            >{{dineInLabel}}</view>
+            <view
+              class="target-option {{form.targetMap.camping ? 'active' : ''}}"
+              data-target="camping"
+              bindtap="chooseTarget"
+            >{{campingLabel}}</view>
+          </view>
+        </view>
+
         <view class="form-row">
           <view class="form-group sort-group">
             <view class="form-label">{{ui.sortLabel}}</view>
             <input class="sort-input" type="number" placeholder="{{ui.sortPlaceholder}}" value="{{form.sort}}" bindinput="onSortInput" />
           </view>
 
-          <view class="form-group status-group">
-            <view class="form-label">{{ui.statusLabel}}</view>
-            <view class="status-options">
-              <view class="status-option {{form.status === item.value ? 'active' : ''}}" wx:for="{{statusOptions}}" wx:key="value" data-status="{{item.value}}" bindtap="chooseStatus">{{item.label}}</view>
-            </view>
-          </view>
-        </view>
-
-        <view class="preview-box">
-          <view class="preview-label">{{ui.previewLabel}}</view>
-          <view class="preview-content">{{previewText}}</view>
         </view>
       </view>
 
       <view class="editor-actions">
         <view class="editor-btn primary" bindtap="saveNotice">{{saving ? ui.saving : ui.save}}</view>
+        <view class="target-error action-error" wx:if="{{targetError}}">{{targetErrorLabel}}</view>
       </view>
     </view>
   </view>

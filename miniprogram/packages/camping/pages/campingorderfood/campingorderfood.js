@@ -329,7 +329,9 @@ Page({
   async loadNotices() {
     try {
       if (apiClient.isEnabled()) {
-        const result = await apiClient.call('notice.list')
+        const result = await apiClient.call('notice.list', {
+          target: 'camping'
+        })
         const noticeList = result.data || []
         this.setData({
           noticeList,
@@ -341,14 +343,22 @@ Page({
       const res = await db.collection('notice')
         .where({ status: 1 }) // 只显示启用的公告
         .orderBy('sort', 'asc')
-        .limit(10)
+        .limit(30)
         .get()
       
       // 将公告内容拼接成一个字符串，用于vant notice-bar滚动显示
-      const noticeText = res.data.map(item => item.content).join('    ')
+      const noticeList = (res.data || [])
+        .filter(item => {
+          const targets = Array.isArray(item.targets) ? item.targets : []
+          return targets.length
+            ? targets.indexOf('camping') >= 0
+            : (!item.target || item.target === 'camping' || item.target === 'all')
+        })
+        .slice(0, 10)
+      const noticeText = noticeList.map(item => item.content).join('    ')
       
       this.setData({
-        noticeList: res.data || [],
+        noticeList,
         noticeText: noticeText
       })
     } catch (err) {

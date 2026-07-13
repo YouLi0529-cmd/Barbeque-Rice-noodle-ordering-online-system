@@ -147,7 +147,8 @@
   color: rgba(255, 247, 236, 0.82);
 }
 
-.reservation-badge {
+.reservation-badge,
+.outdoor-unread-badge {
   position: absolute;
   top: -10rpx;
   right: -10rpx;

@@ -78,6 +78,18 @@ function formatReservation(item = {}) {
   }
 }
 
+function getOutdoorUnreadOrderCount(orders = []) {
+  const rootOrderIds = new Set()
+
+  ;(orders || []).forEach(order => {
+    if (!order || String(order.status || '') !== 'submitted') return
+    const rootOrderId = String(order.rootOrderId || order._id || '').trim()
+    if (rootOrderId) rootOrderIds.add(rootOrderId)
+  })
+
+  return rootOrderIds.size
+}
+
 Page({
   data: {
     ui: ADMIN_TEXT,
@@ -93,6 +105,8 @@ Page({
     confirmPassword: '',
     reservationCount: 0,
     reservationBadgeText: '',
+    outdoorUnreadCount: 0,
+    outdoorUnreadBadgeText: '',
     reservationList: [],
     reservationLoading: false,
     showReservationModal: false,
@@ -112,6 +126,7 @@ Page({
   onShow() {
     if (!this.data.isAuthorized) return
     this.loadReservationList(true)
+    this.loadOutdoorUnreadCount()
     this.startReservationPolling()
   },
 
@@ -203,6 +218,7 @@ Page({
         authRequiredTip: ''
       })
       this.loadReservationList(true)
+      this.loadOutdoorUnreadCount()
       this.startReservationPolling()
       wx.showToast({ title: '\u767b\u5f55\u6210\u529f', icon: 'success' })
     } catch (err) {
@@ -274,11 +290,36 @@ Page({
     }
   },
 
+  async loadOutdoorUnreadCount() {
+    if (!this.data.isAuthorized) return
+
+    try {
+      const res = await apiClient.call('admin.collection.list', {
+        collection: 'order',
+        filters: {
+          orderType: 'camping',
+          status: 'submitted'
+        },
+        orderBy: 'createTime',
+        order: 'desc',
+        limit: 100
+      })
+      const count = getOutdoorUnreadOrderCount(res.data || [])
+      this.setData({
+        outdoorUnreadCount: count,
+        outdoorUnreadBadgeText: count > 99 ? '99+' : (count ? String(count) : '')
+      })
+    } catch (err) {
+      console.error('load outdoor unread count failed', err)
+    }
+  },
+
   startReservationPolling() {
     this.stopReservationPolling()
     this.reservationTimer = setInterval(() => {
       if (this.data.isAuthorized) {
         this.loadReservationList(true)
+        this.loadOutdoorUnreadCount()
       }
     }, 30000)
   },

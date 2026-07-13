@@ -209,6 +209,27 @@
             <text>{{ui.specRemarkLimit}}</text>
           </view>
         </view>
+        <view class="form-item printer-form-item">
+          <view class="form-label">{{ui.printer}}</view>
+          <view class="printer-select">
+            <view class="printer-picker {{showPrinterDropdown ? 'open' : ''}}" bindtap="togglePrinterDropdown">
+              <text>{{currentDish.printerLabel}}</text>
+              <text class="printer-arrow {{showPrinterDropdown ? 'open' : ''}}">∨</text>
+            </view>
+            <view class="printer-dropdown" wx:if="{{showPrinterDropdown}}">
+              <view
+                class="printer-option {{currentDish.printerIndex === index ? 'active' : ''}}"
+                wx:for="{{printerOptions}}"
+                wx:key="value"
+                data-index="{{index}}"
+                catchtap="selectPrinterOption"
+              >
+                <text>{{item.label}}</text>
+              </view>
+            </view>
+          </view>
+          <view class="form-tip">{{ui.printerTip}}</view>
+        </view>
       </scroll-view>
       <view class="modal-footer">
         <view class="modal-btn cancel" bindtap="closeDishModal">{{ui.cancel}}</view>

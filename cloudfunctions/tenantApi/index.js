@@ -33,6 +33,16 @@ const PRINTER_NAMES = {
   shu3: '熟食打印机',
   tian4: '甜品打印机'
 }
+
+function normalizePrinterId(value) {
+  const printerId = String(value || '').trim()
+  return Object.prototype.hasOwnProperty.call(PRINTER_NAMES, printerId) ? printerId : ''
+}
+
+function getPrinterName(printerId) {
+  return PRINTER_NAMES[normalizePrinterId(printerId)] || ''
+}
+
 let ensureSessionCollectionPromise = null
 let ensureCoreCollectionsPromise = null
 
@@ -72,6 +82,97 @@ function requestJson(url) {
       })
     }).on('error', reject)
   })
+}
+
+function requestBuffer(url, method = 'GET', data) {
+  return new Promise((resolve, reject) => {
+    const body = data === undefined ? null : Buffer.from(JSON.stringify(data))
+    const request = https.request(url, {
+      method,
+      headers: body ? {
+        'Content-Type': 'application/json',
+        'Content-Length': body.length
+      } : {}
+    }, res => {
+      const chunks = []
+      res.on('data', chunk => chunks.push(chunk))
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode || 0,
+          headers: res.headers || {},
+          body: Buffer.concat(chunks)
+        })
+      })
+    })
+
+    request.on('error', reject)
+    if (body) request.write(body)
+    request.end()
+  })
+}
+
+let wechatAccessTokenCache = {
+  value: '',
+  expiresAt: 0
+}
+
+async function getWechatAccessToken() {
+  if (wechatAccessTokenCache.value && wechatAccessTokenCache.expiresAt > Date.now()) {
+    return wechatAccessTokenCache.value
+  }
+
+  const appid = process.env.WECHAT_APPID
+  const secret = process.env.WECHAT_SECRET
+  if (!appid || !secret) {
+    throw new Error('missing WECHAT_APPID or WECHAT_SECRET')
+  }
+
+  const url = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(appid)}&secret=${encodeURIComponent(secret)}`
+  const data = await requestJson(url)
+  if (!data.access_token) {
+    throw new Error(data.errmsg || 'failed to get wechat access token')
+  }
+
+  const expiresIn = Math.max(300, Number(data.expires_in || 7200) - 120)
+  wechatAccessTokenCache = {
+    value: data.access_token,
+    expiresAt: Date.now() + expiresIn * 1000
+  }
+  return wechatAccessTokenCache.value
+}
+
+async function createWechatMiniProgramCode(scene, page) {
+  const accessToken = await getWechatAccessToken()
+  const response = await requestBuffer(
+    `https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token=${encodeURIComponent(accessToken)}`,
+    'POST',
+    {
+      scene,
+      page,
+      env_version: 'release',
+      check_path: false,
+      width: 430,
+      auto_color: false,
+      line_color: {
+        r: 58,
+        g: 36,
+        b: 24
+      },
+      is_hyaline: false
+    }
+  )
+  const contentType = String(response.headers['content-type'] || '')
+
+  if (response.statusCode < 200 || response.statusCode >= 300 || contentType.indexOf('image/') === -1) {
+    const error = parseJson(response.body.toString('utf8'))
+    throw new Error(error.errmsg || `wechat code request failed: ${response.statusCode}`)
+  }
+
+  if (!response.body.length) {
+    throw new Error('wechat code image is empty')
+  }
+
+  return response.body
 }
 
 function buildResponse(payload, statusCode = 200) {
@@ -460,6 +561,8 @@ async function buildServerOrderGoods(transaction, orderGoods) {
       quantityMode: dish.quantityMode || '',
       exclusiveGroup,
       returnRequired: !!dish.returnRequired,
+      printerId: normalizePrinterId(dish.printerId || dish.kitchenPrinterId || ''),
+      printerName: getPrinterName(dish.printerId || dish.kitchenPrinterId || ''),
       tags: normalizeTags(item.tags)
     })
   }
@@ -552,6 +655,9 @@ async function createOrder(payload) {
       }
       if (parentOrder.orderScene !== orderScene) {
         throw new Error('order scene mismatch')
+      }
+      if (isAdminPaidOrder(parentOrder)) {
+        throw new Error('paid order cannot add dishes')
       }
       if (orderScene !== 'camping' && String(parentOrder.tableNumber || '') !== tableNumber) {
         if (isOrderTransferredFromTable(parentOrder, tableNumber)) {
@@ -895,6 +1001,26 @@ function getOrderScene(value) {
   return value === 'camping' ? 'camping' : 'dineIn'
 }
 
+function getUserOrderHistoryStartTime() {
+  const now = new Date()
+  const targetYear = now.getFullYear()
+  const targetMonth = now.getMonth() - 3
+  const targetDay = Math.min(
+    now.getDate(),
+    new Date(targetYear, targetMonth + 1, 0).getDate()
+  )
+
+  return new Date(
+    targetYear,
+    targetMonth,
+    targetDay,
+    now.getHours(),
+    now.getMinutes(),
+    now.getSeconds(),
+    now.getMilliseconds()
+  )
+}
+
 async function listUserOrders(payload) {
   const auth = await getAuthSession(payload)
   if (!auth.success) return auth
@@ -905,7 +1031,8 @@ async function listUserOrders(payload) {
   const query = {
     _openid: auth.data.openid,
     type: 'order',
-    deleted: _.neq(true)
+    deleted: _.neq(true),
+    createTime: _.gte(getUserOrderHistoryStartTime())
   }
 
   if (orderScene === 'camping') {
@@ -1620,100 +1747,18 @@ function postJson(url, payload) {
   })
 }
 
-function normalizeRouteText(value) {
-  return String(value || '').replace(/\s+/g, '').trim()
-}
-
-function routeTextIncludes(value, patterns) {
-  const text = normalizeRouteText(value)
-  return patterns.some(pattern => text.indexOf(normalizeRouteText(pattern)) !== -1)
-}
-
-function routeTextEquals(value, names) {
-  const text = normalizeRouteText(value)
-  return names.some(name => text === normalizeRouteText(name))
-}
-
 function isCampingOrder(order = {}) {
   return order.orderScene === 'camping' || order.orderType === 'camping'
 }
 
-function getCampingDishPrinterId(item = {}) {
-  const categoryName = normalizeRouteText(item.categoryName || item.category || '')
-  const dishName = normalizeRouteText(item.dishName || item.name || '')
-
-  if (routeTextEquals(dishName, ['小薄饼', '烤榴莲'])) {
-    return PRINTER_IDS.COOKED
-  }
-  if (routeTextIncludes(categoryName, ['锡纸类', '锡纸'])) {
-    return PRINTER_IDS.COOKED
-  }
-  if (routeTextIncludes(categoryName, [
-    '张南招牌',
-    '牛肉',
-    '牛肉i',
-    '猪肉',
-    '明星烤肉',
-    '素菜',
-    '蔬菜',
-    '小料区',
-    '包肉搭子',
-    '包肉好搭子',
-    '包肉好打字'
-  ])) {
-    return PRINTER_IDS.RAW
-  }
-
-  return PRINTER_IDS.RAW
-}
-
 function getDishPrinterId(item = {}, order = {}) {
-  if (isCampingOrder(order)) {
-    return getCampingDishPrinterId(item)
-  }
-
-  const categoryName = normalizeRouteText(item.categoryName || item.category || '')
-  const dishName = normalizeRouteText(item.dishName || item.name || '')
-
-  if (routeTextIncludes(categoryName, ['贵州冰浆', '雪冰', '甜品饮料'])) {
-    return PRINTER_IDS.DESSERT
-  }
-  if (routeTextIncludes(categoryName, ['主食'])) {
-    return PRINTER_IDS.COOKED
-  }
-  if (routeTextIncludes(categoryName, ['张南原切'])) {
-    return PRINTER_IDS.RAW
-  }
-  if (routeTextIncludes(categoryName, ['张南招牌'])) {
-    if (routeTextEquals(dishName, ['泰式冬阴功', '烤榴莲'])) {
-      return PRINTER_IDS.DESSERT
-    }
-    return PRINTER_IDS.RAW
-  }
-  if (routeTextIncludes(categoryName, ['包肉搭子', '包肉好搭子', '包肉好打字'])) {
-    if (routeTextEquals(dishName, ['小薄饼'])) return PRINTER_IDS.COOKED
-    if (routeTextEquals(dishName, ['糖心苹果片'])) return PRINTER_IDS.DESSERT
-    if (routeTextEquals(dishName, ['生菜', '蔬菜', '菠萝片'])) return PRINTER_IDS.RAW
-    return PRINTER_IDS.RAW
-  }
-  if (routeTextIncludes(categoryName, ['明星烤肉'])) {
-    return PRINTER_IDS.RAW
-  }
-  if (routeTextIncludes(categoryName, ['素菜', '蔬菜'])) {
-    return PRINTER_IDS.RAW
-  }
-  if (routeTextIncludes(categoryName, ['熟食'])) {
-    if (routeTextEquals(dishName, ['绝味花生米', '油酥花生米', '葱心豆干', '芥末黄瓜条', '芥末黄瓜', '虾片'])) {
-      return PRINTER_IDS.RAW
-    }
-  }
-
-  return PRINTER_IDS.FRONT
+  return normalizePrinterId(item.printerId || item.kitchenPrinterId || item.printer)
 }
 
 function groupDishEntriesByPrinter(dishEntries, order = {}) {
   return (dishEntries || []).reduce((groups, entry) => {
     const printerId = getDishPrinterId(entry.item || {}, order)
+    if (!printerId) return groups
     if (!groups[printerId]) groups[printerId] = []
     groups[printerId].push(entry)
     return groups
@@ -1733,11 +1778,13 @@ async function enrichDishEntriesForPrinter(dishEntries) {
     const item = {
       ...(entry.item || {})
     }
-    if (!item.categoryName && item.dishId) {
+    if ((!item.categoryName || !item.printerId) && item.dishId) {
       const dishRes = await db.collection('dish').doc(item.dishId).get()
       const dish = dishRes.data || {}
       item.categoryId = item.categoryId || dish.categoryId || ''
       item.categoryName = item.categoryName || dish.categoryName || ''
+      item.printerId = item.printerId || normalizePrinterId(dish.printerId || dish.kitchenPrinterId || '')
+      item.printerName = item.printerName || getPrinterName(item.printerId)
       if (!item.categoryName && item.categoryId) {
         const categoryRes = await db.collection('dishCategory').doc(item.categoryId).get()
         item.categoryName = categoryRes.data && categoryRes.data.name || ''
@@ -2519,24 +2566,45 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes) {
     }
   }
 
-  const indexSet = new Set(validIndexes)
   const sendTime = new Date()
+  const dishEntries = await enrichDishEntriesForPrinter(validIndexes.map(index => ({
+    index,
+    item: goods[index] || {}
+  })))
+  const printableEntries = dishEntries.filter(entry => getDishPrinterId(entry.item || {}, order))
+  if (printableEntries.length === 0) {
+    return {
+      success: true,
+      data: {
+        orderId,
+        sentCount: 0,
+        allSent: false,
+        printers: []
+      }
+    }
+  }
+
+  const printableIndexSet = new Set(printableEntries.map(entry => entry.index))
+  const printableItemByIndex = printableEntries.reduce((map, entry) => {
+    map[entry.index] = entry.item || {}
+    return map
+  }, {})
   const nextGoods = goods.map((item, index) => {
-    if (!indexSet.has(index)) return item
+    if (!printableIndexSet.has(index)) return item
+    const enrichedItem = printableItemByIndex[index] || {}
     return {
       ...item,
+      printerId: enrichedItem.printerId || item.printerId || '',
+      printerName: enrichedItem.printerName || item.printerName || '',
       kitchenSent: true,
       kitchenStatus: 'sent',
       kitchenSentAt: sendTime
     }
   })
-  const allSent = nextGoods.length > 0 && nextGoods.every(item => item.kitchenSent === true || item.kitchenStatus === 'sent')
-  const dishEntries = await enrichDishEntriesForPrinter(validIndexes.map(index => ({
-    index,
-    item: goods[index] || {}
-  })))
-  const printerDispatch = await dispatchKitchenPrint('kitchen', order, dishEntries)
-  const kitchenLogs = dishEntries.map(entry => {
+  const printableGoods = nextGoods.filter(item => getDishPrinterId(item, order))
+  const allSent = printableGoods.length > 0 && printableGoods.every(item => item.kitchenSent === true || item.kitchenStatus === 'sent')
+  const printerDispatch = await dispatchKitchenPrint('kitchen', order, printableEntries)
+  const kitchenLogs = printableEntries.map(entry => {
     const index = entry.index
     const item = entry.item || {}
     const printerResult = printerDispatch.byDishIndex[index] || {}
@@ -2572,7 +2640,7 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes) {
     success: true,
     data: {
       orderId,
-      sentCount: validIndexes.length,
+      sentCount: printableEntries.length,
       allSent,
       printers: printerDispatch.results
     }
@@ -2601,9 +2669,16 @@ async function adminSendKitchenItems(payload) {
   }
 
   const results = []
+  const skippedPaidOrderIds = []
   for (const orderId of orderIds) {
     const result = await sendOrderDishesToKitchen(orderId, groupedItems[orderId])
-    if (!result.success) return result
+    if (!result.success) {
+      if (result.code === 'ORDER_PAID') {
+        skippedPaidOrderIds.push(orderId)
+        continue
+      }
+      return result
+    }
     results.push(result.data)
   }
 
@@ -2612,6 +2687,7 @@ async function adminSendKitchenItems(payload) {
     data: {
       updatedOrders: results.length,
       sentCount: results.reduce((sum, item) => sum + Number(item.sentCount || 0), 0),
+      skippedPaidOrderIds,
       results
     }
   }
@@ -4415,6 +4491,172 @@ async function adminUploadDishImage(payload) {
   }
 }
 
+const TABLE_CODE_PAGE = 'packages/order/pages/index/index'
+
+function getTableCodeScene(ref) {
+  if (!ref) return ''
+  if (ref.areaKey === 'vip') return `VIP${ref.tableNumber}`
+  if (ref.areaKey === 'sky') return `T${ref.tableNumber}`
+  return ref.tableNumber
+}
+
+function getTableCodeSort(ref) {
+  const offsets = {
+    normal: 0,
+    vip: 100,
+    sky: 200
+  }
+  return Number(offsets[ref && ref.areaKey] || 0) + Number(ref && ref.tableNumber || 0)
+}
+
+function getTableCodeDefinitions() {
+  return ADMIN_TABLE_SECTIONS.reduce((list, section) => {
+    for (let index = 1; index <= section.count; index += 1) {
+      const ref = getAdminTableRef(section.areaKey, String(index).padStart(2, '0'))
+      if (!ref) continue
+      list.push({
+        tableKey: ref.tableKey,
+        areaKey: ref.areaKey,
+        areaName: ref.areaName,
+        tableNumber: ref.tableNumber,
+        scene: getTableCodeScene(ref),
+        page: TABLE_CODE_PAGE,
+        sort: getTableCodeSort(ref)
+      })
+    }
+    return list
+  }, [])
+}
+
+function getTableCodeRecordKey(item = {}) {
+  const tableKey = String(item.tableKey || '').trim()
+  if (tableKey) return tableKey
+  const ref = parseAdminTableNumber(item.scene || item.tableNumber) ||
+    getAdminTableRef(item.areaKey, item.tableNumber)
+  return ref ? ref.tableKey : ''
+}
+
+async function resolveTableCodeUrls(list = []) {
+  const records = (list || []).map(item => ({ ...item }))
+  const fileIDs = Array.from(new Set(records
+    .map(item => String(item.qrCodeFileID || item.qrCodeUrl || '').trim())
+    .filter(isCloudFileID)))
+
+  if (fileIDs.length === 0) return records
+
+  try {
+    const res = await cloud.getTempFileURL({ fileList: fileIDs })
+    const urlMap = (res.fileList || []).reduce((map, item) => {
+      if (item && item.fileID && item.tempFileURL) map[item.fileID] = item.tempFileURL
+      return map
+    }, {})
+    return records.map(item => {
+      const fileID = String(item.qrCodeFileID || item.qrCodeUrl || '').trim()
+      return {
+        ...item,
+        qrCodeFileID: isCloudFileID(fileID) ? fileID : (item.qrCodeFileID || ''),
+        qrCodeUrl: isCloudFileID(fileID) ? (urlMap[fileID] || '') : fileID
+      }
+    })
+  } catch (err) {
+    console.error('resolve table code urls failed', err)
+    return records
+  }
+}
+
+async function adminListTableCodes() {
+  const res = await db.collection('tableCode').limit(100).get()
+  const existingMap = (res.data || []).reduce((map, item) => {
+    const tableKey = getTableCodeRecordKey(item)
+    if (tableKey) map[tableKey] = item
+    return map
+  }, {})
+
+  const records = getTableCodeDefinitions().map(definition => {
+    const existing = existingMap[definition.tableKey] || {}
+    return {
+      ...definition,
+      _id: existing._id || '',
+      status: existing.status !== false,
+      qrCodeFileID: String(existing.qrCodeFileID || (isCloudFileID(existing.qrCodeUrl) ? existing.qrCodeUrl : '') || '').trim(),
+      qrCodeUrl: String(existing.qrCodeUrl || '').trim(),
+      generatedAt: existing.generatedAt || null,
+      updateTime: existing.updateTime || null
+    }
+  })
+
+  return {
+    success: true,
+    data: await resolveTableCodeUrls(records)
+  }
+}
+
+async function adminGenerateTableCode(payload) {
+  const ref = getAdminTableRef(payload.areaKey, payload.tableNumber)
+  if (!ref) {
+    return {
+      success: false,
+      code: 'TABLE_NOT_FOUND',
+      message: 'table not found'
+    }
+  }
+
+  const scene = getTableCodeScene(ref)
+  const imageBuffer = await createWechatMiniProgramCode(scene, TABLE_CODE_PAGE)
+  const tenantId = sanitizeCloudPathName(getTenantId(payload), DEFAULT_TENANT_ID)
+  const cloudPath = `tenant/${tenantId}/table-code/${ref.tableKey}.png`
+  const uploadRes = await cloud.uploadFile({
+    cloudPath,
+    fileContent: imageBuffer
+  })
+  const fileID = String(uploadRes.fileID || '').trim()
+  if (!fileID) {
+    throw new Error('failed to upload table code image')
+  }
+
+  const existingRes = await db.collection('tableCode')
+    .where({ tableKey: ref.tableKey })
+    .limit(1)
+    .get()
+  const existing = existingRes.data && existingRes.data[0]
+  const codeData = {
+    tableKey: ref.tableKey,
+    areaKey: ref.areaKey,
+    areaName: ref.areaName,
+    tableNumber: ref.tableNumber,
+    scene,
+    page: TABLE_CODE_PAGE,
+    qrCodeFileID: fileID,
+    qrCodeUrl: fileID,
+    status: existing ? existing.status !== false : true,
+    sort: getTableCodeSort(ref),
+    generatedAt: db.serverDate(),
+    updateTime: db.serverDate()
+  }
+
+  let id = existing && existing._id
+  if (id) {
+    await db.collection('tableCode').doc(id).update({ data: codeData })
+  } else {
+    const addRes = await db.collection('tableCode').add({
+      data: {
+        ...codeData,
+        createTime: db.serverDate()
+      }
+    })
+    id = addRes._id
+  }
+
+  const records = await resolveTableCodeUrls([{
+    ...codeData,
+    _id: id
+  }])
+  return {
+    success: true,
+    data: records[0] || null
+  }
+}
+
 async function listCategories(payload) {
   const menuType = getMenuType(payload.menuType)
   const res = await db.collection('dishCategory')
@@ -4560,16 +4802,41 @@ async function getShopInfo() {
   }
 }
 
-async function listNotices() {
+function normalizeNoticeTarget(target) {
+  return target === 'camping' ? 'camping' : 'dineIn'
+}
+
+function normalizeNoticeTargets(source) {
+  const rawTargets = Array.isArray(source) ? source : (source ? [source] : [])
+  const targets = rawTargets
+    .map(target => target === 'camping' ? 'camping' : (target === 'dineIn' ? 'dineIn' : ''))
+    .filter(Boolean)
+  return Array.from(new Set(targets))
+}
+
+function isNoticeTargetMatched(notice = {}, target) {
+  if (!target) return true
+  const targets = normalizeNoticeTargets(notice.targets)
+  if (targets.length) {
+    return targets.indexOf(target) >= 0
+  }
+  return !notice.target || notice.target === target || notice.target === 'all'
+}
+
+async function listNotices(payload = {}) {
+  const target = payload.target ? normalizeNoticeTarget(payload.target) : ''
   const res = await db.collection('notice')
     .where({ status: 1 })
     .orderBy('sort', 'asc')
-    .limit(10)
+    .limit(30)
     .get()
+  const data = (res.data || [])
+    .filter(item => isNoticeTargetMatched(item, target))
+    .slice(0, 10)
 
   return {
     success: true,
-    data: res.data || []
+    data
   }
 }
 
@@ -4744,6 +5011,7 @@ function normalizeAdminDish(payload) {
   const needPopup = getDishNeedPopup(dish)
   const flavorOptions = normalizeStringArray(dish.flavorOptions)
   const optionGroups = normalizeSpecOptionGroups(dish.optionGroups)
+  const printerId = normalizePrinterId(dish.printerId || dish.kitchenPrinterId || '')
 
   return {
     ...dish,
@@ -4759,6 +5027,8 @@ function normalizeAdminDish(payload) {
     unit: String(dish.unit || '份').trim() || '份',
     status: dish.status === 0 ? 0 : 1,
     sort: Number(dish.sort || 0),
+    printerId,
+    printerName: getPrinterName(printerId),
     needPopup,
     needSpec: needPopup,
     specTemplate: String(dish.specTemplate || '').trim(),
@@ -4805,6 +5075,8 @@ async function adminSaveDish(payload) {
     unit: dish.unit,
     status: dish.status,
     sort: dish.sort,
+    printerId: dish.printerId,
+    printerName: dish.printerName,
     needPopup: dish.needPopup,
     needSpec: dish.needSpec,
     specTemplate: dish.specTemplate,
@@ -5273,6 +5545,7 @@ async function handleAction(action, payload) {
     action.indexOf('admin.category.') === 0 ||
     action.indexOf('admin.dish.') === 0 ||
     action.indexOf('admin.table.') === 0 ||
+    action.indexOf('admin.tableCode.') === 0 ||
     action.indexOf('admin.order.') === 0 ||
     action.indexOf('admin.collection.') === 0
   ) {
@@ -5299,6 +5572,8 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.sendKitchen') return adminSendTableToKitchen(payload)
   if (action === 'admin.table.sendKitchenItems') return adminSendKitchenItems(payload)
   if (action === 'admin.table.urgeKitchenItems') return adminUrgeKitchenItems(payload)
+  if (action === 'admin.tableCode.list') return adminListTableCodes(payload)
+  if (action === 'admin.tableCode.generate') return adminGenerateTableCode(payload)
   if (action === 'admin.order.sendKitchenItems') return adminSendKitchenItems(payload)
   if (action === 'admin.order.urgeKitchenItems') return adminUrgeKitchenItems(payload)
   if (action === 'admin.table.refundDish') return adminRefundDish(payload)

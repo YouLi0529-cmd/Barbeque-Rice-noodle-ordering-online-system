@@ -32,6 +32,7 @@
           <view class="card-desc">{{ui.reservationDesc}}</view>
         </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToOutdoor">
+          <view class="outdoor-unread-badge" wx:if="{{outdoorUnreadCount > 0}}">{{outdoorUnreadBadgeText}}</view>
           <view class="card-title">{{ui.outdoorTitle}}</view>
           <view class="card-desc">{{ui.outdoorDesc}}</view>
         </view>
