@@ -51,7 +51,7 @@
   position: absolute;
   right: 54rpx;
   bottom: 0;
-  width: 500rpx;
+  width: 375rpx;
   max-width: calc(100vw - 160rpx);
   overflow: hidden;
   border: 1rpx solid #dfcfb5;
@@ -63,8 +63,8 @@
 }
 
 .info-panel-head {
-  height: 72rpx;
-  padding: 0 24rpx;
+  height: 54rpx;
+  padding: 0 18rpx;
   border-bottom: 1rpx solid #eadcc7;
   display: flex;
   align-items: center;
@@ -74,21 +74,21 @@
 
 .info-panel-title {
   color: #372116;
-  font-size: 26rpx;
+  font-size: 22rpx;
   font-weight: 600;
 }
 
 .info-refresh {
   color: #a96928;
-  font-size: 21rpx;
+  font-size: 18rpx;
 }
 
 .info-message-list {
-  height: 404rpx;
+  height: 303rpx;
 }
 
 .info-empty {
-  padding-top: 156rpx;
+  padding-top: 116rpx;
   color: #a79582;
   font-size: 22rpx;
   text-align: center;
@@ -96,8 +96,8 @@
 
 .info-message {
   position: relative;
-  min-height: 92rpx;
-  padding: 16rpx 24rpx 16rpx 34rpx;
+  min-height: 70rpx;
+  padding: 12rpx 18rpx 12rpx 28rpx;
   border-bottom: 1rpx solid #f0e5d5;
   box-sizing: border-box;
   display: flex;
@@ -110,10 +110,10 @@
 
 .info-message-marker {
   position: absolute;
-  left: 14rpx;
-  top: 27rpx;
-  width: 8rpx;
-  height: 8rpx;
+  left: 11rpx;
+  top: 21rpx;
+  width: 6rpx;
+  height: 6rpx;
   border-radius: 50%;
   background: #bb4e39;
 }
@@ -139,19 +139,19 @@
 
 .info-message-type {
   color: #8f5b28;
-  font-size: 18rpx;
+  font-size: 16rpx;
 }
 
 .info-message-time {
-  margin-left: 16rpx;
+  margin-left: 12rpx;
   color: #ae9b86;
-  font-size: 17rpx;
+  font-size: 15rpx;
 }
 
 .info-message-title {
-  margin-top: 4rpx;
+  margin-top: 3rpx;
   color: #3a2418;
-  font-size: 22rpx;
+  font-size: 19rpx;
   line-height: 1.35;
 }
 
