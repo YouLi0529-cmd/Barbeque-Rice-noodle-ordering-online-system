@@ -1,0 +1,37 @@
+<view class="admin-info-center" wx:if="{{visible}}">
+  <view class="info-fab" bindtap="togglePanel">
+    <text class="info-fab-mark">i</text>
+    <view class="info-badge" wx:if="{{unreadCount > 0}}">{{unreadBadge}}</view>
+  </view>
+
+  <view class="info-panel" wx:if="{{panelOpen}}">
+    <view class="info-panel-head">
+      <view class="info-panel-title">{{ui.title}}</view>
+      <view class="info-refresh" bindtap="refreshNotifications">{{loading ? '...' : ui.refresh}}</view>
+    </view>
+    <scroll-view class="info-message-list" scroll-y>
+      <view class="info-empty" wx:if="{{messages.length === 0}}">{{ui.empty}}</view>
+      <view
+        class="info-message {{selectedMessageId === item.id ? 'info-message-selected' : ''}}"
+        wx:for="{{messages}}"
+        wx:key="id"
+        data-id="{{item.id}}"
+        bindtap="selectMessage">
+        <view class="info-message-marker info-message-marker-{{item.type}}"></view>
+        <view class="info-message-content">
+          <view class="info-message-head">
+            <text class="info-message-type">{{item.typeText}}</text>
+            <text class="info-message-time">{{item.time}}</text>
+          </view>
+          <view class="info-message-title">{{item.title}}</view>
+          <view class="info-message-detail" wx:if="{{item.detail}}">{{item.detail}}</view>
+        </view>
+        <view
+          class="info-message-check"
+          wx:if="{{selectedMessageId === item.id}}"
+          data-id="{{item.id}}"
+          catchtap="dismissMessage"></view>
+      </view>
+    </scroll-view>
+  </view>
+</view>

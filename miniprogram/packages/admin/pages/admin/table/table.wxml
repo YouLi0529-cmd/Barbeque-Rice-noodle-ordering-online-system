@@ -52,16 +52,16 @@
     </view>
   </view>
 
-  <scroll-view class="table-board {{transferMode || mergeMode ? 'table-board-transfer' : ''}} {{reservationReminders.length > 0 && !transferMode && !mergeMode ? 'table-board-reservation' : ''}}" scroll-y>
+  <scroll-view class="table-board {{transferMode || mergeMode ? 'table-board-transfer' : ''}} {{reservationReminders.length > 0 && !transferMode && !mergeMode ? 'table-board-reservation' : ''}}" scroll-y bindtap="clearTableSelection">
     <view class="table-section" wx:for="{{tableSections}}" wx:for-item="section" wx:key="areaKey">
       <view class="section-title">{{section.areaName}}</view>
       <view class="table-section-body">
         <view
-          class="table-card {{table.statusClass}} {{table.mergeSelected ? 'table-card-merge-selected' : ''}} {{table.mergeSource ? 'table-card-merge-source' : ''}} {{table.clearSelected ? 'table-card-clear-selected' : ''}}"
+          class="table-card {{table.statusClass}} {{table.mergeSelected ? 'table-card-merge-selected' : ''}} {{table.mergeSource ? 'table-card-merge-source' : ''}} {{table.selected ? 'table-card-selected' : ''}}"
           wx:for="{{section.tables}}"
           wx:for-item="table"
           wx:key="tableKey"
-          bindtap="openTable"
+          catchtap="openTable"
           data-area-key="{{table.areaKey}}"
           data-area="{{section.areaName}}"
           data-table="{{table.tableNumber}}"
@@ -106,7 +106,8 @@
     </view>
   </view>
   <view
-    class="clear-table-btn {{clearMode ? 'active' : ''}} {{selectedClearTable ? 'selected' : ''}}"
+    class="clear-table-btn {{selectedTableCount > 0 ? 'selected' : ''}}"
     bindtap="confirmClearTable"
-  >{{ui.clearTable}}</view>
+  >{{ui.clearTable}}{{selectedTableCount > 0 ? ' (' + selectedTableCount + ')' : ''}}</view>
 </view>
+<admin-info-center />

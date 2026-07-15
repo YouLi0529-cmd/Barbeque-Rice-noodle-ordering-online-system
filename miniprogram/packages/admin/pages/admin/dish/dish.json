@@ -2,5 +2,7 @@
   "navigationBarTitleText": "\u83dc\u54c1\u7ba1\u7406",
   "pageOrientation": "landscape",
   "disableScroll": true,
-  "usingComponents": {}
+  "usingComponents": {
+    "admin-info-center": "/packages/admin/components/adminInfoCenter/adminInfoCenter"
+  }
 }

@@ -80,9 +80,11 @@ Page({
   mergeOrderGroup(orders) {
     const rootOrderId = orders[0].rootOrderId || orders[0]._id
     const rootOrder = orders.find(item => item._id === rootOrderId || item.isAddOnOrder !== true) || orders[0]
-    const goods = orders.reduce((list, item) => {
+    const rawGoods = orders.reduce((list, item) => {
       return list.concat(Array.isArray(item.goods) ? item.goods : [])
     }, [])
+    const allCompleted = orders.length > 0 && orders.every(item => this.isOrderCompleted(item))
+    const goods = allCompleted ? this.mergeCompletedGoods(rawGoods) : rawGoods
     const totalPrice = orders.reduce((sum, item) => sum + Number(item.totalPrice || 0), 0)
     const finalPrice = orders.reduce((sum, item) => {
       return sum + Number(item.finalPrice || item.totalPrice || 0)
@@ -98,6 +100,54 @@ Page({
       pay_status: orders.every(item => item.pay_status !== false),
       status: this.getMergedStatus(orders)
     }
+  },
+
+  mergeCompletedGoods(goods) {
+    const mergedByKey = {}
+
+    return (goods || []).reduce((list, item, index) => {
+      const dishName = String(item.dishName || item.goodsName || item.name || '菜品').trim()
+      const dishId = String(item.dishId || item.goodsId || '').trim()
+      const price = Number(item.price || 0)
+      const count = Number(item.count || 1)
+      const tags = Array.isArray(item.tags)
+        ? item.tags.map(tag => String(tag).trim()).filter(Boolean)
+        : Array.isArray(item.tagLabels)
+          ? item.tagLabels.map(tag => String(tag).trim()).filter(Boolean)
+          : String(item.tagText || '').split('、').map(tag => tag.trim()).filter(Boolean)
+      const remark = String(item.remark || item.note || '').trim()
+      const mergeKey = JSON.stringify([
+        dishId || dishName,
+        dishName,
+        price,
+        tags.slice().sort(),
+        remark,
+        item.isGift === true
+      ])
+      const subtotal = Number(item.subtotal !== undefined ? item.subtotal : price * count)
+      const existing = mergedByKey[mergeKey]
+
+      if (existing) {
+        existing.count += count
+        existing.subtotal += subtotal
+        return list
+      }
+
+      const mergedItem = {
+        ...item,
+        dishId,
+        dishName,
+        tags,
+        remark,
+        note: remark,
+        count,
+        subtotal,
+        detailKey: `merged-${index}`
+      }
+      mergedByKey[mergeKey] = mergedItem
+      list.push(mergedItem)
+      return list
+    }, [])
   },
 
   getMergedStatus(orders) {

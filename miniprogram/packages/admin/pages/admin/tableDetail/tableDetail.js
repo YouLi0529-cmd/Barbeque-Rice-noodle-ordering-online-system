@@ -81,11 +81,14 @@ const UI = {
   peopleSaveFailed: '\u4eba\u6570\u4fee\u6539\u5931\u8d25',
   checkoutFailed: '\u7ed3\u8d26\u5931\u8d25',
   discountDialogTitle: '\u8f93\u5165\u6298\u6263',
+  directReduceDialogTitle: '\u8f93\u5165\u76f4\u51cf\u91d1\u989d',
   discountRowLabel: '\u6298\u6263',
   discountInputPlaceholder: '\u8bf7\u8f93\u5165\u6298\u6263\uff0c\u5982 8.8\uff0c0\u4e3a\u514d\u5355',
+  directReduceInputPlaceholder: '\u8bf7\u8f93\u5165\u76f4\u51cf\u91d1\u989d',
   discountCancel: '\u53d6\u6d88',
   discountConfirm: '\u786e\u5b9a',
   discountInvalid: '\u8bf7\u8f93\u5165 0-10 \u4e4b\u95f4\u7684\u6298\u6263',
+  directReduceInvalid: '\u76f4\u51cf\u91d1\u989d\u4e0d\u80fd\u8d85\u8fc7\u6298\u540e\u91d1\u989d',
   editDishTitle: '\u4fee\u6539\u83dc\u54c1',
   editDishOptionsLabel: '\u53e3\u5473/\u9009\u9879',
   editDishRemarkLabel: '\u5907\u6ce8',
@@ -129,7 +132,8 @@ const DISH_ACTIONS = [
 const TABLE_ACTIONS = new Set([UI.sendKitchen, UI.reprintGuestBill, UI.mergeTable, UI.changeTable])
 
 const DISCOUNT_OPTIONS = [
-  { value: 'reduce', label: '\u8ba2\u5355\u51cf\u514d' }
+  { value: 'discount', label: '\u6253\u6298' },
+  { value: 'direct_reduce', label: '\u76f4\u51cf' }
 ]
 
 const PAYMENT_OPTIONS = [
@@ -252,18 +256,32 @@ function getOptionLabel(options, value) {
   return match ? match.label : ''
 }
 
-function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue = '') {
+function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue = '', directReduceValue = '') {
   const total = getNumber(totalPrice)
   const hasDiscountInput = discountValue !== '' && discountValue != null
   const discountNumber = getNumber(discountValue)
-  const hasDiscount = discountType === 'reduce' && hasDiscountInput && discountNumber >= 0 && discountNumber <= 10
-  const receivable = hasDiscount ? total * discountNumber / 10 : total
+  const hasRateDiscount = (discountType === 'discount' || discountType === 'reduce') &&
+    hasDiscountInput && discountNumber >= 0 && discountNumber <= 10
+  const priceAfterRateDiscount = hasRateDiscount ? total * discountNumber / 10 : total
+  const directReductionRaw = directReduceValue !== '' && directReduceValue != null
+    ? directReduceValue
+    : (discountType === 'direct_reduce' ? discountValue : '')
+  const hasDirectReductionInput = directReductionRaw !== '' && directReductionRaw != null
+  const directReductionNumber = getNumber(directReductionRaw)
+  const hasDirectReduction = hasDirectReductionInput &&
+    directReductionNumber >= 0 && directReductionNumber <= priceAfterRateDiscount
+  const receivable = hasDirectReduction
+    ? Math.max(0, priceAfterRateDiscount - directReductionNumber)
+    : priceAfterRateDiscount
   const received = receivable
+  const discountTextParts = []
+  if (hasRateDiscount) discountTextParts.push(formatPrice(discountNumber) + '\u6298')
+  if (hasDirectReduction) discountTextParts.push('\u76f4\u51cf\uffe5' + formatPrice(directReductionNumber))
 
   return {
     totalText: formatPrice(total),
     receivableText: formatPrice(receivable),
-    discountText: hasDiscount ? formatPrice(discountNumber) + '\u6298' : '',
+    discountText: discountTextParts.join(' + '),
     discountPriceText: formatPrice(receivable),
     paymentLabel: getOptionLabel(PAYMENT_OPTIONS, paymentMethod) || getOptionLabel(PAYMENT_OPTIONS, 'wechat_alipay'),
     receivedText: formatPrice(received)
@@ -338,6 +356,8 @@ Page({
     discountType: '',
     discountInput: '',
     discountValue: '',
+    directReduceValue: '',
+    discountDialogType: '',
     showDiscountDialog: false,
     showPeopleDialog: false,
     showMergeDialog: false,
@@ -348,7 +368,7 @@ Page({
     selectedMergeTableCount: 0,
     peopleInput: '',
     paymentMethod: 'wechat_alipay',
-    paySummary: buildPaySummary(0, 'wechat_alipay', '', ''),
+    paySummary: buildPaySummary(0, 'wechat_alipay', '', '', ''),
     loading: false,
     sendingKitchen: false,
     urgingKitchen: false,
@@ -369,7 +389,7 @@ Page({
       billGroups: [],
       itemCount: 0,
       totalPriceText: table.priceText,
-      paySummary: buildPaySummary(table.totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue)
+      paySummary: buildPaySummary(table.totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, this.data.directReduceValue)
     })
     this.loadDetail()
   },
@@ -414,7 +434,7 @@ Page({
         selectedDishCount: 0,
         selectedDishText: UI.noSelectedDish,
         selectedGroupId: '',
-        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue)
+        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, this.data.directReduceValue)
       })
     } catch (err) {
       console.error('load admin table detail failed', err)
@@ -1002,20 +1022,31 @@ Page({
   },
 
   selectDiscount(event) {
-    const value = event.currentTarget.dataset.value || 'reduce'
-    if (this.data.discountType === value && this.data.discountValue !== '') {
+    const value = event.currentTarget.dataset.value || 'discount'
+    const totalPrice = this.data.table.totalPrice
+    if (value === 'direct_reduce' && this.data.directReduceValue !== '') {
+      this.setData({
+        directReduceValue: '',
+        discountDialogType: '',
+        showDiscountDialog: false,
+        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, '')
+      })
+      return
+    }
+    if (value === 'discount' && this.data.discountType === 'discount' && this.data.discountValue !== '') {
       this.setData({
         discountType: '',
         discountInput: '',
         discountValue: '',
+        discountDialogType: '',
         showDiscountDialog: false,
-        paySummary: buildPaySummary(this.data.table.totalPrice, this.data.paymentMethod, '', '')
+        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, '', '', this.data.directReduceValue)
       })
       return
     }
 
     this.setData({
-      discountType: value,
+      discountDialogType: value,
       discountInput: '',
       showDiscountDialog: true
     })
@@ -1030,7 +1061,8 @@ Page({
   closeDiscountDialog() {
     this.setData({
       showDiscountDialog: false,
-      discountType: this.data.discountValue !== '' ? 'reduce' : ''
+      discountDialogType: '',
+      discountInput: ''
     })
   },
 
@@ -1038,26 +1070,53 @@ Page({
 
   confirmDiscountDialog() {
     const value = Number(this.data.discountInput)
-    if (!Number.isFinite(value) || value < 0 || value > 10) {
+    const type = this.data.discountDialogType || 'discount'
+    const totalPrice = getNumber(this.data.table.totalPrice)
+    const isDirectReduction = type === 'direct_reduce'
+    const activeRateValue = type === 'discount' ? value : Number(this.data.discountValue)
+    const hasActiveRate = type === 'discount'
+      ? Number.isFinite(value) && value >= 0 && value <= 10
+      : this.data.discountType === 'discount' && Number.isFinite(activeRateValue) && activeRateValue >= 0 && activeRateValue <= 10
+    const priceAfterRateDiscount = hasActiveRate ? totalPrice * activeRateValue / 10 : totalPrice
+    const isValid = isDirectReduction
+      ? Number.isFinite(value) && value >= 0 && value <= priceAfterRateDiscount
+      : Number.isFinite(value) && value >= 0 && value <= 10
+    if (!isValid) {
       wx.showToast({
-        title: UI.discountInvalid,
+        title: isDirectReduction ? UI.directReduceInvalid : UI.discountInvalid,
+        icon: 'none'
+      })
+      return
+    }
+    const activeDirectReduction = isDirectReduction ? value : Number(this.data.directReduceValue)
+    const hasActiveDirectReduction = isDirectReduction
+      ? true
+      : this.data.directReduceValue !== '' && Number.isFinite(activeDirectReduction)
+    if (!isDirectReduction && hasActiveDirectReduction && activeDirectReduction > priceAfterRateDiscount) {
+      wx.showToast({
+        title: UI.directReduceInvalid,
         icon: 'none'
       })
       return
     }
 
+    const nextDiscountType = isDirectReduction ? this.data.discountType : 'discount'
+    const nextDiscountValue = isDirectReduction ? this.data.discountValue : String(value)
+    const nextDirectReduceValue = isDirectReduction ? String(value) : this.data.directReduceValue
     this.setData({
-      discountType: 'reduce',
-      discountValue: String(value),
+      discountType: nextDiscountType,
+      discountValue: nextDiscountValue,
+      directReduceValue: nextDirectReduceValue,
+      discountDialogType: '',
       showDiscountDialog: false,
-      paySummary: buildPaySummary(this.data.table.totalPrice, this.data.paymentMethod, 'reduce', value)
+      paySummary: buildPaySummary(this.data.table.totalPrice, this.data.paymentMethod, nextDiscountType, nextDiscountValue, nextDirectReduceValue)
     })
   },
   selectPayment(event) {
     const value = event.currentTarget.dataset.value || 'wechat_alipay'
     this.setData({
       paymentMethod: value,
-      paySummary: buildPaySummary(this.data.table.totalPrice, value, this.data.discountType, this.data.discountValue)
+      paySummary: buildPaySummary(this.data.table.totalPrice, value, this.data.discountType, this.data.discountValue, this.data.directReduceValue)
     })
   },
 
@@ -1430,7 +1489,8 @@ Page({
         tableNumber: table.tableNumber,
         paymentMethod: this.data.paymentMethod,
         discountType: this.data.discountType,
-        discountValue: this.data.discountValue
+        discountValue: this.data.discountValue,
+        directReduceValue: this.data.directReduceValue
       })
       wx.showToast({
         title: UI.checkoutSuccess,

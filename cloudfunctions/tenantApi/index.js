@@ -309,10 +309,8 @@ async function ensureCoreCollections() {
       ensureCollection('tableGroup'),
       ensureCollection('queue'),
       ensureCollection('reservation'),
-      ensureCollection('outdoorGrill'),
       ensureCollection('printer'),
-      ensureCollection('tableCode'),
-      ensureCollection('rechargeOptions')
+      ensureCollection('tableCode')
     ])
   }
   return ensureCoreCollectionsPromise
@@ -1048,9 +1046,13 @@ async function listUserOrders(payload) {
     .limit(limit)
     .get()
 
+  const orders = await normalizeOrderGoodsImages(
+    (res.data || []).filter(order => !isExpiredSavedOrder(order))
+  )
+
   return {
     success: true,
-    data: (res.data || []).filter(order => !isExpiredSavedOrder(order)),
+    data: orders,
     page,
     limit,
     hasMore: (res.data || []).length === limit
@@ -1081,9 +1083,13 @@ async function getUserOrderDetail(payload) {
     .limit(100)
     .get()
 
+  const orders = await normalizeOrderGoodsImages(
+    (res.data || []).filter(order => !isExpiredSavedOrder(order))
+  )
+
   return {
     success: true,
-    data: (res.data || []).filter(order => !isExpiredSavedOrder(order))
+    data: orders
   }
 }
 
@@ -1956,7 +1962,8 @@ async function adminGetTableDetail(payload) {
   const tableGroup = await getActiveTableGroupForRef(baseTable)
   const tableSession = await getActiveTableSessionForRef(baseTable)
   const table = summarizeAdminTable(baseTable, orders, tableGroup, tableSession)
-  const billGroups = buildAdminBillGroups(orders)
+  const ordersWithImages = await normalizeOrderGoodsImages(orders)
+  const billGroups = buildAdminBillGroups(ordersWithImages)
   const totalPrice = roundMoney(billGroups.reduce((sum, group) => sum + Number(group.finalPrice || 0), 0))
   const itemCount = billGroups.reduce((sum, group) => sum + Number(group.goodsCount || 0), 0)
 
@@ -2333,15 +2340,30 @@ function buildAdminCheckoutSummary(orders, payload) {
   const discountType = String(payload.discountType || '').trim()
   const discountValueRaw = payload.discountValue
   const discountValue = discountValueRaw === '' || discountValueRaw == null ? '' : Number(discountValueRaw)
-  const hasDiscount = discountType === 'reduce' && Number.isFinite(discountValue) && discountValue >= 0 && discountValue <= 10
-  const receivable = hasDiscount ? roundMoney(totalPrice * discountValue / 10) : totalPrice
+  const hasRateDiscount = (discountType === 'discount' || discountType === 'reduce') &&
+    Number.isFinite(discountValue) && discountValue >= 0 && discountValue <= 10
+  const priceAfterRateDiscount = hasRateDiscount
+    ? roundMoney(totalPrice * discountValue / 10)
+    : totalPrice
+  const directReduceValueRaw = payload.directReduceValue !== '' && payload.directReduceValue != null
+    ? payload.directReduceValue
+    : (discountType === 'direct_reduce' ? discountValueRaw : '')
+  const directReduceValue = directReduceValueRaw === '' || directReduceValueRaw == null
+    ? ''
+    : Number(directReduceValueRaw)
+  const hasDirectReduction = Number.isFinite(directReduceValue) &&
+    directReduceValue >= 0 && directReduceValue <= priceAfterRateDiscount
+  const receivable = hasDirectReduction
+    ? roundMoney(Math.max(0, priceAfterRateDiscount - directReduceValue))
+    : priceAfterRateDiscount
 
   return {
     totalPrice,
     receivable,
     paymentMethod: String(payload.paymentMethod || 'wechat_alipay').trim() || 'wechat_alipay',
-    discountType: hasDiscount ? discountType : '',
-    discountValue: hasDiscount ? discountValue : ''
+    discountType: hasRateDiscount ? 'discount' : (hasDirectReduction ? 'direct_reduce' : ''),
+    discountValue: hasRateDiscount ? discountValue : (hasDirectReduction ? directReduceValue : ''),
+    directReduceValue: hasDirectReduction ? directReduceValue : ''
   }
 }
 
@@ -2372,6 +2394,7 @@ async function adminFinishTableCheckout(payload) {
       checkoutReceivable: checkoutSummary.receivable,
       checkoutDiscountType: checkoutSummary.discountType,
       checkoutDiscountValue: checkoutSummary.discountValue,
+      checkoutDirectReduceValue: checkoutSummary.directReduceValue,
       checkoutAt: checkoutTime,
       updateTime: db.serverDate()
     }
@@ -4142,15 +4165,17 @@ async function resolveDishImageUrls(list = []) {
   }
 
   try {
-    const res = await cloud.getTempFileURL({
-      fileList: fileIDs
-    })
-    const tempMap = (res.fileList || []).reduce((map, item) => {
-      if (item && item.fileID && item.tempFileURL) {
-        map[item.fileID] = item.tempFileURL
-      }
-      return map
-    }, {})
+    const tempMap = {}
+    for (let index = 0; index < fileIDs.length; index += 50) {
+      const res = await cloud.getTempFileURL({
+        fileList: fileIDs.slice(index, index + 50)
+      })
+      ;(res.fileList || []).forEach(item => {
+        if (item && item.fileID && item.tempFileURL) {
+          tempMap[item.fileID] = item.tempFileURL
+        }
+      })
+    }
 
     return dishes.map(item => {
       const image = String(item.image || '').trim()
@@ -4173,6 +4198,97 @@ async function resolveDishImageUrls(list = []) {
       }
     })
   }
+}
+
+function getOrderGoodsField(order = {}) {
+  const fields = ['goods', 'orderGoods', 'goodsList', 'items']
+  return fields.find(field => Array.isArray(order[field])) || ''
+}
+
+function getOrderGoodsImage(item = {}) {
+  return String(item.dishImage || item.image || item.img || '').trim()
+}
+
+function getOrderGoodsDishId(item = {}) {
+  return String(item.dishId || item.goodsId || '').trim()
+}
+
+async function getDishImageMap(dishIds = []) {
+  const ids = Array.from(new Set((dishIds || []).map(id => String(id || '').trim()).filter(Boolean)))
+  const imageMap = {}
+
+  for (let index = 0; index < ids.length; index += 50) {
+    const batch = ids.slice(index, index + 50)
+    const res = await db.collection('dish')
+      .where({ _id: _.in(batch) })
+      .limit(50)
+      .get()
+
+    ;(res.data || []).forEach(dish => {
+      const dishId = String(dish && dish._id || '').trim()
+      const image = String(dish && dish.image || '').trim()
+      if (dishId && image) imageMap[dishId] = image
+    })
+  }
+
+  return imageMap
+}
+
+async function normalizeOrderGoodsImages(orders = []) {
+  const sourceOrders = Array.isArray(orders) ? orders : []
+  const missingDishIds = []
+
+  sourceOrders.forEach(order => {
+    const goodsField = getOrderGoodsField(order)
+    if (!goodsField) return
+    order[goodsField].forEach(item => {
+      if (!getOrderGoodsImage(item)) {
+        const dishId = getOrderGoodsDishId(item)
+        if (dishId) missingDishIds.push(dishId)
+      }
+    })
+  })
+
+  const fallbackImageMap = missingDishIds.length > 0
+    ? await getDishImageMap(missingDishIds)
+    : {}
+  const imageSources = new Set()
+
+  sourceOrders.forEach(order => {
+    const goodsField = getOrderGoodsField(order)
+    if (!goodsField) return
+    order[goodsField].forEach(item => {
+      const image = getOrderGoodsImage(item) || fallbackImageMap[getOrderGoodsDishId(item)] || ''
+      if (image) imageSources.add(image)
+    })
+  })
+
+  const resolvedImages = await resolveDishImageUrls(
+    Array.from(imageSources).map(image => ({ image }))
+  )
+  const imageUrlMap = resolvedImages.reduce((map, item) => {
+    const source = String(item.imageFileID || item.image || '').trim()
+    if (source) map[source] = String(item.image || '').trim()
+    return map
+  }, {})
+
+  return sourceOrders.map(order => {
+    const goodsField = getOrderGoodsField(order)
+    if (!goodsField) return { ...order }
+
+    return {
+      ...order,
+      [goodsField]: order[goodsField].map(item => {
+        const source = getOrderGoodsImage(item) || fallbackImageMap[getOrderGoodsDishId(item)] || ''
+        const image = imageUrlMap[source] || (isCloudFileID(source) ? '' : source)
+        return {
+          ...item,
+          dishImage: image,
+          ...(isCloudFileID(source) ? { dishImageFileID: source } : {})
+        }
+      })
+    }
+  })
 }
 
 function getDishNeedPopup(dish = {}) {
@@ -5163,11 +5279,6 @@ const ADMIN_COLLECTIONS = {
     order: 'desc',
     searchFields: ['name', 'description']
   },
-  user: {
-    orderBy: 'createTime',
-    order: 'desc',
-    searchFields: ['nickName', 'nickname', 'phone', 'userCode']
-  },
   order: {
     orderBy: 'createTime',
     order: 'desc',
@@ -5183,11 +5294,6 @@ const ADMIN_COLLECTIONS = {
     order: 'desc',
     searchFields: ['name', 'phone', 'status']
   },
-  outdoorGrill: {
-    orderBy: 'sort',
-    order: 'asc',
-    searchFields: ['name', 'status']
-  },
   printer: {
     orderBy: 'createTime',
     order: 'desc',
@@ -5198,11 +5304,6 @@ const ADMIN_COLLECTIONS = {
     order: 'asc',
     searchFields: ['tableNumber', 'name', 'scene']
   },
-  rechargeOptions: {
-    orderBy: 'amount',
-    order: 'asc',
-    searchFields: ['description']
-  }
 }
 
 function getAdminCollectionConfig(collection) {
@@ -5266,13 +5367,72 @@ async function adminCollectionList(payload) {
     .skip(page * limit)
     .limit(limit)
     .get()
+  const data = config.key === 'order'
+    ? await normalizeOrderGoodsImages(res.data || [])
+    : (res.data || [])
 
   return {
     success: true,
-    data: res.data || [],
+    data,
     page,
     limit,
     hasMore: (res.data || []).length === limit
+  }
+}
+
+async function adminListInfoCenter(payload) {
+  const [orderRes, reservationRes] = await Promise.all([
+    db.collection('order')
+      .where({
+        type: 'order',
+        status: 'submitted',
+        deleted: _.neq(true)
+      })
+      .orderBy('createTime', 'desc')
+      .limit(100)
+      .get(),
+    db.collection('reservation')
+      .where({
+        status: _.in(['pending', 'confirmed'])
+      })
+      .orderBy('createTime', 'desc')
+      .limit(100)
+      .get()
+  ])
+
+  const orders = (orderRes.data || [])
+    .filter(order => order.tableCleared !== true)
+    .map(order => ({
+      _id: order._id,
+      orderScene: order.orderScene || order.orderType || 'dineIn',
+      tableNumber: order.tableNumber || '',
+      userPhone: order.userPhone || order.userSnapshot && order.userSnapshot.phoneNumber || '',
+      goodsCount: (Array.isArray(order.goods) ? order.goods : [])
+        .reduce((sum, item) => sum + Number(item && item.count || 0), 0),
+      finalPrice: Number(order.finalPrice || order.totalPrice || 0),
+      createTime: order.createTime,
+      updateTime: order.updateTime || order.createTime,
+      isAddOnOrder: order.isAddOnOrder === true,
+      addOnIndex: Number(order.addOnIndex || 0)
+    }))
+  const reservations = (reservationRes.data || []).map(item => ({
+    _id: item._id,
+    reservationDate: item.reservationDate || '',
+    reservationDateText: item.reservationDateText || '',
+    reservationTime: item.reservationTime || '',
+    peopleCount: Number(item.peopleCount || 0),
+    roomType: item.roomType || '',
+    phone: item.phone || item.phoneNumber || '',
+    status: item.status || '',
+    updateTime: item.updateTime || item.createTime
+  }))
+
+  return {
+    success: true,
+    data: {
+      orders,
+      reservations
+    }
   }
 }
 
@@ -5547,6 +5707,7 @@ async function handleAction(action, payload) {
     action.indexOf('admin.table.') === 0 ||
     action.indexOf('admin.tableCode.') === 0 ||
     action.indexOf('admin.order.') === 0 ||
+    action.indexOf('admin.notification.') === 0 ||
     action.indexOf('admin.collection.') === 0
   ) {
     const adminAuth = await requireAdminAuth(payload)
@@ -5580,6 +5741,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.refundDishes') return adminRefundDishes(payload)
   if (action === 'admin.table.giftDishes') return adminGiftDishes(payload)
   if (action === 'admin.table.updateDish') return adminUpdateTableDish(payload)
+  if (action === 'admin.notification.list') return adminListInfoCenter(payload)
   if (action === 'admin.collection.list') return adminCollectionList(payload)
   if (action === 'admin.collection.save') return adminCollectionSave(payload)
   if (action === 'admin.collection.update') return adminCollectionUpdate(payload)

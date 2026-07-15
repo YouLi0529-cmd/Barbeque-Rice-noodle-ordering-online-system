@@ -436,13 +436,12 @@ page {
     0 2rpx 4rpx rgba(58, 36, 24, 0.12);
 }
 
-.table-card-clear-selected {
+.table-card-selected {
   box-shadow:
-    0 0 0 3rpx rgba(255, 247, 236, 0.95),
-    0 0 0 6rpx rgba(143, 62, 23, 0.48),
-    0 8rpx 18rpx rgba(58, 36, 24, 0.16),
-    0 2rpx 4rpx rgba(58, 36, 24, 0.12);
-  border-color: rgba(143, 62, 23, 0.86);
+    0 12rpx 26rpx rgba(58, 36, 24, 0.3),
+    0 4rpx 9rpx rgba(58, 36, 24, 0.2),
+    inset 0 1rpx 0 rgba(255, 255, 255, 0.42);
+  border-color: rgba(58, 36, 24, 0.72);
 }
 
 .table-card.status-submitted {
@@ -536,13 +535,6 @@ page {
   box-shadow: 0 5rpx 12rpx rgba(58, 36, 24, 0.08);
   font-size: 10rpx;
   font-weight: 900;
-}
-
-.clear-table-btn.active {
-  color: #8F3E17;
-  background: rgba(245, 213, 139, 0.36);
-  border-color: rgba(143, 62, 23, 0.42);
-  box-shadow: 0 7rpx 16rpx rgba(143, 62, 23, 0.12);
 }
 
 .clear-table-btn.selected {

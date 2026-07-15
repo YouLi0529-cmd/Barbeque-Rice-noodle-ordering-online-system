@@ -40,7 +40,6 @@ const UI = {
   reservationUpdateFailed: '\u9884\u7ea6\u5904\u7406\u5931\u8d25',
   reservationSelectFirst: '\u8bf7\u5148\u9009\u62e9\u9884\u7ea6',
   clearTable: '\u6e05\u53f0',
-  clearModeTip: '\u8bf7\u70b9\u9009\u9700\u8981\u6e05\u53f0\u7684\u684c\u53f0',
   clearSelectFirst: '\u8bf7\u5148\u70b9\u9009\u9700\u8981\u6e05\u53f0\u7684\u684c\u53f0',
   clearConfirmTitle: '\u786e\u8ba4\u6e05\u53f0',
   clearConfirmPrefix: '\u786e\u5b9a\u5c06',
@@ -139,7 +138,7 @@ function isSameTable(left, right) {
     left.tableNumber === right.tableNumber
 }
 
-function formatTable(item, selectedMap = {}, mergeSource = null, clearSelectedTable = null) {
+function formatTable(item, mergeSelectedMap = {}, mergeSource = null, selectedTableMap = {}) {
   const status = STATUS[item.status] || STATUS.empty
   const tableKey = item.tableKey || `${item.areaKey}-${item.tableNumber}`
   const mergedTables = Array.isArray(item.mergedTables) ? item.mergedTables : []
@@ -153,9 +152,9 @@ function formatTable(item, selectedMap = {}, mergeSource = null, clearSelectedTa
     peopleText: `${Number(item.peopleCount || 0)}/${Number(item.maxPeople || 0)}`,
     diningTimeText: getDiningTime(item.scannedAt, item.finishedAt),
     hasMergedTable,
-    mergeSelected: !!selectedMap[tableKey],
+    mergeSelected: !!mergeSelectedMap[tableKey],
     mergeSource: isSameTable(item, mergeSource),
-    clearSelected: isSameTable(item, clearSelectedTable)
+    selected: !!selectedTableMap[tableKey]
   }
 }
 
@@ -236,8 +235,8 @@ Page({
     merging: false,
     reservationReminders: [],
     selectedReservationReminderId: '',
-    clearMode: false,
-    selectedClearTable: null,
+    selectedTableMap: {},
+    selectedTableCount: 0,
     clearingTable: false
   },
 
@@ -431,11 +430,11 @@ Page({
   refreshTables() {
     const selectedMap = this.data.selectedMergeTableMap || {}
     const mergeSource = this.data.mergeSource || null
-    const clearSelectedTable = this.data.selectedClearTable || null
+    const selectedTableMap = this.data.selectedTableMap || {}
     this.setData({
       tableSections: (this.rawTables || []).map(section => ({
         ...section,
-        tables: (section.tables || []).map(table => formatTable(table, selectedMap, mergeSource, clearSelectedTable))
+        tables: (section.tables || []).map(table => formatTable(table, selectedMap, mergeSource, selectedTableMap))
       }))
     })
   },
@@ -536,57 +535,64 @@ Page({
   },
 
   navigateToTable(data) {
-    wx.navigateTo({
-      url: `${TABLE_DETAIL_PAGE}?${this.buildTableQuery(data)}`
+    this.setData({
+      selectedTableMap: {},
+      selectedTableCount: 0
+    }, () => {
+      wx.navigateTo({
+        url: `${TABLE_DETAIL_PAGE}?${this.buildTableQuery(data)}`
+      })
     })
   },
 
-  selectClearTable(data) {
-    const selectedClearTable = {
+  selectTable(data) {
+    const table = {
       areaKey: data.areaKey,
       areaName: data.area,
       tableNumber: data.table,
       tableKey: data.tableKey,
       label: `${data.area}${data.table}${UI.tableUnit}`
     }
+    if (!table.tableKey) return
 
-    if (isSameTable(this.data.selectedClearTable, selectedClearTable)) {
-      this.setData({ selectedClearTable: null })
-    } else {
-      this.setData({ selectedClearTable })
+    const selectedTableMap = {
+      ...(this.data.selectedTableMap || {}),
+      [table.tableKey]: table
     }
+    this.setData({
+      selectedTableMap,
+      selectedTableCount: Object.keys(selectedTableMap).length
+    })
     this.refreshTables()
+  },
+
+  clearTableSelection() {
+    if (this.data.selectedTableCount <= 0) return
+    this.setData({
+      selectedTableMap: {},
+      selectedTableCount: 0
+    }, () => {
+      this.refreshTables()
+    })
   },
 
   async confirmClearTable() {
     if (this.data.clearingTable) return
-    if (!this.data.clearMode) {
-      this.setData({
-        clearMode: true,
-        selectedClearTable: null
-      })
-      this.refreshTables()
+    const tables = Object.keys(this.data.selectedTableMap || {})
+      .map(key => this.data.selectedTableMap[key])
+      .filter(table => table && table.tableNumber)
+    if (tables.length === 0) {
       wx.showToast({
-        title: UI.clearModeTip,
+        title: UI.clearSelectFirst,
         icon: 'none'
       })
-      return
-    }
-
-    const table = this.data.selectedClearTable || {}
-    if (!table.tableNumber) {
-      this.setData({
-        clearMode: false,
-        selectedClearTable: null
-      })
-      this.refreshTables()
       return
     }
 
     const confirmed = await new Promise(resolve => {
       wx.showModal({
         title: UI.clearConfirmTitle,
-        content: `${UI.clearConfirmPrefix}${table.label || ''}${UI.clearConfirmSuffix}`,
+        content: `${UI.clearConfirmPrefix}${tables.map(table => table.label).join(', ')}${UI.clearConfirmSuffix}`,
         confirmText: UI.clearTable,
         cancelText: '\u53d6\u6d88',
         success: res => resolve(res.confirm === true),
@@ -597,13 +603,25 @@ Page({
 
     try {
       this.setData({ clearingTable: true })
-      await apiClient.call('admin.table.clear', {
-        areaKey: table.areaKey,
-        tableNumber: table.tableNumber
-      })
+      const results = []
+      for (const table of tables) {
+        try {
+          await apiClient.call('admin.table.clear', {
+            areaKey: table.areaKey,
+            tableNumber: table.tableNumber
+          })
+          results.push({ table, cleared: true })
+        } catch (err) {
+          results.push({ table, error: err })
+        }
+      }
+      const failed = results.filter(item => item.error && item.error.code !== 'NO_TABLE_STATE')
+      if (failed.length > 0) {
+        throw failed[0].error
+      }
       this.setData({
-        clearMode: false,
-        selectedClearTable: null
+        selectedTableMap: {},
+        selectedTableCount: 0
       })
       wx.showToast({
         title: UI.clearSuccess,
@@ -819,18 +837,11 @@ Page({
       this.toggleMergeTable(data, mergeSource)
       return
     }
-    if (this.data.clearMode) {
-      this.selectClearTable(data)
+    const selectedTableMap = this.data.selectedTableMap || {}
+    if (selectedTableMap[data.tableKey]) {
+      this.navigateToTable(data)
       return
     }
-
-    if (this.data.clearMode || this.data.selectedClearTable) {
-      this.setData({
-        clearMode: false,
-        selectedClearTable: null
-      })
-      this.refreshTables()
-    }
-    this.navigateToTable(data)
+    this.selectTable(data)
   }
 })

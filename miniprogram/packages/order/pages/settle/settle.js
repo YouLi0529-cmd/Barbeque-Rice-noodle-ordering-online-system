@@ -443,13 +443,19 @@ Page({
       }
       this.clearCart()
 
+      const cartImageMap = (this.data.orderGoods || []).reduce((map, item) => {
+        if (item && item.dishId && item.dishImage) {
+          map[item.dishId] = item.dishImage
+        }
+        return map
+      }, {})
       const submittedGoods = Array.isArray(serverOrder.goods)
         ? serverOrder.goods.map(item => {
             const tags = Array.isArray(item.tags) ? item.tags : []
             return {
               dishId: item.dishId,
               dishName: item.dishName,
-              dishImage: item.dishImage,
+              dishImage: cartImageMap[item.dishId] || item.dishImage || '',
               price: item.price,
               count: item.count,
               tags,

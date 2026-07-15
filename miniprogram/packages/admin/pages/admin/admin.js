@@ -15,11 +15,7 @@ const ADMIN_TEXT = {
   reservationDesc: '\u786e\u8ba4\u9884\u7ea6\u548c\u5230\u5e97\u8bb0\u5f55',
   outdoorTitle: '\u6237\u5916\u8ba2\u5355',
   outdoorDesc: '\u9732\u8425\u8ba2\u5355\u5904\u7406',
-  grillTitle: '\u70e4\u67b6\u7ba1\u7406',
-  grillDesc: '\u65b0\u589e\u3001\u542f\u7528\u3001\u505c\u7528',
   settingsSection: '\u5e97\u94fa\u8bbe\u7f6e',
-  userTitle: '\u4f1a\u5458\u7ba1\u7406',
-  userDesc: '\u7528\u6237\u8d44\u6599\u548c\u6d88\u8d39\u8bb0\u5f55',
   noticeTitle: '\u516c\u544a\u7ba1\u7406',
   noticeDesc: '\u9996\u9875\u901a\u77e5\u5185\u5bb9',
   tableCodeTitle: '\u684c\u7801\u7ba1\u7406',
@@ -28,8 +24,6 @@ const ADMIN_TEXT = {
   shopInfoDesc: '\u57fa\u7840\u8d44\u6599\u7ef4\u62a4',
   printerTitle: '\u6253\u5370\u673a\u7ba1\u7406',
   printerDesc: '\u5c0f\u7968\u6253\u5370\u914d\u7f6e',
-  rechargeTitle: '\u5145\u503c\u9009\u9879',
-  rechargeDesc: '\u6682\u65f6\u4fdd\u7559',
   reservationModalTitle: '\u65b0\u9884\u7ea6',
   reservationEmpty: '\u6682\u65e0\u65b0\u9884\u7ea6',
   reservationRefresh: '\u5237\u65b0',
@@ -78,18 +72,6 @@ function formatReservation(item = {}) {
   }
 }
 
-function getOutdoorUnreadOrderCount(orders = []) {
-  const rootOrderIds = new Set()
-
-  ;(orders || []).forEach(order => {
-    if (!order || String(order.status || '') !== 'submitted') return
-    const rootOrderId = String(order.rootOrderId || order._id || '').trim()
-    if (rootOrderId) rootOrderIds.add(rootOrderId)
-  })
-
-  return rootOrderIds.size
-}
-
 Page({
   data: {
     ui: ADMIN_TEXT,
@@ -103,10 +85,6 @@ Page({
     oldPassword: '',
     newPassword: '',
     confirmPassword: '',
-    reservationCount: 0,
-    reservationBadgeText: '',
-    outdoorUnreadCount: 0,
-    outdoorUnreadBadgeText: '',
     reservationList: [],
     reservationLoading: false,
     showReservationModal: false,
@@ -121,21 +99,6 @@ Page({
     if (options.changePassword === 'true' && this.data.isAuthorized) {
       this.showChangePassword()
     }
-  },
-
-  onShow() {
-    if (!this.data.isAuthorized) return
-    this.loadReservationList(true)
-    this.loadOutdoorUnreadCount()
-    this.startReservationPolling()
-  },
-
-  onHide() {
-    this.stopReservationPolling()
-  },
-
-  onUnload() {
-    this.stopReservationPolling()
   },
 
   async prepareAdminAuth() {
@@ -216,10 +179,10 @@ Page({
         showAuthModal: false,
         adminPassword: '',
         authRequiredTip: ''
+      }, () => {
+        const infoCenter = this.selectComponent('#admin-info-center')
+        if (infoCenter) infoCenter.activate()
       })
-      this.loadReservationList(true)
-      this.loadOutdoorUnreadCount()
-      this.startReservationPolling()
       wx.showToast({ title: '\u767b\u5f55\u6210\u529f', icon: 'success' })
     } catch (err) {
       wx.hideLoading()
@@ -232,10 +195,6 @@ Page({
 
   goToDish() {
     wx.navigateTo({ url: `${ADMIN_ROOT}/dish/dish` })
-  },
-
-  goToUser() {
-    wx.navigateTo({ url: `${ADMIN_ROOT}/user/user` })
   },
 
   goToOrder() {
@@ -271,11 +230,8 @@ Page({
         limit: 100
       })
       const reservationList = (res.data || []).map(formatReservation)
-      const count = reservationList.length
       this.setData({
         reservationList,
-        reservationCount: count,
-        reservationBadgeText: count > 99 ? '99+' : (count ? String(count) : ''),
         reservationLoading: false
       })
     } catch (err) {
@@ -288,46 +244,6 @@ Page({
         })
       }
     }
-  },
-
-  async loadOutdoorUnreadCount() {
-    if (!this.data.isAuthorized) return
-
-    try {
-      const res = await apiClient.call('admin.collection.list', {
-        collection: 'order',
-        filters: {
-          orderType: 'camping',
-          status: 'submitted'
-        },
-        orderBy: 'createTime',
-        order: 'desc',
-        limit: 100
-      })
-      const count = getOutdoorUnreadOrderCount(res.data || [])
-      this.setData({
-        outdoorUnreadCount: count,
-        outdoorUnreadBadgeText: count > 99 ? '99+' : (count ? String(count) : '')
-      })
-    } catch (err) {
-      console.error('load outdoor unread count failed', err)
-    }
-  },
-
-  startReservationPolling() {
-    this.stopReservationPolling()
-    this.reservationTimer = setInterval(() => {
-      if (this.data.isAuthorized) {
-        this.loadReservationList(true)
-        this.loadOutdoorUnreadCount()
-      }
-    }, 30000)
-  },
-
-  stopReservationPolling() {
-    if (!this.reservationTimer) return
-    clearInterval(this.reservationTimer)
-    this.reservationTimer = null
   },
 
   closeReservationModal() {
@@ -392,14 +308,6 @@ Page({
 
   goToOutdoor() {
     wx.navigateTo({ url: `${ADMIN_ROOT}/outdoor/outdoor` })
-  },
-
-  goToGrill() {
-    wx.navigateTo({ url: `${ADMIN_ROOT}/grill/grill` })
-  },
-
-  goToRechargeOptions() {
-    wx.navigateTo({ url: `${ADMIN_ROOT}/rechargeOptions/rechargeOptions` })
   },
 
   goToNotice() {

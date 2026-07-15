@@ -34,10 +34,13 @@ const UI = {
   checkoutConfirmContent: '\u786e\u8ba4\u6237\u5916\u8ba2\u5355\u5df2\u6536\u6b3e\u5e76\u5b8c\u6210\u5417',
   discountTitle: '\u9009\u62e9\u4f18\u60e0',
   discountDialogTitle: '\u8f93\u5165\u6298\u6263',
+  directReduceDialogTitle: '\u8f93\u5165\u76f4\u51cf\u91d1\u989d',
   discountInputPlaceholder: '\u8bf7\u8f93\u5165\u6298\u6263\uff0c\u5982 8.8\uff0c0\u4e3a\u514d\u5355',
+  directReduceInputPlaceholder: '\u8bf7\u8f93\u5165\u76f4\u51cf\u91d1\u989d',
   discountCancel: '\u53d6\u6d88',
   discountConfirm: '\u786e\u5b9a',
   discountInvalid: '\u8bf7\u8f93\u5165 0-10 \u4e4b\u95f4\u7684\u6298\u6263',
+  directReduceInvalid: '\u76f4\u51cf\u91d1\u989d\u4e0d\u80fd\u8d85\u8fc7\u6298\u540e\u91d1\u989d',
   noSelectedGoods: '\u8bf7\u5148\u9009\u62e9\u83dc\u54c1',
   noSelectedKitchenGoods: '\u8bf7\u5148\u9009\u62e9\u8981\u53d1\u9001\u7684\u83dc\u54c1',
   sendKitchenConfirmTitle: '\u53d1\u9001\u540e\u53a8',
@@ -76,7 +79,8 @@ const ORDER_ACTIONS = [
 ]
 
 const DISCOUNT_OPTIONS = [
-  { value: 'reduce', label: '\u8ba2\u5355\u51cf\u514d' }
+  { value: 'discount', label: '\u6253\u6298' },
+  { value: 'direct_reduce', label: '\u76f4\u51cf' }
 ]
 
 const PAYMENT_OPTIONS = [
@@ -362,18 +366,32 @@ function getOptionLabel(options, value) {
   return match ? match.label : ''
 }
 
-function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue = '') {
+function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue = '', directReduceValue = '') {
   const total = getNumber(totalPrice)
   const hasDiscountInput = discountValue !== '' && discountValue != null
   const discountNumber = getNumber(discountValue)
-  const hasDiscount = discountType === 'reduce' && hasDiscountInput && discountNumber >= 0 && discountNumber <= 10
-  const receivable = hasDiscount ? total * discountNumber / 10 : total
+  const hasRateDiscount = (discountType === 'discount' || discountType === 'reduce') &&
+    hasDiscountInput && discountNumber >= 0 && discountNumber <= 10
+  const priceAfterRateDiscount = hasRateDiscount ? total * discountNumber / 10 : total
+  const directReductionRaw = directReduceValue !== '' && directReduceValue != null
+    ? directReduceValue
+    : (discountType === 'direct_reduce' ? discountValue : '')
+  const hasDirectReductionInput = directReductionRaw !== '' && directReductionRaw != null
+  const directReductionNumber = getNumber(directReductionRaw)
+  const hasDirectReduction = hasDirectReductionInput &&
+    directReductionNumber >= 0 && directReductionNumber <= priceAfterRateDiscount
+  const receivable = hasDirectReduction
+    ? Math.max(0, priceAfterRateDiscount - directReductionNumber)
+    : priceAfterRateDiscount
+  const discountTextParts = []
+  if (hasRateDiscount) discountTextParts.push(`${formatPrice(discountNumber)}\u6298`)
+  if (hasDirectReduction) discountTextParts.push(`\u76f4\u51cf\uffe5${formatPrice(directReductionNumber)}`)
 
   return {
     totalText: formatPrice(total),
     receivable,
     receivableText: formatPrice(receivable),
-    discountText: hasDiscount ? `${formatPrice(discountNumber)}\u6298` : '',
+    discountText: discountTextParts.join(' + '),
     paymentLabel: getOptionLabel(PAYMENT_OPTIONS, paymentMethod) || getOptionLabel(PAYMENT_OPTIONS, 'wechat_alipay'),
     receivedText: formatPrice(receivable)
   }
@@ -422,9 +440,11 @@ Page({
     discountType: '',
     discountInput: '',
     discountValue: '',
+    directReduceValue: '',
+    discountDialogType: '',
     showDiscountDialog: false,
     paymentMethod: 'wechat_alipay',
-    paySummary: buildPaySummary(0, 'wechat_alipay', '', '')
+    paySummary: buildPaySummary(0, 'wechat_alipay', '', '', '')
   },
 
   onLoad() {
@@ -503,8 +523,10 @@ Page({
         discountType: '',
         discountInput: '',
         discountValue: '',
+        directReduceValue: '',
+        discountDialogType: '',
         showDiscountDialog: false,
-        paySummary: buildPaySummary(0, this.data.paymentMethod, '', '')
+        paySummary: buildPaySummary(0, this.data.paymentMethod, '', '', '')
       })
       return
     }
@@ -512,11 +534,12 @@ Page({
     const selectedGoodsMap = options.resetSelection ? {} : this.data.selectedGoodsMap || {}
     const discountType = options.resetPay ? '' : this.data.discountType
     const discountValue = options.resetPay ? '' : this.data.discountValue
+    const directReduceValue = options.resetPay ? '' : this.data.directReduceValue
     const discountInput = options.resetPay ? '' : this.data.discountInput
     const goodsList = normalizeMergedGoods(order, selectedGoodsMap)
     const goodsCount = goodsList.reduce((sum, goods) => sum + goods.count, 0)
     const totalPrice = getOrderTotal(order)
-    const paySummary = buildPaySummary(totalPrice, this.data.paymentMethod, discountType, discountValue)
+    const paySummary = buildPaySummary(totalPrice, this.data.paymentMethod, discountType, discountValue, directReduceValue)
 
     this.setData({
       selectedOrder: order,
@@ -534,6 +557,8 @@ Page({
       discountType,
       discountInput,
       discountValue,
+      directReduceValue,
+      discountDialogType: '',
       showDiscountDialog: false,
       paySummary
     })
@@ -725,25 +750,37 @@ Page({
     if (!value) return
     const totalPrice = getOrderTotal(this.data.selectedOrder)
 
-    if (this.data.discountType === value && this.data.discountValue !== '') {
+    if (value === 'direct_reduce' && this.data.directReduceValue !== '') {
+      this.setData({
+        directReduceValue: '',
+        discountDialogType: '',
+        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, '')
+      })
+      return
+    }
+    if (value === 'discount' && this.data.discountType === 'discount' && this.data.discountValue !== '') {
       this.setData({
         discountType: '',
         discountValue: '',
         discountInput: '',
-        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, '', '')
+        discountDialogType: '',
+        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, '', '', this.data.directReduceValue)
       })
       return
     }
 
     this.setData({
-      discountType: value,
+      discountDialogType: value,
       showDiscountDialog: true,
-      discountInput: this.data.discountValue || ''
+      discountInput: ''
     })
   },
 
   closeDiscountDialog() {
-    this.setData({ showDiscountDialog: false })
+    this.setData({
+      showDiscountDialog: false,
+      discountDialogType: '',
+      discountInput: ''
   },
 
   stopDiscountDialogTap() {},
@@ -755,15 +792,42 @@ Page({
   confirmDiscountDialog() {
     const value = this.data.discountInput
     const number = Number(value)
-    if (!Number.isFinite(number) || number < 0 || number > 10) {
-      wx.showToast({ title: UI.discountInvalid, icon: 'none' })
+    const type = this.data.discountDialogType || 'discount'
+    const totalPrice = getNumber(getOrderTotal(this.data.selectedOrder))
+    const isDirectReduction = type === 'direct_reduce'
+    const activeRateValue = type === 'discount' ? number : Number(this.data.discountValue)
+    const hasActiveRate = type === 'discount'
+      ? Number.isFinite(number) && number >= 0 && number <= 10
+      : this.data.discountType === 'discount' && Number.isFinite(activeRateValue) && activeRateValue >= 0 && activeRateValue <= 10
+    const priceAfterRateDiscount = hasActiveRate ? totalPrice * activeRateValue / 10 : totalPrice
+    const isValid = isDirectReduction
+      ? Number.isFinite(number) && number >= 0 && number <= priceAfterRateDiscount
+      : Number.isFinite(number) && number >= 0 && number <= 10
+    if (!isValid) {
+      wx.showToast({
+        title: isDirectReduction ? UI.directReduceInvalid : UI.discountInvalid,
+        icon: 'none'
+      })
       return
     }
-    const totalPrice = getOrderTotal(this.data.selectedOrder)
+    const activeDirectReduction = isDirectReduction ? number : Number(this.data.directReduceValue)
+    const hasActiveDirectReduction = isDirectReduction
+      ? true
+      : this.data.directReduceValue !== '' && Number.isFinite(activeDirectReduction)
+    if (!isDirectReduction && hasActiveDirectReduction && activeDirectReduction > priceAfterRateDiscount) {
+      wx.showToast({ title: UI.directReduceInvalid, icon: 'none' })
+      return
+    }
+    const nextDiscountType = isDirectReduction ? this.data.discountType : 'discount'
+    const nextDiscountValue = isDirectReduction ? this.data.discountValue : value
+    const nextDirectReduceValue = isDirectReduction ? value : this.data.directReduceValue
     this.setData({
-      discountValue: value,
+      discountType: nextDiscountType,
+      discountValue: nextDiscountValue,
+      directReduceValue: nextDirectReduceValue,
+      discountDialogType: '',
       showDiscountDialog: false,
-      paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, value)
+      paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, nextDiscountType, nextDiscountValue, nextDirectReduceValue)
     })
   },
 
@@ -773,7 +837,7 @@ Page({
     const totalPrice = getOrderTotal(this.data.selectedOrder)
     this.setData({
       paymentMethod: value,
-      paySummary: buildPaySummary(totalPrice, value, this.data.discountType, this.data.discountValue)
+      paySummary: buildPaySummary(totalPrice, value, this.data.discountType, this.data.discountValue, this.data.directReduceValue)
     })
   },
 
@@ -891,6 +955,7 @@ Page({
           payMethod: this.data.paymentMethod,
           discountType: this.data.discountType,
           discountValue: this.data.discountValue,
+          directReduceValue: this.data.directReduceValue,
           receivedAmount: this.data.paySummary.receivable
         }, UI.checkoutSuccess)
       }

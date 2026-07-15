@@ -34,7 +34,6 @@
           <view wx:else class="goods-image-fallback">{{item.shortName}}</view>
           <view class="goods-main">
             <view class="goods-name">{{item.dishName}}</view>
-            <view class="goods-options" wx:if="{{item.tagText}}">{{item.tagText}}</view>
           </view>
           <view class="goods-count">x{{item.count}}</view>
           <view class="goods-price">¥{{item.subtotalText}}</view>

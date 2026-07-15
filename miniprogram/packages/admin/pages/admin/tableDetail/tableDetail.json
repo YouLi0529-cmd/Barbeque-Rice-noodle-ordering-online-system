@@ -1,5 +1,7 @@
 {
   "navigationBarTitleText": "\u684c\u53f0\u8d26\u5355",
   "pageOrientation": "landscape",
-  "usingComponents": {}
+  "usingComponents": {
+    "admin-info-center": "/packages/admin/components/adminInfoCenter/adminInfoCenter"
+  }
 }

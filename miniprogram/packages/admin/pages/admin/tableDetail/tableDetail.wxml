@@ -118,7 +118,7 @@
         <view class="pay-section-title">{{ui.discountTitle}}</view>
         <view class="option-row">
           <view
-            class="pay-option {{discountType === item.value ? 'pay-option-active' : ''}}"
+            class="pay-option {{item.value === 'direct_reduce' ? (directReduceValue !== '' ? 'pay-option-active' : '') : (discountType === item.value ? 'pay-option-active' : '')}}"
             wx:for="{{discountOptions}}"
             wx:key="value"
             data-value="{{item.value}}"
@@ -173,12 +173,12 @@
   </view>
   <view class="discount-mask" wx:if="{{showDiscountDialog}}" catchtap="closeDiscountDialog">
     <view class="discount-dialog" catchtap="stopDiscountDialogTap">
-      <view class="discount-title">{{ui.discountDialogTitle}}</view>
+      <view class="discount-title">{{discountDialogType === 'direct_reduce' ? ui.directReduceDialogTitle : ui.discountDialogTitle}}</view>
       <input
         class="discount-input"
         type="digit"
         value="{{discountInput}}"
-        placeholder="{{ui.discountInputPlaceholder}}"
+        placeholder="{{discountDialogType === 'direct_reduce' ? ui.directReduceInputPlaceholder : ui.discountInputPlaceholder}}"
         bindinput="onDiscountInput"
       />
       <view class="discount-actions">
@@ -279,3 +279,4 @@
     </view>
   </view>
 </view>
+<admin-info-center />
