@@ -1,6 +1,7 @@
 const cloud = require('wx-server-sdk')
 const crypto = require('crypto')
 const https = require('https')
+const { createPrintService } = require('./printService')
 
 cloud.init({
   env: cloud.DYNAMIC_CURRENT_ENV
@@ -42,6 +43,12 @@ function normalizePrinterId(value) {
 function getPrinterName(printerId) {
   return PRINTER_NAMES[normalizePrinterId(printerId)] || ''
 }
+
+const printService = createPrintService({
+  db,
+  _,
+  defaultTenantId: DEFAULT_TENANT_ID
+})
 
 let ensureSessionCollectionPromise = null
 let ensureCoreCollectionsPromise = null
@@ -310,7 +317,9 @@ async function ensureCoreCollections() {
       ensureCollection('queue'),
       ensureCollection('reservation'),
       ensureCollection('printer'),
-      ensureCollection('tableCode')
+      ensureCollection('tableCode'),
+      ensureCollection('rechargeOptions'),
+      ...printService.collectionNames.map(name => ensureCollection(name))
     ])
   }
   return ensureCoreCollectionsPromise
@@ -696,6 +705,7 @@ async function createOrder(payload) {
       frontDeskRemark: '',
       kitchenPrinted: false,
       kitchenPrintStatus: 'pending',
+      storeId: getTenantId(payload),
       createTime: db.serverDate(),
       updateTime: db.serverDate(),
       _openid: openid,
@@ -2417,6 +2427,21 @@ async function adminFinishTableCheckout(payload) {
   }))))
 
   const sharedCartClearResult = await clearCheckoutSharedCarts(targetOrders, payload, checkoutTime)
+  let cashierPrintJobs = []
+  let cashierPrintError = ''
+  try {
+    const printResult = await printService.queueCashierReceipt({
+      id: getTenantId(payload),
+      ticketType: 'checkout',
+      orders: targetOrders,
+      checkoutSummary,
+      eventKey: `checkout:${targetOrders.map(order => order._id).sort().join(',')}`
+    })
+    cashierPrintJobs = (printResult.jobs || []).map(job => job._id)
+  } catch (err) {
+    cashierPrintError = err.message || 'checkout print task creation failed'
+    console.error('checkout receipt job failed', err)
+  }
 
   return {
     success: true,
@@ -2426,9 +2451,48 @@ async function adminFinishTableCheckout(payload) {
       receivable: checkoutSummary.receivable,
       paymentMethod: checkoutSummary.paymentMethod,
       sharedCartRemoved: sharedCartClearResult.removed,
-      sharedCartTables: sharedCartClearResult.tableNumbers
+      sharedCartTables: sharedCartClearResult.tableNumbers,
+      cashierPrintJobs,
+      cashierPrintError
     }
   }
+}
+
+async function adminPrintTableReceipt(payload, ticketType) {
+  const orders = await getAdminTableOrders(payload)
+  const targets = orders.filter(order => !order.deleted && order.status !== 'cancelled')
+  if (!targets.length) {
+    return {
+      success: false,
+      code: 'ORDER_NOT_FOUND',
+      message: 'no printable order found'
+    }
+  }
+
+  const result = await printService.queueCashierReceipt({
+    id: getTenantId(payload),
+    ticketType,
+    orders: targets,
+    checkoutSummary: buildAdminCheckoutSummary(targets, payload),
+    eventKey: `${ticketType}:${targets.map(order => order._id).sort().join(',')}`
+  })
+
+  return {
+    success: true,
+    data: {
+      jobs: (result.jobs || []).map(job => job._id),
+      skipped: !!result.skipped,
+      reason: result.reason || ''
+    }
+  }
+}
+
+async function adminPrintPrebill(payload) {
+  return adminPrintTableReceipt(payload, 'prebill')
+}
+
+async function adminPrintCustomerOrder(payload) {
+  return adminPrintTableReceipt(payload, 'customer_order')
 }
 
 async function adminClearTable(payload) {
@@ -2524,20 +2588,20 @@ async function adminClearTable(payload) {
 async function adminSendTableToKitchen(payload) {
   const orders = await getAdminTableOrders(payload)
   const targetOrders = orders.filter(order => !isAdminPaidOrder(order) && !isAdminPreparingOrder(order))
-
-  await Promise.all(targetOrders.map(order => db.collection('order').doc(order._id).update({
-    data: {
-      status: 'pending_prepare',
-      frontDeskConfirmed: true,
-      kitchenPrintStatus: 'sent',
-      updateTime: db.serverDate()
-    }
-  })))
+  const results = []
+  for (const order of targetOrders) {
+    const indexes = (Array.isArray(order.goods) ? order.goods : []).map((_, index) => index)
+    if (!indexes.length) continue
+    const result = await sendOrderDishesToKitchen(order._id, indexes)
+    if (!result.success) return result
+    results.push(result.data)
+  }
 
   return {
     success: true,
     data: {
-      updated: targetOrders.length
+      updated: results.length,
+      queuedJobs: results.reduce((count, item) => count + ((item.printers || []).filter(printer => printer.status === 'queued').length), 0)
     }
   }
 }
@@ -2594,40 +2658,23 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes) {
     index,
     item: goods[index] || {}
   })))
-  const printableEntries = dishEntries.filter(entry => getDishPrinterId(entry.item || {}, order))
-  if (printableEntries.length === 0) {
-    return {
-      success: true,
-      data: {
-        orderId,
-        sentCount: 0,
-        allSent: false,
-        printers: []
-      }
-    }
-  }
-
-  const printableIndexSet = new Set(printableEntries.map(entry => entry.index))
-  const printableItemByIndex = printableEntries.reduce((map, entry) => {
-    map[entry.index] = entry.item || {}
-    return map
-  }, {})
+  const printerDispatch = await dispatchKitchenPrint('kitchen', order, dishEntries)
+  const indexSet = new Set(validIndexes)
   const nextGoods = goods.map((item, index) => {
-    if (!printableIndexSet.has(index)) return item
-    const enrichedItem = printableItemByIndex[index] || {}
+    if (!indexSet.has(index)) return item
+    const dispatch = printerDispatch.byDishIndex[index] || {}
+    const queued = dispatch.status === 'queued' || dispatch.status === 'claimed' || dispatch.status === 'sending'
+    const skipped = dispatch.status === 'skipped'
     return {
       ...item,
-      printerId: enrichedItem.printerId || item.printerId || '',
-      printerName: enrichedItem.printerName || item.printerName || '',
-      kitchenSent: true,
-      kitchenStatus: 'sent',
-      kitchenSentAt: sendTime
+      kitchenSent: queued || skipped,
+      kitchenStatus: queued ? 'queued' : (skipped ? 'not_required' : 'failed'),
+      kitchenSentAt: queued ? sendTime : item.kitchenSentAt || null,
+      kitchenPrintError: dispatch.message || ''
     }
   })
-  const printableGoods = nextGoods.filter(item => getDishPrinterId(item, order))
-  const allSent = printableGoods.length > 0 && printableGoods.every(item => item.kitchenSent === true || item.kitchenStatus === 'sent')
-  const printerDispatch = await dispatchKitchenPrint('kitchen', order, printableEntries)
-  const kitchenLogs = printableEntries.map(entry => {
+  const allSent = nextGoods.length > 0 && nextGoods.every(item => item.kitchenSent === true || item.kitchenStatus === 'sent')
+  const kitchenLogs = dishEntries.map(entry => {
     const index = entry.index
     const item = entry.item || {}
     const printerResult = printerDispatch.byDishIndex[index] || {}
@@ -2650,7 +2697,7 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes) {
       status: 'pending_prepare',
       frontDeskConfirmed: true,
       kitchenPrinted: allSent,
-      kitchenPrintStatus: allSent ? 'sent' : 'partial_sent',
+      kitchenPrintStatus: allSent ? 'queued' : 'partial_failed',
       kitchenLogs: [
         ...(Array.isArray(order.kitchenLogs) ? order.kitchenLogs : []),
         ...kitchenLogs
@@ -2663,7 +2710,7 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes) {
     success: true,
     data: {
       orderId,
-      sentCount: printableEntries.length,
+      sentCount: validIndexes.length,
       allSent,
       printers: printerDispatch.results
     }
@@ -2783,27 +2830,13 @@ async function dispatchPrinterPayload(printerId, payload) {
 }
 
 async function dispatchKitchenPrint(type, order, dishEntries) {
-  const groupedEntries = groupDishEntriesByPrinter(dishEntries, order)
-  const results = []
-
-  for (const printerId of Object.keys(groupedEntries)) {
-    const payload = buildKitchenPrinterPayload(type, order, printerId, groupedEntries[printerId])
-    const result = await dispatchPrinterPayload(printerId, payload)
-    results.push({
-      ...result,
-      dishIndexes: groupedEntries[printerId].map(entry => entry.index)
-    })
-  }
-
-  return {
-    results,
-    byDishIndex: results.reduce((map, result) => {
-      ;(result.dishIndexes || []).forEach(index => {
-        map[index] = result
-      })
-      return map
-    }, {})
-  }
+  return printService.queueKitchenJobs({
+    id: String(order.storeId || getTenantId({})).trim(),
+    order,
+    dishEntries,
+    kind: type === 'urge' ? 'urge' : 'kitchen_order',
+    eventKey: `${type}:${dishEntries.map(entry => entry.index).join(',')}`
+  })
 }
 
 async function urgeOrderDishes(orderId, dishIndexes) {
@@ -2930,7 +2963,7 @@ async function adminUrgeKitchenItems(payload) {
     }
   }
 }
-async function refundOrderDishes(orderId, dishIndexes) {
+async function refundOrderDishes(orderId, dishIndexes, payload = {}) {
   if (!orderId) {
     return {
       success: false,
@@ -3020,6 +3053,33 @@ async function refundOrderDishes(orderId, dishIndexes) {
     data: updateData
   })
 
+  let refundPrintJobs = []
+  let refundPrintError = ''
+  try {
+    const refundEntries = removedItems.map(entry => ({ index: entry.index, item: entry.item }))
+    const kitchenResult = await printService.queueKitchenJobs({
+      id: getTenantId(payload),
+      order,
+      dishEntries: refundEntries,
+      kind: 'refund',
+      eventKey: `refund:${orderId}:${validIndexes.join(',')}`,
+      reason: String(payload.refundReason || '').trim()
+    })
+    refundPrintJobs = (kitchenResult.results || []).map(result => result.jobId).filter(Boolean)
+    if (nextGoods.length === 0) {
+      const cashierResult = await printService.queueCashierReceipt({
+        id: getTenantId(payload),
+        ticketType: 'refund',
+        orders: [{ ...order, goods: [], finalPrice: 0, totalPrice: 0 }],
+        eventKey: `refund-receipt:${orderId}`
+      })
+      refundPrintJobs = refundPrintJobs.concat((cashierResult.jobs || []).map(job => job._id))
+    }
+  } catch (err) {
+    refundPrintError = err.message || 'refund print task creation failed'
+    console.error('refund print job failed', err)
+  }
+
   return {
     success: true,
     data: {
@@ -3027,7 +3087,9 @@ async function refundOrderDishes(orderId, dishIndexes) {
       removed: removedItems.map(entry => entry.item),
       removedCount: removedItems.length,
       totalPrice,
-      remainingCount: nextGoods.reduce((sum, item) => sum + Number(item.count || 0), 0)
+      remainingCount: nextGoods.reduce((sum, item) => sum + Number(item.count || 0), 0),
+      refundPrintJobs,
+      refundPrintError
     }
   }
 }
@@ -3035,7 +3097,7 @@ async function refundOrderDishes(orderId, dishIndexes) {
 async function adminRefundDish(payload) {
   const orderId = String(payload.orderId || payload.groupId || '').trim()
   const dishIndex = Math.floor(Number(payload.dishIndex))
-  return refundOrderDishes(orderId, [dishIndex])
+  return refundOrderDishes(orderId, [dishIndex], payload)
 }
 
 async function adminRefundDishes(payload) {
@@ -3061,7 +3123,7 @@ async function adminRefundDishes(payload) {
 
   const results = []
   for (const orderId of orderIds) {
-    const result = await refundOrderDishes(orderId, groupedItems[orderId])
+    const result = await refundOrderDishes(orderId, groupedItems[orderId], payload)
     if (!result.success) return result
     results.push(result.data)
   }
@@ -5708,7 +5770,8 @@ async function handleAction(action, payload) {
     action.indexOf('admin.tableCode.') === 0 ||
     action.indexOf('admin.order.') === 0 ||
     action.indexOf('admin.notification.') === 0 ||
-    action.indexOf('admin.collection.') === 0
+    action.indexOf('admin.collection.') === 0 ||
+    action.indexOf('admin.print.') === 0
   ) {
     const adminAuth = await requireAdminAuth(payload)
     if (!adminAuth.success) return adminAuth
@@ -5729,6 +5792,8 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.merge') return adminMergeTables(payload)
   if (action === 'admin.table.transfer') return adminTransferTable(payload)
   if (action === 'admin.table.finishCheckout') return adminFinishTableCheckout(payload)
+  if (action === 'admin.table.prebill') return adminPrintPrebill(payload)
+  if (action === 'admin.table.printCustomerOrder') return adminPrintCustomerOrder(payload)
   if (action === 'admin.table.clear') return adminClearTable(payload)
   if (action === 'admin.table.sendKitchen') return adminSendTableToKitchen(payload)
   if (action === 'admin.table.sendKitchenItems') return adminSendKitchenItems(payload)
@@ -5746,6 +5811,14 @@ async function handleAction(action, payload) {
   if (action === 'admin.collection.save') return adminCollectionSave(payload)
   if (action === 'admin.collection.update') return adminCollectionUpdate(payload)
   if (action === 'admin.collection.delete') return adminCollectionDelete(payload)
+  if (action.indexOf('admin.print.') === 0) {
+    const printResult = await printService.handleAdminAction(action, payload)
+    if (printResult) return printResult
+  }
+  if (action.indexOf('print.agent.') === 0) {
+    const agentResult = await printService.handleAgentAction(action, payload)
+    if (agentResult) return agentResult
+  }
   if (action === 'auth.login') return loginByWechatCode(payload)
   if (action === 'user.me') return getCurrentUser(payload)
   if (action === 'user.completeProfile') return completeUserProfile(payload)

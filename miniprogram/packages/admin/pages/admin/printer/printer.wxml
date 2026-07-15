@@ -1,60 +1,198 @@
-<!-- admin simple collection page -->
-<view class="admin-simple-page">
-  <view class="admin-simple-header">
-    <view class="admin-simple-title">{{ui.title}}</view>
-    <view class="admin-simple-actions">
-      <view class="header-btn" bindtap="loadList">{{ui.refresh}}</view>
-      <view class="header-btn primary" wx:if="{{canAdd}}" bindtap="showAddModal">{{ui.add}}</view>
+<view class="print-page">
+  <view class="page-head">
+    <view>
+      <view class="eyebrow">STORE PRINTING</view>
+      <view class="page-title">打印中心</view>
+      <view class="page-desc">任务统一由店内平板代理发送至实体打印机</view>
     </view>
+    <view class="refresh-icon" bindtap="refreshCurrent">刷新</view>
   </view>
 
-  <view class="search-row" wx:if="{{allowSearch}}">
-    <input class="search-input" placeholder="{{ui.searchPlaceholder}}" value="{{keyword}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="doSearch" />
-    <view class="search-btn" bindtap="doSearch">{{ui.searchPlaceholder}}</view>
-    <view class="clear-btn" bindtap="clearSearch">x</view>
-  </view>
-
-  <scroll-view class="admin-list" scroll-y>
-    <view class="admin-card" wx:for="{{list}}" wx:key="_id">
-      <view class="card-head">
-        <view class="card-title">{{item._displayTitle}}</view>
-        <view class="card-status" wx:if="{{item._displayStatus}}">{{item._displayStatus}}</view>
-      </view>
-      <view class="card-subtitle" wx:if="{{item._displaySubtitle}}">{{item._displaySubtitle}}</view>
-      <view class="line-row" wx:for="{{item._displayLines}}" wx:for-item="line" wx:key="key">
-        <text class="line-label">{{line.label}}</text>
-        <text class="line-value">{{line.value}}</text>
-      </view>
-      <view class="card-actions">
-        <view class="mini-btn" wx:if="{{canEdit}}" bindtap="showEditModal" data-item="{{item}}">{{ui.edit}}</view>
-        <view class="mini-btn" wx:for="{{item._actions}}" wx:for-item="act" wx:for-index="actIndex" wx:key="label" bindtap="runAction" data-id="{{item._id}}" data-index="{{actIndex}}">{{act.label}}</view>
-        <view class="mini-btn danger" wx:if="{{canDelete}}" bindtap="deleteItem" data-item="{{item}}">{{ui.delete}}</view>
-      </view>
+  <scroll-view class="tab-scroll" scroll-x enable-flex>
+    <view class="tabs">
+      <view wx:for="{{tabs}}" wx:key="key" class="tab {{activeTab === item.key ? 'active' : ''}}" bindtap="switchTab" data-key="{{item.key}}">{{item.label}}</view>
     </view>
-
-    <view class="empty-text" wx:if="{{!loading && list.length === 0}}">{{ui.empty}}</view>
-    <view class="empty-text" wx:if="{{loading}}">{{ui.loading}}</view>
   </scroll-view>
 
-  <view class="modal-mask" wx:if="{{showModal}}" catchtap="closeModal">
-    <view class="modal-dialog" catchtap="stopPropagation">
-      <view class="modal-title">{{editMode ? ui.edit : ui.add}}</view>
-      <scroll-view class="modal-content" scroll-y>
-        <view class="form-item" wx:for="{{formFields}}" wx:key="key">
-          <view class="form-label">{{item.label}}</view>
-          <textarea wx:if="{{item.type === 'textarea'}}" class="form-textarea" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
-          <view wx:elif="{{item.type === 'switch'}}" class="switch-row">
-            <text>{{item.value ? ui.yes : ui.no}}</text>
-            <switch checked="{{item.value}}" data-key="{{item.key}}" bindchange="onFieldSwitch" color="#C99A4A" />
-          </view>
-          <input wx:else class="form-input" type="{{item.type === 'number' ? 'digit' : 'text'}}" placeholder="{{item.placeholder}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="onFieldInput" />
+  <view wx:if="{{loading}}" class="loading-bar">正在同步云端打印数据...</view>
+  <view wx:if="{{backendError}}" class="backend-error">
+    <view class="backend-error-title">打印管理服务尚未就绪</view>
+    <view class="backend-error-message">{{backendError}}</view>
+    <view class="backend-retry" bindtap="loadAll">重新连接</view>
+  </view>
+
+  <scroll-view class="content-scroll" scroll-y>
+    <view wx:if="{{activeTab === 'dashboard'}}" class="tab-panel">
+      <view class="agent-banner {{dashboard.agentOnline ? 'online' : 'offline'}}">
+        <view>
+          <view class="agent-title">{{dashboard.agentOnline ? '打印代理在线' : '打印代理离线'}}</view>
+          <view class="agent-sub">{{dashboard.agentOnline ? '已连接的平板可以领取打印任务' : '请在店内安卓平板启动打印代理'}}</view>
         </view>
-      </scroll-view>
-      <view class="modal-footer">
-        <view class="modal-btn cancel" bindtap="closeModal">{{ui.cancel}}</view>
-        <view class="modal-btn confirm" bindtap="saveItem">{{ui.save}}</view>
+        <view class="outline-btn" bindtap="createRegistration">注册平板</view>
       </view>
+
+      <view class="metric-grid">
+        <view class="metric-card"><text class="metric-num">{{dashboard.printers.length}}</text><text class="metric-label">已配打印机</text></view>
+        <view class="metric-card warning"><text class="metric-num">{{dashboard.metrics.queued}}</text><text class="metric-label">等待打印</text></view>
+        <view class="metric-card error"><text class="metric-num">{{dashboard.metrics.failed}}</text><text class="metric-label">打印失败</text></view>
+        <view class="metric-card"><text class="metric-num">{{dashboard.metrics.unassigned}}</text><text class="metric-label">未配置菜品</text></view>
+      </view>
+
+      <view class="section-title">功能管理</view>
+      <view class="feature-grid">
+        <view wx:for="{{features}}" wx:key="key" class="feature-card" bindtap="goFeature" data-key="{{item.key}}">
+          <view class="feature-title">{{item.title}}</view>
+          <view class="feature-desc">{{item.desc}}</view>
+        </view>
+      </view>
+
+      <view class="section-title">实体打印机状态</view>
+      <view wx:for="{{dashboard.printers}}" wx:key="_id" class="compact-row">
+        <view><view class="row-title">{{item.name}}</view><view class="row-sub">{{item.connectionType === 'usb' ? 'USB' : item.ip + ':' + item.port}} · {{item.paperWidth}}mm</view></view>
+        <view class="status-pill {{item.connectionStatus}}">{{item.connectionStatus === 'online' ? '已连接' : '离线'}}</view>
+      </view>
+
+      <view wx:if="{{dashboard.alerts.length}}" class="alert-box">
+        <view class="alert-title">有菜品没有配置出品档口</view>
+        <view wx:for="{{dashboard.alerts}}" wx:key="_id" class="alert-line">{{item.dishName}} · {{item.orderNumber}} → {{item.stationName}}</view>
+        <view class="text-link" bindtap="goFeature" data-key="dishes">去补充配置</view>
+      </view>
+      <view wx:if="{{usbDevices.length}}" class="alert-box usb-box">
+        <view class="alert-title">已发现 USB 设备</view>
+        <view wx:for="{{usbDevices}}" wx:key="name" class="alert-line">{{item.agentName}} · {{item.name}} · {{item.vendorId}}/{{item.productId}} · {{item.permission ? '已授权' : '待授权'}}</view>
+        <view class="section-tip">编辑 USB 打印机时，将设备的 VID、PID 和名称填入绑定项即可重新绑定。</view>
+      </view>
+    </view>
+
+    <view wx:if="{{activeTab === 'printers'}}" class="tab-panel">
+      <view class="section-head"><view><view class="section-title no-margin">实体打印机</view><view class="section-tip">状态由安卓代理上报，测试单会创建真实任务</view></view><view class="primary-btn" bindtap="openPrinterForm">添加</view></view>
+      <view wx:for="{{printers}}" wx:key="_id" class="data-card">
+        <view class="card-top"><view><view class="card-title">{{item.name}}</view><view class="card-sub">{{item.brand}} {{item.model}} · {{item.connectionType === 'usb' ? 'USB' : item.ip + ':' + item.port}}</view></view><view class="status-pill {{item.connectionStatus}}">{{item.connectionStatus === 'online' ? '在线' : '离线'}}</view></view>
+        <view class="detail-grid"><text>{{item.paperWidth}}mm / {{item.resolution}}dpi</text><text>{{item.printerType === 'thermal' ? '热敏' : '针式'}} / {{item.printMode === 'text' ? '文字打印' : '图片打印'}}</text><text>{{item.status ? '已启用' : '已停用'}}</text></view>
+        <view wx:if="{{item.lastError}}" class="error-line">最近错误：{{item.lastError}}</view>
+        <view class="card-actions"><view class="small-btn" bindtap="openPrinterForm" data-item="{{item}}">编辑</view><view class="small-btn" bindtap="changePrinterStatus" data-item="{{item}}">{{item.status ? '停用' : '启用'}}</view><view class="small-btn strong" bindtap="confirmPrinterAction" data-action="test" data-id="{{item._id}}" data-name="{{item.name}}">测试</view><view class="small-btn" bindtap="confirmPrinterAction" data-action="clear" data-id="{{item._id}}" data-name="{{item.name}}">清空任务</view><view class="small-btn danger" bindtap="confirmPrinterAction" data-action="delete" data-id="{{item._id}}" data-name="{{item.name}}">删除</view></view>
+      </view>
+      <view wx:if="{{!printers.length}}" class="empty-state">还没有打印机配置</view>
+    </view>
+
+    <view wx:if="{{activeTab === 'cashier'}}" class="tab-panel">
+      <view class="section-title">收银打印配置</view>
+      <view class="section-tip top-tip">只绑定前台 USB 打印机。菜品按下单时间正序、完全相同的项目会合并打印。</view>
+      <view wx:for="{{cashierConfigs}}" wx:key="_id" class="data-card">
+        <view class="card-top"><view class="card-title">{{item.name}}</view><switch checked="{{item.enabled}}" color="#E54A1D" bindchange="onCashierSwitch" data-index="{{index}}" /></view>
+        <view class="form-line"><text>绑定打印机</text><picker range="{{usbPrinterNames}}" bindchange="onCashierPrinter" data-index="{{index}}"><view class="picker-value">{{item.printer ? item.printer.name : '请选择前台 USB 打印机'}} ›</view></picker></view>
+        <view class="form-line"><text>打印份数</text><input class="inline-input" type="number" value="{{item.copies}}" bindinput="onCashierCopies" data-index="{{index}}" /></view>
+        <view class="card-actions"><view class="primary-small" bindtap="saveCashier" data-item="{{item}}">保存设置</view></view>
+      </view>
+    </view>
+
+    <view wx:if="{{activeTab === 'stations'}}" class="tab-panel">
+      <view class="section-head"><view><view class="section-title no-margin">后厨出品档口</view><view class="section-tip">档口是逻辑对象，不等于物理打印机。只允许一个默认兜底档口。</view></view><view class="primary-btn" bindtap="openStationForm">添加</view></view>
+      <view wx:for="{{stations}}" wx:key="_id" class="data-card">
+        <view class="card-top"><view><view class="card-title">{{item.name}}</view><view class="card-sub">绑定：{{item.printer ? item.printer.name : '未绑定打印机'}}</view></view><view class="status-pill {{item.status ? 'online' : 'offline'}}">{{item.isDefault ? '默认兜底' : (item.status ? '已启用' : '已停用')}}</view></view>
+        <view class="card-actions"><view class="small-btn strong" bindtap="openStationForm" data-item="{{item}}">编辑档口</view></view>
+      </view>
+    </view>
+
+    <view wx:if="{{activeTab === 'dishes'}}" class="tab-panel">
+      <view class="section-title">菜品打印配置</view>
+      <view class="filter-row"><input class="search-input" value="{{dishKeyword}}" placeholder="搜索菜名或助记码" bindinput="onDishKeyword" confirm-type="search" bindconfirm="searchDishes" /><view class="search-btn" bindtap="searchDishes">搜索</view></view>
+      <view class="filter-row"><picker range="{{categoryOptions}}" range-key="name" bindchange="onDishCategory"><view class="filter-picker">{{dishCategoryId ? '已选分类' : '所有分类'}} ›</view></picker><view class="filter-toggle {{dishUnassignedOnly ? 'on' : ''}}" bindtap="toggleUnassigned">只看未配置</view><view class="primary-small" bindtap="openRouteForm">批量配置({{selectedDishIds.length}})</view></view>
+      <view wx:for="{{dishes}}" wx:key="dishId" class="data-card dish-card {{item.selected ? 'selected' : ''}}" bindtap="toggleDishSelect" data-id="{{item.dishId}}">
+        <view class="card-top"><view><view class="card-title">{{item.dishName}}</view><view class="card-sub">{{item.categoryName || '未分类'}} · {{item.mnemonic || '无编码'}}</view></view><view class="status-pill {{item.configStatus === 'configured' ? 'online' : 'unassigned'}}">{{item.configStatus === 'configured' ? item.stationName : '未配置'}}</view></view>
+        <view class="dish-bottom"><text>{{item.printEnabled ? '已开启后厨打印' : '不生成后厨任务'}}</text><view class="text-link" catchtap="openRouteForm" data-id="{{item.dishId}}">配置</view></view>
+      </view>
+      <view wx:if="{{!dishes.length}}" class="empty-state">没有符合筛选条件的菜品</view>
+    </view>
+
+    <view wx:if="{{activeTab === 'templates'}}" class="tab-panel">
+      <view class="section-title">票据样式设置</view>
+      <scroll-view class="template-tabs" scroll-x enable-flex><view class="tabs"><view wx:for="{{templates}}" wx:key="_id" class="template-tab {{selectedTemplateId === item._id ? 'active' : ''}}" bindtap="chooseTemplate" data-id="{{item._id}}">{{item.name}}</view></view></scroll-view>
+      <view wx:if="{{editTemplate}}" class="template-actions"><view class="small-btn" bindtap="templateAction" data-action="history">版本记录</view><view class="small-btn" bindtap="templateAction" data-action="reset">恢复默认</view><view class="small-btn strong" bindtap="templateAction" data-action="test">打印测试</view><view class="primary-small" bindtap="saveTemplate">保存模板</view></view>
+      <view wx:if="{{editTemplate}}" class="three-column-editor">
+        <view class="editor-column field-library"><view class="editor-label">可选字段</view><view wx:for="{{fieldLibrary}}" wx:key="key" class="field-option" bindtap="addTemplateField" data-item="{{item}}">+ {{item.label}}</view></view>
+        <view class="editor-column preview-column"><view class="editor-label">实时预览 {{editTemplate.paperWidth}}mm</view><view class="receipt-preview"><view wx:for="{{previewFields}}" wx:key="id" class="preview-line {{index === selectedTemplateFieldIndex ? 'selected' : ''}} size-{{item.size}} align-{{item.align}} {{item.bold ? 'bold' : ''}} {{item.inverse ? 'inverse' : ''}}" bindtap="selectTemplateField" data-index="{{index}}">{{item.text}}<view wx:if="{{item.dividerAfter}}" class="preview-divider"></view></view></view></view>
+        <view class="editor-column settings-column"><view class="editor-label">字段样式</view><block wx:for="{{editTemplate.fields}}" wx:key="id"><view wx:if="{{index === selectedTemplateFieldIndex}}"><view class="selected-field-name">{{item.label}}</view><view class="setting-row"><text>显示名称</text><input value="{{item.label}}" data-key="label" bindinput="onTemplateFieldInput" /></view><view class="setting-row"><text>字号</text><picker range="{{sizeLabels}}" bindchange="onTemplateFieldPicker" data-key="size" data-options="sizeOptions"><view>{{item.size}} ›</view></picker></view><view class="setting-row"><text>对齐</text><picker range="{{alignLabels}}" bindchange="onTemplateFieldPicker" data-key="align" data-options="alignOptions"><view>{{item.align}} ›</view></picker></view><view class="setting-row"><text>颜色</text><picker range="{{colorLabels}}" bindchange="onTemplateFieldPicker" data-key="color" data-options="colorOptions"><view>{{item.color}} ›</view></picker></view><view class="setting-row"><text>加粗</text><switch checked="{{item.bold}}" color="#E54A1D" data-key="bold" bindchange="onTemplateFieldSwitch" /></view><view class="setting-row"><text>反转底色</text><switch checked="{{item.inverse}}" color="#E54A1D" data-key="inverse" bindchange="onTemplateFieldSwitch" /></view><view class="setting-row"><text>上方空行</text><switch checked="{{item.blankBefore}}" color="#E54A1D" data-key="blankBefore" bindchange="onTemplateFieldSwitch" /></view><view class="setting-row"><text>下方分割线</text><switch checked="{{item.dividerAfter}}" color="#E54A1D" data-key="dividerAfter" bindchange="onTemplateFieldSwitch" /></view><view class="field-actions"><view class="small-btn" bindtap="moveTemplateField" data-direction="-1">上移</view><view class="small-btn" bindtap="moveTemplateField" data-direction="1">下移</view><view class="small-btn danger" bindtap="deleteTemplateField">删除</view></view></view></block><view class="setting-row"><text>纸张宽度</text><picker range="{{paperOptions}}" bindchange="onTemplatePaper"><view>{{editTemplate.paperWidth}}mm ›</view></picker></view></view>
+      </view>
+    </view>
+
+    <view wx:if="{{activeTab === 'jobs'}}" class="tab-panel">
+      <view class="section-title">打印任务</view>
+      <view class="filter-row"><picker range="{{printers}}" range-key="name" bindchange="onJobPrinterFilter"><view class="filter-picker">打印机 ›</view></picker><picker range="{{ticketTypeOptions}}" range-key="label" bindchange="onJobTicketFilter"><view class="filter-picker">票据类型 ›</view></picker></view>
+      <view class="filter-row"><input class="search-input" value="{{jobFilter.orderTail}}" placeholder="订单号尾号" data-key="orderTail" bindinput="onJobFilterInput" bindconfirm="loadJobs" /><view class="search-btn" bindtap="loadJobs">查询</view><view class="filter-toggle" bindtap="clearJobFilter">清空</view></view>
+      <view class="filter-row"><input class="search-input" value="{{jobFilter.deviceName}}" placeholder="当前设备名称" data-key="deviceName" bindinput="onJobFilterInput" bindconfirm="loadJobs" /><view class="search-btn" bindtap="loadJobs">按设备筛选</view></view>
+      <view wx:for="{{jobs}}" wx:key="_id" class="data-card" bindtap="openJob" data-id="{{item._id}}"><view class="card-top"><view><view class="card-title">{{item.ticketName}}</view><view class="card-sub">{{item.tableNumber || item.orderNumber || item.orderId}} · {{item.printerName}}</view></view><view class="status-pill {{item.status}}">{{item.status}}</view></view><view class="detail-grid"><text>{{item.orderNumber}}</text><text>{{item.deviceName || '未领取'}}</text><text>{{item.copies || 1}}份 · {{item.attempts}} 次尝试</text></view><view class="card-sub">{{item.displayTime}}</view></view>
+      <view wx:if="{{!jobs.length}}" class="empty-state">暂无符合条件的打印任务</view>
+    </view>
+
+    <view wx:if="{{activeTab === 'logs'}}" class="tab-panel">
+      <view class="section-head"><view><view class="section-title no-margin">打印机操作日志</view><view class="section-tip">任务记录与设备日志分开保存</view></view><view class="small-btn danger" bindtap="clearLogs">清空</view></view>
+      <view class="filter-row"><picker range="{{printers}}" range-key="name" bindchange="onLogPrinterFilter"><view class="filter-picker">所有打印机 ›</view></picker><view class="range-tabs"><view class="range-tab {{logFilter.range === 'today' ? 'active' : ''}}" bindtap="setLogRange" data-range="today">今天</view><view class="range-tab {{logFilter.range === 'yesterday' ? 'active' : ''}}" bindtap="setLogRange" data-range="yesterday">昨天</view><view class="range-tab {{logFilter.range === 'sevenDays' ? 'active' : ''}}" bindtap="setLogRange" data-range="sevenDays">近7天</view></view></view>
+      <view wx:for="{{logs}}" wx:key="_id" class="log-row"><view class="log-dot {{item.level === 'error' ? 'error' : ''}}"></view><view class="log-main"><view class="row-title">{{item.printerName || '打印代理'}}</view><view class="row-sub">{{item.status}} · {{item.message || '无附加信息'}}</view></view><view class="log-time">{{item.displayTime}}</view></view>
+      <view wx:if="{{!logs.length}}" class="empty-state">暂无对应的设备日志</view>
+    </view>
+  </scroll-view>
+</view>
+
+<view wx:if="{{showPrinterForm}}" class="modal-mask" catchtap="closePrinterForm"><view class="modal-card" catchtap="stopPropagation"><view class="modal-title">{{printerForm._id ? '编辑打印机' : '新增打印机'}}</view><scroll-view class="modal-body" scroll-y><view class="form-grid"><view class="form-item"><text>名称</text><input value="{{printerForm.name}}" data-key="name" bindinput="onPrinterInput" placeholder="例如：后厨" /></view><view class="form-item"><text>品牌</text><picker range="{{brandOptions}}" bindchange="onPrinterPick" data-key="brand" data-options="brandOptions"><view class="picker-value">{{printerForm.brand}} ›</view></picker></view><view class="form-item"><text>型号</text><input value="{{printerForm.model}}" data-key="model" bindinput="onPrinterInput" placeholder="可选" /></view><view class="form-item"><text>连接方式</text><view class="segmented"><view class="segment {{printerForm.connectionType === 'network' ? 'active' : ''}}" bindtap="setPrinterConnection" data-value="network">网口</view><view class="segment {{printerForm.connectionType === 'usb' ? 'active' : ''}}" bindtap="setPrinterConnection" data-value="usb">USB</view></view></view><block wx:if="{{printerForm.connectionType === 'network'}}"><view class="form-item"><text>IP 地址</text><input value="{{printerForm.ip}}" data-key="ip" bindinput="onPrinterInput" placeholder="192.168.10.42" /></view><view class="form-item"><text>端口</text><input type="number" value="{{printerForm.port}}" data-key="port" bindinput="onPrinterNumberInput" /></view></block><block wx:else><view class="form-item full"><text>USB 设备名</text><input value="{{printerForm.usbBinding.deviceName}}" data-key="usbBinding.deviceName" bindinput="onPrinterInput" placeholder="代理发现设备后可自动绑定" /></view><view class="form-item"><text>VID</text><input value="{{printerForm.usbBinding.vendorId}}" data-key="usbBinding.vendorId" bindinput="onPrinterInput" /></view><view class="form-item"><text>PID</text><input value="{{printerForm.usbBinding.productId}}" data-key="usbBinding.productId" bindinput="onPrinterInput" /></view></block><view class="form-item"><text>纸宽</text><picker range="{{paperOptions}}" bindchange="onPrinterPick" data-key="paperWidth" data-options="paperOptions"><view class="picker-value">{{printerForm.paperWidth}}mm ›</view></picker></view><view class="form-item"><text>分辨率</text><picker range="{{resolutionOptions}}" bindchange="onPrinterPick" data-key="resolution" data-options="resolutionOptions"><view class="picker-value">{{printerForm.resolution}}dpi ›</view></picker></view><view class="form-item"><text>用途</text><view class="segmented"><view class="segment {{printerForm.usage === 'cashier' ? 'active' : ''}}" bindtap="setPrinterUsage" data-value="cashier">收银</view><view class="segment {{printerForm.usage === 'kitchen' ? 'active' : ''}}" bindtap="setPrinterUsage" data-value="kitchen">后厨</view></view></view><view class="form-item"><text>启用</text><switch checked="{{printerForm.status}}" color="#E54A1D" data-key="status" bindchange="onPrinterSwitch" /></view></view><view class="subhead">高级设置</view><view class="form-grid"><view class="form-item"><text>走纸行数</text><input type="number" value="{{printerForm.feedLines}}" data-key="feedLines" bindinput="onPrinterNumberInput" /></view><view class="form-item"><text>重试次数</text><input type="number" value="{{printerForm.retryLimit}}" data-key="retryLimit" bindinput="onPrinterNumberInput" /></view><view class="form-item"><text>蜂鸣次数</text><input disabled="{{!printerForm.capabilities.beep}}" type="number" value="{{printerForm.beepCount}}" data-key="beepCount" bindinput="onPrinterNumberInput" /></view><view class="form-item"><text>蜂鸣等级</text><input disabled="{{!printerForm.capabilities.beep}}" type="number" value="{{printerForm.beepLevel}}" data-key="beepLevel" bindinput="onPrinterNumberInput" /></view></view><view class="capability-list"><view class="capability"><text>ESC/POS</text><switch checked="{{printerForm.capabilities.escpos}}" color="#E54A1D" data-key="capabilities.escpos" bindchange="onPrinterSwitch" /></view><view class="capability"><text>蜂鸣</text><switch checked="{{printerForm.capabilities.beep}}" color="#E54A1D" data-key="capabilities.beep" bindchange="onPrinterSwitch" /></view><view class="capability"><text>开钱箱</text><switch checked="{{printerForm.capabilities.cashDrawer}}" color="#E54A1D" data-key="capabilities.cashDrawer" bindchange="onPrinterSwitch" /></view><view class="capability"><text>切纸</text><switch checked="{{printerForm.capabilities.cutPaper}}" color="#E54A1D" data-key="capabilities.cutPaper" bindchange="onPrinterSwitch" /></view><view class="capability"><text>开钱箱指令</text><switch disabled="{{!printerForm.capabilities.cashDrawer}}" checked="{{printerForm.openCashDrawer}}" color="#E54A1D" data-key="openCashDrawer" bindchange="onPrinterSwitch" /></view></view></scroll-view><view class="modal-footer"><view class="modal-btn cancel" bindtap="closePrinterForm">取消</view><view class="modal-btn confirm" bindtap="savePrinter">保存</view></view></view></view>
+
+<view wx:if="{{showStationForm}}" class="modal-mask" catchtap="closeStationForm">
+  <view class="modal-card short" catchtap="stopPropagation">
+    <view class="modal-title">出品档口</view>
+    <view class="modal-body">
+      <view class="form-item">
+        <text>档口名称</text>
+        <input value="{{stationForm.name}}" data-key="name" bindinput="onStationInput" placeholder="例如：凉菜" />
+      </view>
+      <view class="form-item">
+        <text>编码</text>
+        <input value="{{stationForm.code}}" data-key="code" bindinput="onStationInput" placeholder="可选" />
+      </view>
+      <view class="form-item">
+        <text>绑定打印机</text>
+        <picker range="{{printers}}" range-key="name" bindchange="onStationPrinter">
+          <text class="picker-value">点击选择打印机</text>
+        </picker>
+      </view>
+      <view class="capability">
+        <text>启用档口</text>
+        <switch checked="{{stationForm.status}}" color="#E54A1D" data-key="status" bindchange="onStationSwitch" />
+      </view>
+      <view class="capability">
+        <text>默认兜底档口</text>
+        <switch checked="{{stationForm.isDefault}}" color="#E54A1D" data-key="isDefault" bindchange="onStationSwitch" />
+      </view>
+    </view>
+    <view class="modal-footer">
+      <view class="modal-btn cancel" bindtap="closeStationForm">取消</view>
+      <view class="modal-btn confirm" bindtap="saveStation">保存</view>
     </view>
   </view>
 </view>
-<admin-info-center />
+
+<view wx:if="{{showRouteForm}}" class="modal-mask" catchtap="closeRouteForm">
+  <view class="modal-card short" catchtap="stopPropagation">
+    <view class="modal-title">配置出品档口</view>
+    <view class="modal-body">
+      <view class="modal-note">已选 {{selectedDishIds.length}} 道菜。未配置时会发送到默认兜底档口并产生告警。</view>
+      <view class="capability">
+        <text>后厨打印</text>
+        <switch checked="{{routeForm.printEnabled}}" color="#E54A1D" bindchange="onRouteSwitch" />
+      </view>
+      <view wx:if="{{routeForm.printEnabled}}" class="form-item">
+        <text>出品档口</text>
+        <picker range="{{stations}}" range-key="name" bindchange="onRouteStation">
+          <text class="picker-value">请选择或留空使用默认兜底档口</text>
+        </picker>
+      </view>
+    </view>
+    <view class="modal-footer">
+      <view class="modal-btn cancel" bindtap="closeRouteForm">取消</view>
+      <view class="modal-btn confirm" bindtap="saveRoutes">保存</view>
+    </view>
+  </view>
+</view>
+
+<view wx:if="{{showJobDetail}}" class="modal-mask" catchtap="closeJob"><view class="modal-card short" catchtap="stopPropagation"><view class="modal-title">打印任务详情</view><scroll-view class="modal-body" scroll-y><view wx:if="{{jobDetail}}"><view class="job-meta"><text>{{jobDetail.ticketName}}</text><text>{{jobDetail.status}}</text></view><view class="receipt-preview job-preview"><view wx:for="{{jobDetail.ticket.lines}}" wx:key="index" class="preview-line size-{{item.size}} align-{{item.align}} {{item.bold ? 'bold' : ''}} {{item.inverse ? 'inverse' : ''}}">{{item.text}}<view wx:if="{{item.kind === 'divider'}}" class="preview-divider"></view></view></view><view wx:if="{{jobDetail.error}}" class="error-line">{{jobDetail.error}}</view></view></scroll-view><view class="modal-footer"><view class="modal-btn cancel" bindtap="closeJob">关闭</view><view wx:if="{{jobDetail.status === 'queued'}}" class="modal-btn cancel" bindtap="jobAction" data-action="cancel" data-id="{{jobDetail._id}}">取消任务</view><view class="modal-btn confirm" bindtap="jobAction" data-action="reprint" data-id="{{jobDetail._id}}">补打</view></view></view></view>
+
+<view wx:if="{{showRegistration}}" class="modal-mask" catchtap="closeRegistration"><view class="modal-card registration-card" catchtap="stopPropagation"><view class="modal-title">注册安卓打印代理</view><view class="modal-body"><view class="modal-note">在平板的 Android Print Agent 首次启动时输入下列信息。注册码 15 分钟后失效，设备成功注册后会换取独立令牌。</view><view class="code-line">设备 ID：{{registration.agentId}}</view><view class="registration-code">{{registration.registrationCode}}</view><view class="code-line">有效期：{{registration.expiresInSeconds}}秒</view></view><view class="modal-footer"><view class="modal-btn confirm" bindtap="closeRegistration">我已记下</view></view></view></view>
