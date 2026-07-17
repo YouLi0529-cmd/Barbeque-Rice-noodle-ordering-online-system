@@ -48,10 +48,6 @@
           <view class="card-title">{{ui.tableCodeTitle}}</view>
           <view class="card-desc">{{ui.tableCodeDesc}}</view>
         </view>
-        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToShopInfo">
-          <view class="card-title">{{ui.shopInfoTitle}}</view>
-          <view class="card-desc">{{ui.shopInfoDesc}}</view>
-        </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToPrinter">
           <view class="card-title">{{ui.printerTitle}}</view>
           <view class="card-desc">{{ui.printerDesc}}</view>
@@ -61,7 +57,6 @@
 
     <view class="bottom-actions">
       <view class="ghost-action" bindtap="showChangePassword">{{ui.changePassword}}</view>
-      <view class="ghost-action" bindtap="goBack">{{ui.back}}</view>
     </view>
   </view>
 

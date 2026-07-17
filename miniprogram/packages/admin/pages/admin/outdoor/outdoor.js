@@ -781,6 +781,7 @@ Page({
       showDiscountDialog: false,
       discountDialogType: '',
       discountInput: ''
+    })
   },
 
   stopDiscountDialogTap() {},

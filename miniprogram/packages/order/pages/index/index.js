@@ -4,6 +4,8 @@ const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()
 const _ = db ? db.command : null
 const { getCustomNavOptions } = require('../../../../utils/customNav')
+const SHARED_CART_ACTIVE_POLL_MS = 8000
+const SHARED_CART_IDLE_POLL_MS = 20000
 
 Page({
   data: {
@@ -57,10 +59,13 @@ Page({
     shopNavTotalHeight: 84,
     tableNumber: '', // 桌码号
     sharedSessionId: '',
+    sharedCartAccessToken: '',
     sharedCartReady: false,
     sharedCartWatchReady: false,
     sharedCartVersion: 0,
     sharedCartHydrated: false,
+    sharedCartSyncActive: false,
+    sharedCartActiveUntil: 0,
     orderSessionClosed: false,
     showPeopleModal: false,
     peopleOptions: [1, 2, 3, 4, 5, 6, 7, 8],
@@ -198,10 +203,13 @@ Page({
     this.setData({
       tableNumber: '',
       sharedSessionId: '',
+      sharedCartAccessToken: '',
       sharedCartReady: false,
       sharedCartWatchReady: false,
       sharedCartVersion: 0,
       sharedCartHydrated: false,
+      sharedCartSyncActive: false,
+      sharedCartActiveUntil: 0,
       orderSessionClosed: true,
       sharedPeopleCount: 0,
       sharedPeopleConfirmed: false,
@@ -403,9 +411,12 @@ Page({
       this.setData({
         tableNumber: currentTable,
         sharedSessionId: result.sessionId,
+        sharedCartAccessToken: result.sharedCartAccessToken || '',
         sharedCartReady: true,
         sharedCartVersion: Number(result.cartVersion || 0),
         sharedCartHydrated: false,
+        sharedCartSyncActive: result.sharedCartSyncActive !== false,
+        sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0),
         orderSessionClosed: false
       })
       this.applySharedPeopleState(result)
@@ -487,14 +498,19 @@ Page({
 
   startSharedCartFallback() {
     if (!this.data.sharedSessionId || this.sharedCartFallbackTimer) return
-    this.sharedCartFallbackTimer = setInterval(() => {
-      this.fetchSharedCart(false)
-    }, 8000)
+    const delay = this.data.sharedCartSyncActive
+      ? SHARED_CART_ACTIVE_POLL_MS
+      : SHARED_CART_IDLE_POLL_MS
+    this.sharedCartFallbackTimer = setTimeout(async () => {
+      this.sharedCartFallbackTimer = null
+      await this.fetchSharedCart(false)
+      this.startSharedCartFallback()
+    }, delay)
   },
 
   stopSharedCartFallback() {
     if (this.sharedCartFallbackTimer) {
-      clearInterval(this.sharedCartFallbackTimer)
+      clearTimeout(this.sharedCartFallbackTimer)
       this.sharedCartFallbackTimer = null
     }
   },
@@ -519,9 +535,55 @@ Page({
           sessionId,
           tableNumber: this.data.tableNumber
         }
+
+        // Steady-state sync only checks the session version. The full cart is
+        // requested only after another diner changes it.
+        const canCheckStatusOnly = apiClient.isEnabled() &&
+          this.sharedCartStatusSupported !== false &&
+          !force &&
+          this.data.sharedCartHydrated
+        if (canCheckStatusOnly) {
+          const previousCartVersion = Number(this.data.sharedCartVersion || 0)
+          let statusResult = null
+          try {
+            statusResult = await apiClient.call('sharedCart.status', {
+              sessionId,
+              tableNumber: this.data.tableNumber,
+              sharedCartAccessToken: this.data.sharedCartAccessToken
+            })
+          } catch (err) {
+            if (err.code !== 'ACTION_NOT_FOUND') throw err
+            // Let an older backend keep using the legacy version-aware get API.
+            this.sharedCartStatusSupported = false
+          }
+          if (!statusResult) {
+            requestData.cartVersion = previousCartVersion
+          }
+          if (statusResult && !statusResult.success) {
+            throw new Error(statusResult.message || '同步购物车失败')
+          }
+          if (statusResult && this.data.sharedSessionId !== sessionId) return
+          if (statusResult && this.isSharedSessionClosed(statusResult)) {
+            this.handleSharedSessionClosed('本桌订单已结账，请重新扫码开台')
+            return
+          }
+
+          if (statusResult) {
+          const currentCartVersion = Number(statusResult.cartVersion || 0)
+          this.applySharedPeopleState(statusResult)
+          this.setData({
+            sharedCartVersion: currentCartVersion,
+            sharedCartSyncActive: statusResult.sharedCartSyncActive === true,
+            sharedCartActiveUntil: Number(statusResult.sharedCartActiveUntil || 0)
+          })
+            if (currentCartVersion === previousCartVersion) return
+            requestData.force = true
+          }
+        }
+
         if (force || !this.data.sharedCartHydrated) {
           requestData.force = true
-        } else {
+        } else if (!requestData.force) {
           requestData.cartVersion = this.data.sharedCartVersion
         }
 
@@ -542,7 +604,11 @@ Page({
         this.applySharedPeopleState(result)
         this.setData({
           sharedCartVersion: Number(result.cartVersion || 0),
-          sharedCartHydrated: this.data.sharedCartHydrated || !result.unchanged
+          sharedCartHydrated: this.data.sharedCartHydrated || !result.unchanged,
+          sharedCartSyncActive: typeof result.sharedCartSyncActive === 'boolean'
+            ? result.sharedCartSyncActive
+            : this.data.sharedCartSyncActive,
+          sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0)
         })
         if (!result.unchanged) {
           this.applySharedCartDocs(result.items || [])
@@ -643,8 +709,14 @@ Page({
       if (result && Number.isFinite(Number(result.cartVersion))) {
         this.setData({
           sharedCartVersion: Number(result.cartVersion),
-          sharedCartHydrated: true
+          sharedCartHydrated: true,
+          sharedCartSyncActive: typeof result.sharedCartSyncActive === 'boolean'
+            ? result.sharedCartSyncActive
+            : this.data.sharedCartSyncActive,
+          sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0)
         })
+        this.stopSharedCartFallback()
+        this.startSharedCartFallback()
       }
     }).catch(err => {
       console.error('同步共同点单购物车失败', err)

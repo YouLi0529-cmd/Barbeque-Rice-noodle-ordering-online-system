@@ -20,8 +20,6 @@ const ADMIN_TEXT = {
   noticeDesc: '\u9996\u9875\u901a\u77e5\u5185\u5bb9',
   tableCodeTitle: '\u684c\u7801\u7ba1\u7406',
   tableCodeDesc: '\u5802\u98df\u684c\u7801\u751f\u6210',
-  shopInfoTitle: '\u5e97\u94fa\u8bbe\u7f6e',
-  shopInfoDesc: '\u57fa\u7840\u8d44\u6599\u7ef4\u62a4',
   printerTitle: '\u6253\u5370\u673a\u7ba1\u7406',
   printerDesc: '\u5c0f\u7968\u6253\u5370\u914d\u7f6e',
   reservationModalTitle: '\u65b0\u9884\u7ea6',
@@ -35,7 +33,6 @@ const ADMIN_TEXT = {
   confirmReservation: '\u786e\u8ba4\u9884\u7ea6',
   reservationConfirmed: '\u5df2\u786e\u8ba4\u9884\u7ea6',
   changePassword: '\u4fee\u6539\u5bc6\u7801',
-  back: '\u8fd4\u56de',
   close: '\u5173\u95ed',
   setupAdminPassword: '\u8bbe\u7f6e\u7ba1\u7406\u5458\u5bc6\u7801',
   adminLogin: '\u7ba1\u7406\u5458\u767b\u5f55',
@@ -94,6 +91,14 @@ Page({
   },
 
   async onLoad(options = {}) {
+    if (options.adminRoot !== '1' && getCurrentPages().length > 1) {
+      const changePassword = options.changePassword === 'true' ? '&changePassword=true' : ''
+      wx.reLaunch({
+        url: `${ADMIN_ROOT}/admin?adminRoot=1${changePassword}`
+      })
+      return
+    }
+
     await this.prepareAdminAuth()
 
     if (options.changePassword === 'true' && this.data.isAuthorized) {
@@ -322,10 +327,6 @@ Page({
     wx.navigateTo({ url: `${ADMIN_ROOT}/printer/printer` })
   },
 
-  goToShopInfo() {
-    wx.navigateTo({ url: `${ADMIN_ROOT}/shopInfo/shopInfo` })
-  },
-
   showChangePassword() {
     if (!this.data.isAuthorized) {
       this.setData({ showAuthModal: true })
@@ -406,15 +407,4 @@ Page({
     }
   },
 
-  goBack() {
-    const pages = getCurrentPages()
-    if (pages.length > 1) {
-      wx.navigateBack()
-      return
-    }
-
-    wx.reLaunch({
-      url: '/pages/covertest/covertest'
-    })
-  }
 })

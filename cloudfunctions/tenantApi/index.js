@@ -16,6 +16,9 @@ const DEFAULT_TENANT_ID = 'zhangnan'
 const ACTIVE_STATUS = 'active'
 const SESSION_EXPIRE_DAYS = 7
 const DRAFT_EXPIRE_MS = 24 * 60 * 60 * 1000
+const SHARED_CART_ACCESS_TOKEN_TTL_MS = 4 * 60 * 60 * 1000
+const SHARED_CART_ACTIVE_WINDOW_MS = 2 * 60 * 1000
+const ADMIN_TABLE_BOARD_STATE_ID = '__admin_table_board__'
 const MAX_DISH_IMAGE_SIZE = 1024 * 1024
 const DISH_IMAGE_TYPES = {
   jpg: 'image/jpeg',
@@ -51,6 +54,30 @@ const printService = createPrintService({
 })
 
 let ensureSessionCollectionPromise = null
+const AUTH_SESSION_CACHE_TTL_MS = 60 * 1000
+const AUTH_SESSION_CACHE_MAX_SIZE = 500
+const authSessionCache = new Map()
+const RUNTIME_CACHE_TTL_MS = 60 * 1000
+const RUNTIME_CACHE_MAX_SIZE = 200
+const tenantLicenseCache = new Map()
+const adminAuthCache = new Map()
+
+function readRuntimeCache(cache, key) {
+  const cached = cache.get(key)
+  if (!cached || cached.expiresAt <= Date.now()) {
+    cache.delete(key)
+    return null
+  }
+  return cached.value
+}
+
+function writeRuntimeCache(cache, key, value) {
+  if (cache.size >= RUNTIME_CACHE_MAX_SIZE) cache.clear()
+  cache.set(key, {
+    value,
+    expiresAt: Date.now() + RUNTIME_CACHE_TTL_MS
+  })
+}
 
 function parseJson(text) {
   if (!text || typeof text !== 'string') return {}
@@ -61,8 +88,72 @@ function parseJson(text) {
   }
 }
 
+function getRequestHeader(event = {}, name = '') {
+  const headers = event.headers || {}
+  const wanted = String(name).toLowerCase()
+  const key = Object.keys(headers).find(item => String(item).toLowerCase() === wanted)
+  return key ? String(headers[key] || '') : ''
+}
+
+function parseMultipartPayload(event = {}) {
+  const contentType = getRequestHeader(event, 'content-type')
+  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;\s]+))/i)
+  const boundaryText = boundaryMatch && (boundaryMatch[1] || boundaryMatch[2])
+  if (!boundaryText) return {}
+
+  const rawBody = event.body
+  const body = Buffer.isBuffer(rawBody)
+    ? rawBody
+    : event.isBase64Encoded
+      ? Buffer.from(String(rawBody || ''), 'base64')
+      : Buffer.from(String(rawBody || ''), 'latin1')
+  const boundary = Buffer.from(`--${boundaryText}`)
+  const headerSeparator = Buffer.from('\r\n\r\n')
+  const payload = {}
+  let partStart = body.indexOf(boundary)
+
+  while (partStart >= 0) {
+    partStart += boundary.length
+    if (body[partStart] === 45 && body[partStart + 1] === 45) break
+    if (body[partStart] === 13 && body[partStart + 1] === 10) partStart += 2
+
+    const nextBoundary = body.indexOf(boundary, partStart)
+    if (nextBoundary < 0) break
+
+    const headerEnd = body.indexOf(headerSeparator, partStart)
+    if (headerEnd < 0 || headerEnd >= nextBoundary) {
+      partStart = nextBoundary
+      continue
+    }
+
+    const headers = body.slice(partStart, headerEnd).toString('utf8')
+    const nameMatch = headers.match(/name="([^"]+)"/i)
+    const fileNameMatch = headers.match(/filename="([^"]*)"/i)
+    const name = nameMatch && nameMatch[1]
+    let contentEnd = nextBoundary
+    if (body[contentEnd - 2] === 13 && body[contentEnd - 1] === 10) contentEnd -= 2
+    const content = body.slice(headerEnd + headerSeparator.length, contentEnd)
+
+    if (name) {
+      if (fileNameMatch) {
+        payload.fileContent = content
+        payload.fileName = fileNameMatch[1]
+      } else {
+        payload[name] = content.toString('utf8')
+      }
+    }
+
+    partStart = nextBoundary
+  }
+
+  return payload
+}
+
 function parsePayload(event = {}) {
-  const body = parseJson(event.body)
+  const contentType = getRequestHeader(event, 'content-type')
+  const body = contentType.toLowerCase().indexOf('multipart/form-data') >= 0
+    ? parseMultipartPayload(event)
+    : parseJson(event.body)
   const query = event.queryStringParameters || {}
   return {
     ...query,
@@ -209,6 +300,9 @@ function toTime(value) {
 }
 
 async function getTenantLicense(tenantId) {
+  const cached = readRuntimeCache(tenantLicenseCache, tenantId)
+  if (cached) return cached
+
   let res
   try {
     res = await db.collection('tenantLicense')
@@ -223,7 +317,9 @@ async function getTenantLicense(tenantId) {
     throw err
   }
 
-  return res.data && res.data[0]
+  const license = res.data && res.data[0]
+  if (license) writeRuntimeCache(tenantLicenseCache, tenantId, license)
+  return license
 }
 
 async function checkTenantLicense(tenantId) {
@@ -264,6 +360,88 @@ async function checkTenantLicense(tenantId) {
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(String(token || '')).digest('hex')
+}
+
+function encodeBase64Url(value) {
+  return Buffer.from(String(value || '')).toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+}
+
+function decodeBase64Url(value) {
+  const text = String(value || '').replace(/-/g, '+').replace(/_/g, '/')
+  const padding = '='.repeat((4 - text.length % 4) % 4)
+  return Buffer.from(text + padding, 'base64').toString('utf8')
+}
+
+function getSharedCartAccessTokenSecret() {
+  return String(process.env.SHARED_CART_TOKEN_SECRET || process.env.WECHAT_SECRET || '').trim()
+}
+
+function createSharedCartAccessToken({ tenantId, sessionId, openid }) {
+  const secret = getSharedCartAccessTokenSecret()
+  if (!secret || !tenantId || !sessionId || !openid) return ''
+
+  const payload = encodeBase64Url(JSON.stringify({
+    tenantId,
+    sessionId,
+    openid,
+    expiresAt: Date.now() + SHARED_CART_ACCESS_TOKEN_TTL_MS
+  }))
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('hex')
+  return `${payload}.${signature}`
+}
+
+function getSharedCartAccessTokenPayload(token, tenantId, sessionId) {
+  const secret = getSharedCartAccessTokenSecret()
+  const parts = String(token || '').trim().split('.')
+  if (!secret || parts.length !== 2 || !parts[0] || !parts[1]) return null
+
+  const expectedSignature = crypto.createHmac('sha256', secret).update(parts[0]).digest('hex')
+  const expected = Buffer.from(expectedSignature, 'utf8')
+  const actual = Buffer.from(parts[1], 'utf8')
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) return null
+
+  try {
+    const payload = JSON.parse(decodeBase64Url(parts[0]))
+    if (!payload || payload.tenantId !== tenantId || payload.sessionId !== sessionId) return null
+    if (!payload.openid || Number(payload.expiresAt || 0) <= Date.now()) return null
+    return payload
+  } catch (err) {
+    return null
+  }
+}
+
+function getAuthSessionCacheKey(tenantId, token) {
+  return `${tenantId}:${hashToken(token)}`
+}
+
+function isAuthSessionExpired(session) {
+  return !!(session && session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now())
+}
+
+function getCachedAuthSession(tenantId, token) {
+  const key = getAuthSessionCacheKey(tenantId, token)
+  const cached = authSessionCache.get(key)
+  if (!cached) return null
+  if (cached.expiresAt <= Date.now() || isAuthSessionExpired(cached.session)) {
+    authSessionCache.delete(key)
+    return null
+  }
+  return cached.session
+}
+
+function cacheAuthSession(tenantId, token, session) {
+  const key = getAuthSessionCacheKey(tenantId, token)
+  if (authSessionCache.size >= AUTH_SESSION_CACHE_MAX_SIZE && !authSessionCache.has(key)) {
+    const oldestKey = authSessionCache.keys().next().value
+    if (oldestKey) authSessionCache.delete(oldestKey)
+  }
+  authSessionCache.set(key, {
+    session,
+    expiresAt: Date.now() + AUTH_SESSION_CACHE_TTL_MS
+  })
 }
 
 function createToken() {
@@ -397,6 +575,14 @@ async function getAuthSession(payload) {
     }
   }
 
+  const cachedSession = getCachedAuthSession(tenantId, token)
+  if (cachedSession) {
+    return {
+      success: true,
+      data: cachedSession
+    }
+  }
+
   const res = await db.collection('tenantSession')
     .where({
       tenantId,
@@ -414,13 +600,15 @@ async function getAuthSession(payload) {
     }
   }
 
-  if (session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now()) {
+  if (isAuthSessionExpired(session)) {
     return {
       success: false,
       code: 'AUTH_EXPIRED',
       message: 'login session expired'
     }
   }
+
+  cacheAuthSession(tenantId, token, session)
 
   return {
     success: true,
@@ -672,6 +860,7 @@ async function createOrder(payload) {
       payStatus: false,
       payMethod: 'offline',
       status: 'submitted',
+      tableCleared: false,
       frontDeskConfirmed: false,
       frontDeskRemark: '',
       kitchenPrinted: false,
@@ -1826,21 +2015,57 @@ function buildAdminBillGroups(orders) {
   })
 }
 
+async function listVisibleTableOrders() {
+  try {
+    return await db.collection('order')
+      .where({
+        type: 'order',
+        tableCleared: _.neq(true)
+      })
+      .limit(300)
+      .get()
+  } catch (err) {
+    // Keep the table board usable if a legacy environment lacks this index.
+    console.warn('list visible table orders fallback', err)
+    return db.collection('order')
+      .where({ type: 'order' })
+      .orderBy('createTime', 'desc')
+      .limit(300)
+      .get()
+  }
+}
+
 async function adminListTables() {
-  const res = await db.collection('order')
-    .where({
-      type: 'order'
-    })
-    .orderBy('createTime', 'desc')
-    .limit(300)
-    .get()
-  const tableGroups = await listActiveTableGroups()
-  const tableSessions = await listActiveTableSessions()
+  const [res, tableGroups, tableSessions, reservationRes, boardVersion] = await Promise.all([
+    listVisibleTableOrders(),
+    listActiveTableGroups(),
+    listActiveTableSessions(),
+    db.collection('reservation')
+      .where({ status: 'confirmed' })
+      .orderBy('createTime', 'desc')
+      .limit(100)
+      .get(),
+    getAdminTableBoardVersion()
+  ])
 
   return {
     success: true,
     data: {
-      sections: buildAdminTableSections(res.data || [], tableGroups, tableSessions)
+      sections: buildAdminTableSections(res.data || [], tableGroups, tableSessions),
+      reservations: reservationRes.data || [],
+      boardVersion
+    }
+  }
+}
+
+async function adminGetTableBoardStatus(payload) {
+  const boardVersion = await getAdminTableBoardVersion()
+  const knownVersion = Math.max(0, Math.floor(Number(payload.boardVersion || 0)))
+  return {
+    success: true,
+    data: {
+      boardVersion,
+      changed: boardVersion !== knownVersion
     }
   }
 }
@@ -3602,14 +3827,52 @@ function buildSharedCartPeopleState(session) {
 
 function buildSharedCartSessionState(session) {
   const sessionActive = isActiveTableSession(session)
+  const sharedCartActiveUntil = toTime(session && session.sharedCartActiveUntil)
   return {
     sessionActive,
     sessionClosed: !session || !sessionActive,
     sessionStatus: String(session && session.status || ''),
     checkoutStatus: String(session && session.checkoutStatus || ''),
+    sharedCartSyncActive: sessionActive && sharedCartActiveUntil > Date.now(),
+    sharedCartActiveUntil,
     // Changes whenever cart items change. Clients can skip re-reading all items
     // when the version they already hold is still current.
     cartVersion: Math.max(0, Math.floor(Number(session && session.cartVersion || 0)))
+  }
+}
+
+async function getAdminTableBoardVersion() {
+  try {
+    const res = await db.collection('tableOrderSession').doc(ADMIN_TABLE_BOARD_STATE_ID).get()
+    return Math.max(0, Math.floor(Number(res.data && res.data.version || 0)))
+  } catch (err) {
+    return 0
+  }
+}
+
+async function touchAdminTableBoard() {
+  const ref = db.collection('tableOrderSession').doc(ADMIN_TABLE_BOARD_STATE_ID)
+  try {
+    await ref.update({
+      data: {
+        version: _.inc(1),
+        updateTime: db.serverDate()
+      }
+    })
+  } catch (err) {
+    try {
+      await ref.set({
+        data: {
+          type: 'admin_table_board_state',
+          version: 1,
+          createTime: db.serverDate(),
+          updateTime: db.serverDate()
+        }
+      })
+    } catch (setErr) {
+      // Board refresh is an optimization. A failed marker must not block ordering.
+      console.error('touch admin table board failed', setErr)
+    }
   }
 }
 
@@ -3644,6 +3907,7 @@ async function joinSharedCart(payload) {
   const sessionRef = db.collection('tableOrderSession').doc(sessionId)
   const oldSessionRes = await sessionRef.get()
   const oldSession = oldSessionRes.data
+  const sharedCartActiveUntil = new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS)
   let nextSession = oldSession
   let clearedForNewSession = {
     clearedOrders: 0,
@@ -3660,6 +3924,7 @@ async function joinSharedCart(payload) {
       checkoutStatus: '',
       finishedAt: null,
       memberOpenids: shouldResetSession ? [auth.data.openid] : _.addToSet(auth.data.openid),
+      sharedCartActiveUntil,
       updateTime: db.serverDate()
     }
     if (shouldResetSession) {
@@ -3680,9 +3945,13 @@ async function joinSharedCart(payload) {
         status: 'ordering',
         peopleCount: 0,
         peopleConfirmed: false,
-        cartVersion: 0
+        cartVersion: 0,
+        sharedCartActiveUntil
       }
-      : oldSession
+      : {
+        ...oldSession,
+        sharedCartActiveUntil
+      }
   } else {
     await sessionRef.set({
       data: {
@@ -3692,6 +3961,7 @@ async function joinSharedCart(payload) {
         peopleConfirmed: false,
         peopleConfirmedAt: null,
         cartVersion: 0,
+        sharedCartActiveUntil,
         memberOpenids: [auth.data.openid],
         createTime: db.serverDate(),
         updateTime: db.serverDate()
@@ -3703,7 +3973,8 @@ async function joinSharedCart(payload) {
       status: 'ordering',
       peopleCount: 0,
       peopleConfirmed: false,
-      cartVersion: 0
+      cartVersion: 0,
+      sharedCartActiveUntil
     }
   }
 
@@ -3711,6 +3982,11 @@ async function joinSharedCart(payload) {
     success: true,
     sessionId,
     tableNumber,
+    sharedCartAccessToken: createSharedCartAccessToken({
+      tenantId: getTenantId(payload),
+      sessionId,
+      openid: auth.data.openid
+    }),
     ...buildSharedCartPeopleState(nextSession),
     ...buildSharedCartSessionState(nextSession),
     clearedForNewSession
@@ -3769,6 +4045,38 @@ async function getSharedCart(payload) {
     items: res.data || [],
     ...buildSharedCartPeopleState(sessionRes.data),
     ...sessionState
+  }
+}
+
+async function getSharedCartStatus(payload) {
+  const tableNumber = normalizeTableNumber(payload.tableNumber)
+  const sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
+  if (!sessionId) {
+    return {
+      success: false,
+      code: 'SESSION_REQUIRED',
+      message: 'shared cart session required'
+    }
+  }
+
+  const sessionRes = await db.collection('tableOrderSession').doc(sessionId).get()
+  const session = sessionRes.data
+  const accessPayload = getSharedCartAccessTokenPayload(
+    payload.sharedCartAccessToken,
+    getTenantId(payload),
+    sessionId
+  )
+  const accessOpenid = accessPayload && accessPayload.openid
+  const members = Array.isArray(session && session.memberOpenids) ? session.memberOpenids : []
+  if (!accessOpenid || members.indexOf(accessOpenid) === -1) {
+    const auth = await getAuthSession(payload)
+    if (!auth.success) return auth
+  }
+
+  return {
+    success: true,
+    ...buildSharedCartPeopleState(session),
+    ...buildSharedCartSessionState(session)
   }
 }
 
@@ -3938,18 +4246,22 @@ async function patchSharedCart(payload) {
     }
   })
 
+  const sharedCartActiveUntil = new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS)
   await sessionRef.update({
     data: {
       tableNumber,
       memberOpenids: _.addToSet(auth.data.openid),
       cartVersion: _.inc(1),
+      sharedCartActiveUntil,
       updateTime: db.serverDate()
     }
   })
 
   return {
     success: true,
-    cartVersion: Math.max(0, Math.floor(Number(sessionRes.data && sessionRes.data.cartVersion || 0))) + 1
+    cartVersion: Math.max(0, Math.floor(Number(sessionRes.data && sessionRes.data.cartVersion || 0))) + 1,
+    sharedCartSyncActive: true,
+    sharedCartActiveUntil: sharedCartActiveUntil.getTime()
   }
 }
 
@@ -3982,13 +4294,16 @@ async function clearSharedCart(payload) {
   await db.collection('tableOrderSession').doc(sessionId).update({
     data: {
       cartVersion: _.inc(1),
+      sharedCartActiveUntil: null,
       updateTime: db.serverDate()
     }
   })
 
   return {
     success: true,
-    removed: (res.data || []).length
+    removed: (res.data || []).length,
+    sharedCartSyncActive: false,
+    sharedCartActiveUntil: 0
   }
 }
 
@@ -4610,21 +4925,7 @@ function sanitizeCloudPathName(value, fallback = 'dish') {
   return name || fallback
 }
 
-async function adminUploadDishImage(payload) {
-  const tenantId = getTenantId(payload)
-  const dishId = String(payload.dishId || payload._id || '').trim()
-  const dishName = String(payload.dishName || payload.name || '').trim()
-  const base64 = String(payload.fileBase64 || payload.base64 || '').replace(/^data:image\/\w+;base64,/, '')
-
-  if (!base64) {
-    return {
-      success: false,
-      code: 'IMAGE_REQUIRED',
-      message: 'image required'
-    }
-  }
-
-  const fileContent = Buffer.from(base64, 'base64')
+async function storeDishImageFile({ tenantId, dishId, dishName, fileContent }) {
   if (!fileContent.length || fileContent.length > MAX_DISH_IMAGE_SIZE) {
     return {
       success: false,
@@ -4684,6 +4985,42 @@ async function adminUploadDishImage(payload) {
       contentType: imageType.contentType
     }
   }
+}
+
+async function adminUploadDishImage(payload) {
+  const base64 = String(payload.fileBase64 || payload.base64 || '').replace(/^data:image\/\w+;base64,/, '')
+  if (!base64) {
+    return {
+      success: false,
+      code: 'IMAGE_REQUIRED',
+      message: 'image required'
+    }
+  }
+
+  return storeDishImageFile({
+    tenantId: getTenantId(payload),
+    dishId: String(payload.dishId || payload._id || '').trim(),
+    dishName: String(payload.dishName || payload.name || '').trim(),
+    fileContent: Buffer.from(base64, 'base64')
+  })
+}
+
+async function adminUploadDishFile(payload) {
+  const fileContent = Buffer.isBuffer(payload.fileContent) ? payload.fileContent : Buffer.alloc(0)
+  if (!fileContent.length) {
+    return {
+      success: false,
+      code: 'IMAGE_REQUIRED',
+      message: 'image required'
+    }
+  }
+
+  return storeDishImageFile({
+    tenantId: getTenantId(payload),
+    dishId: String(payload.dishId || payload._id || '').trim(),
+    dishName: String(payload.dishName || payload.name || '').trim(),
+    fileContent
+  })
 }
 
 const TABLE_CODE_PAGE = 'packages/order/pages/index/index'
@@ -5630,6 +5967,22 @@ function buildAdminAuthToken(admin) {
 
 async function requireAdminAuth(payload) {
   const token = String(payload.adminAuthToken || '').trim()
+  if (!token) {
+    return {
+      success: false,
+      code: 'ADMIN_AUTH_REQUIRED',
+      message: 'admin auth required'
+    }
+  }
+
+  const cachedAdmin = readRuntimeCache(adminAuthCache, token)
+  if (cachedAdmin) {
+    return {
+      success: true,
+      admin: cachedAdmin
+    }
+  }
+
   const res = await db.collection('admin').limit(1).get()
   const admin = res.data && res.data[0]
 
@@ -5641,13 +5994,15 @@ async function requireAdminAuth(payload) {
     }
   }
 
-  if (!token || token !== buildAdminAuthToken(admin)) {
+  if (token !== buildAdminAuthToken(admin)) {
     return {
       success: false,
       code: 'ADMIN_AUTH_REQUIRED',
       message: 'admin auth required'
     }
   }
+
+  writeRuntimeCache(adminAuthCache, token, admin)
 
   return {
     success: true,
@@ -5691,6 +6046,7 @@ async function setAdminPassword(payload) {
       updateTime: db.serverDate()
     }
   })
+  adminAuthCache.clear()
 
   return {
     success: true,
@@ -5724,10 +6080,12 @@ async function loginAdmin(payload) {
     }
   }
 
+  const adminAuthToken = buildAdminAuthToken(admin)
+  writeRuntimeCache(adminAuthCache, adminAuthToken, admin)
   return {
     success: true,
     data: {
-      adminAuthToken: buildAdminAuthToken(admin)
+      adminAuthToken
     }
   }
 }
@@ -5769,6 +6127,7 @@ async function changeAdminPassword(payload) {
       updateTime: db.serverDate()
     }
   })
+  adminAuthCache.clear()
 
   return {
     success: true,
@@ -5779,6 +6138,20 @@ async function changeAdminPassword(payload) {
       })
     }
   }
+}
+
+async function completeAdminTableMutation(resultPromise) {
+  const result = await resultPromise
+  if (result && result.success) await touchAdminTableBoard()
+  return result
+}
+
+async function completeReservationMutation(resultPromise, payload) {
+  const result = await resultPromise
+  if (result && result.success && String(payload.collection || '') === 'reservation') {
+    await touchAdminTableBoard()
+  }
+  return result
 }
 
 async function handleAction(action, payload) {
@@ -5838,31 +6211,33 @@ async function handleAction(action, payload) {
   if (action === 'admin.dish.status') return adminSetDishStatus(payload)
   if (action === 'admin.dish.matchImages') return adminMatchDishImages(payload)
   if (action === 'admin.dish.uploadImage') return adminUploadDishImage(payload)
+  if (action === 'admin.dish.uploadFile') return adminUploadDishFile(payload)
   if (action === 'admin.table.list') return adminListTables(payload)
+  if (action === 'admin.table.status') return adminGetTableBoardStatus(payload)
   if (action === 'admin.table.detail') return adminGetTableDetail(payload)
-  if (action === 'admin.table.updatePeople') return adminUpdateTablePeople(payload)
-  if (action === 'admin.table.merge') return adminMergeTables(payload)
-  if (action === 'admin.table.transfer') return adminTransferTable(payload)
-  if (action === 'admin.table.finishCheckout') return adminFinishTableCheckout(payload)
+  if (action === 'admin.table.updatePeople') return completeAdminTableMutation(adminUpdateTablePeople(payload))
+  if (action === 'admin.table.merge') return completeAdminTableMutation(adminMergeTables(payload))
+  if (action === 'admin.table.transfer') return completeAdminTableMutation(adminTransferTable(payload))
+  if (action === 'admin.table.finishCheckout') return completeAdminTableMutation(adminFinishTableCheckout(payload))
   if (action === 'admin.table.prebill') return adminPrintPrebill(payload)
   if (action === 'admin.table.printCustomerOrder') return adminPrintCustomerOrder(payload)
-  if (action === 'admin.table.clear') return adminClearTable(payload)
-  if (action === 'admin.table.sendKitchen') return adminSendTableToKitchen(payload)
-  if (action === 'admin.table.sendKitchenItems') return adminSendKitchenItems(payload)
-  if (action === 'admin.table.urgeKitchenItems') return adminUrgeKitchenItems(payload)
+  if (action === 'admin.table.clear') return completeAdminTableMutation(adminClearTable(payload))
+  if (action === 'admin.table.sendKitchen') return completeAdminTableMutation(adminSendTableToKitchen(payload))
+  if (action === 'admin.table.sendKitchenItems') return completeAdminTableMutation(adminSendKitchenItems(payload))
+  if (action === 'admin.table.urgeKitchenItems') return completeAdminTableMutation(adminUrgeKitchenItems(payload))
   if (action === 'admin.tableCode.list') return adminListTableCodes(payload)
   if (action === 'admin.tableCode.generate') return adminGenerateTableCode(payload)
-  if (action === 'admin.order.sendKitchenItems') return adminSendKitchenItems(payload)
-  if (action === 'admin.order.urgeKitchenItems') return adminUrgeKitchenItems(payload)
-  if (action === 'admin.table.refundDish') return adminRefundDish(payload)
-  if (action === 'admin.table.refundDishes') return adminRefundDishes(payload)
-  if (action === 'admin.table.giftDishes') return adminGiftDishes(payload)
-  if (action === 'admin.table.updateDish') return adminUpdateTableDish(payload)
+  if (action === 'admin.order.sendKitchenItems') return completeAdminTableMutation(adminSendKitchenItems(payload))
+  if (action === 'admin.order.urgeKitchenItems') return completeAdminTableMutation(adminUrgeKitchenItems(payload))
+  if (action === 'admin.table.refundDish') return completeAdminTableMutation(adminRefundDish(payload))
+  if (action === 'admin.table.refundDishes') return completeAdminTableMutation(adminRefundDishes(payload))
+  if (action === 'admin.table.giftDishes') return completeAdminTableMutation(adminGiftDishes(payload))
+  if (action === 'admin.table.updateDish') return completeAdminTableMutation(adminUpdateTableDish(payload))
   if (action === 'admin.notification.list') return adminListInfoCenter(payload)
   if (action === 'admin.collection.list') return adminCollectionList(payload)
-  if (action === 'admin.collection.save') return adminCollectionSave(payload)
-  if (action === 'admin.collection.update') return adminCollectionUpdate(payload)
-  if (action === 'admin.collection.delete') return adminCollectionDelete(payload)
+  if (action === 'admin.collection.save') return completeReservationMutation(adminCollectionSave(payload), payload)
+  if (action === 'admin.collection.update') return completeReservationMutation(adminCollectionUpdate(payload), payload)
+  if (action === 'admin.collection.delete') return completeReservationMutation(adminCollectionDelete(payload), payload)
   if (action.indexOf('admin.print.') === 0) {
     const printResult = await printService.handleAdminAction(action, payload)
     if (printResult) return printResult
@@ -5876,14 +6251,24 @@ async function handleAction(action, payload) {
   if (action === 'user.completeProfile') return completeUserProfile(payload)
   if (action === 'phone.getNumber') return getPhoneNumber(payload)
   if (action === 'reservation.create') return createReservation(payload)
-  if (action === 'order.create') return createOrder(payload)
+  if (action === 'order.create') {
+    const result = await createOrder(payload)
+    const isDineIn = payload.orderScene !== 'camping' && payload.orderType !== 'camping'
+    if (result && result.success && isDineIn) await touchAdminTableBoard()
+    return result
+  }
   if (action === 'order.list') return listUserOrders(payload)
   if (action === 'order.detail') return getUserOrderDetail(payload)
   if (action === 'order.delete') return markUserOrdersDeleted(payload)
   if (action === 'order.cancel') return cancelUserOrder(payload)
   if (action === 'sharedCart.join') return joinSharedCart(payload)
+  if (action === 'sharedCart.status') return getSharedCartStatus(payload)
   if (action === 'sharedCart.get') return getSharedCart(payload)
-  if (action === 'sharedCart.setPeople') return setSharedCartPeople(payload)
+  if (action === 'sharedCart.setPeople') {
+    const result = await setSharedCartPeople(payload)
+    if (result && result.success) await touchAdminTableBoard()
+    return result
+  }
   if (action === 'sharedCart.patch') return patchSharedCart(payload)
   if (action === 'sharedCart.clear') return clearSharedCart(payload)
   if (action === 'orderDraft.save') return saveOrderDraft(payload)

@@ -115,6 +115,10 @@ Component({
     show() {
       if (!this.data.enabled) return
       this.activate()
+      this.startPolling()
+    },
+    hide() {
+      this.stopPolling()
     }
   },
 

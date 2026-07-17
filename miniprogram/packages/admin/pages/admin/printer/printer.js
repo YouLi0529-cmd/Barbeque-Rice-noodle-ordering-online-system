@@ -165,25 +165,14 @@ Page({
   async loadAll() {
     this.setData({ loading: true, backendError: '' })
     try {
-      const results = await Promise.all([
-        this.loadDashboard().catch(error => error),
-        this.loadPrinters().catch(error => error),
-        this.loadCashier().catch(error => error),
-        this.loadStations().catch(error => error),
-        this.loadDishes().catch(error => error),
-        this.loadTemplates().catch(error => error),
-        this.loadJobs().catch(error => error),
-        this.loadLogs().catch(error => error)
-      ])
-      const error = results.find(result => result instanceof Error)
-      if (error) {
-        console.error('load print management failed', error)
-        const message = error.message || ''
-        const backendError = message.indexOf('unknown action') >= 0
-          ? '云端 tenantApi 还是旧版本，尚未包含打印管理接口。请在微信开发者工具上传并部署 tenantApi 后重新编译。'
-          : `打印管理数据暂时无法加载：${message || '请检查云函数和网络连接。'}`
-        this.setData({ backendError })
-      }
+      await this.loadDashboard()
+    } catch (error) {
+      console.error('load print management failed', error)
+      const message = error.message || ''
+      const backendError = message.indexOf('unknown action') >= 0
+        ? '云端 tenantApi 还是旧版本，尚未包含打印管理接口。请在微信开发者工具上传并部署 tenantApi 后重新编译。'
+        : `打印管理数据暂时无法加载：${message || '请检查云函数和网络连接。'}`
+      this.setData({ backendError })
     } finally {
       this.setData({ loading: false })
     }
