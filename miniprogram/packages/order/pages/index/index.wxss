@@ -1616,29 +1616,16 @@ page {
   flex-basis: calc((50% - 9rpx));
 }
 
-.people-custom-row {
-  height: 78rpx;
-  margin-top: 24rpx;
-  padding: 0 24rpx;
-  border-radius: 18rpx;
-  border: 2rpx solid rgba(216, 180, 126, 0.72);
-  background: rgba(255, 255, 255, 0.86);
-  display: flex;
-  align-items: center;
-  box-sizing: border-box;
-}
-
-.people-custom-input {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
+.people-custom-inline {
+  padding: 0 16rpx;
+  text-align: center;
   color: #2f241b;
-  font-size: 30rpx;
+  font-size: 28rpx;
+  line-height: 70rpx;
 }
 
-.people-custom-unit {
-  color: #8a6a42;
-  font-size: 26rpx;
+.people-custom-inline-placeholder {
+  color: #7b6d60;
 }
 
 .people-modal-tip {

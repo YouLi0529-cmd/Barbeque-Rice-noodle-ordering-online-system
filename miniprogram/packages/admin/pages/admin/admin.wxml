@@ -167,4 +167,4 @@
     </view>
   </view>
 </view>
-<admin-info-center id="admin-info-center" />
+<admin-info-center id="admin-info-center" enabled="{{isAuthorized}}" />

@@ -59,12 +59,15 @@ Page({
     sharedSessionId: '',
     sharedCartReady: false,
     sharedCartWatchReady: false,
+    sharedCartVersion: 0,
+    sharedCartHydrated: false,
     orderSessionClosed: false,
     showPeopleModal: false,
     peopleOptions: [1, 2, 3, 4, 5, 6, 7, 8],
     selectedPeopleCount: 0,
     selectedPeopleMode: '',
     customPeopleInput: '',
+    customPeopleFocused: false,
     sharedPeopleCount: 0,
     sharedPeopleConfirmed: false,
     pendingSettleAfterPeopleConfirm: false,
@@ -136,10 +139,9 @@ Page({
       }
     }
     
-    this.loadShopInfo()
-    this.loadMenu()
+    this.skipInitialUserInfoReload = true
+    this.loadInitialOrderData()
     this.loadUserInfo()
-    this.loadNotices()
     if (scannedTableNumber) {
       this.initSharedCart(scannedTableNumber)
     }
@@ -152,12 +154,22 @@ Page({
 
   onShow() {
     this.refreshCustomNav()
-    this.loadUserInfo()
+    if (this.skipInitialUserInfoReload) {
+      this.skipInitialUserInfoReload = false
+    } else {
+      this.loadUserInfo()
+    }
     if (this.data.tableNumber && !this.data.sharedSessionId) {
       this.initSharedCart(this.data.tableNumber)
     } else if (this.data.sharedSessionId) {
-      this.fetchSharedCart(false)
+      this.fetchSharedCart(false, true)
+      this.startSharedCartWatch(this.data.sharedSessionId)
     }
+  },
+
+  onHide() {
+    // Avoid spending database reads while the user is on another page or app.
+    this.stopSharedCartSync()
   },
 
   onUnload() {
@@ -188,6 +200,8 @@ Page({
       sharedSessionId: '',
       sharedCartReady: false,
       sharedCartWatchReady: false,
+      sharedCartVersion: 0,
+      sharedCartHydrated: false,
       orderSessionClosed: true,
       sharedPeopleCount: 0,
       sharedPeopleConfirmed: false,
@@ -261,17 +275,27 @@ Page({
       selectedPeopleCount: count,
       selectedPeopleMode: 'preset',
       customPeopleInput: '',
+      customPeopleFocused: false,
       peopleModalTip: ''
     })
   },
 
-  chooseCustomPeople() {
+  focusCustomPeople() {
+    if (this.data.selectedPeopleMode === 'custom') {
+      this.setData({ customPeopleFocused: true })
+      return
+    }
     this.setData({
       selectedPeopleMode: 'custom',
       selectedPeopleCount: 0,
       customPeopleInput: '',
+      customPeopleFocused: true,
       peopleModalTip: ''
     })
+  },
+
+  blurCustomPeople() {
+    this.setData({ customPeopleFocused: false })
   },
 
   onCustomPeopleInput(e) {
@@ -280,6 +304,7 @@ Page({
       selectedPeopleMode: 'custom',
       customPeopleInput: value,
       selectedPeopleCount: Math.floor(Number(value || 0)),
+      customPeopleFocused: true,
       peopleModalTip: ''
     })
   },
@@ -379,11 +404,13 @@ Page({
         tableNumber: currentTable,
         sharedSessionId: result.sessionId,
         sharedCartReady: true,
+        sharedCartVersion: Number(result.cartVersion || 0),
+        sharedCartHydrated: false,
         orderSessionClosed: false
       })
       this.applySharedPeopleState(result)
 
-      await this.fetchSharedCart(false)
+      await this.fetchSharedCart(false, true)
       if (localCartBeforeJoin) {
         const mergedCart = { ...this.data.cart }
         Object.keys(localCartBeforeJoin).forEach(cartKey => {
@@ -462,7 +489,7 @@ Page({
     if (!this.data.sharedSessionId || this.sharedCartFallbackTimer) return
     this.sharedCartFallbackTimer = setInterval(() => {
       this.fetchSharedCart(false)
-    }, 2000)
+    }, 8000)
   },
 
   stopSharedCartFallback() {
@@ -477,39 +504,63 @@ Page({
     this.stopSharedCartFallback()
   },
 
-  async fetchSharedCart(showError = true) {
-    if (!this.data.sharedSessionId) return
-
-    try {
-      const result = apiClient.isEnabled()
-        ? await apiClient.call('sharedCart.get', {
-          action: 'get',
-          sessionId: this.data.sharedSessionId,
-          tableNumber: this.data.tableNumber
-        })
-        : (await wx.cloud.callFunction({
-          name: 'sharedCart',
-          data: {
-            action: 'get',
-            sessionId: this.data.sharedSessionId,
-            tableNumber: this.data.tableNumber
-          }
-        })).result || {}
-      if (!result.success) {
-        throw new Error(result.message || '同步购物车失败')
-      }
-      if (this.isSharedSessionClosed(result)) {
-        this.handleSharedSessionClosed('本桌订单已结账，请重新扫码开台')
-        return
-      }
-      this.applySharedPeopleState(result)
-      this.applySharedCartDocs(result.items || [])
-    } catch (err) {
-      console.error('拉取共同点单购物车失败', err)
-      if (showError) {
-        wx.showToast({ title: '同步失败', icon: 'none' })
-      }
+  async fetchSharedCart(showError = true, force = false) {
+    const sessionId = this.data.sharedSessionId
+    if (!sessionId) return
+    if (this.sharedCartFetchPromise && this.sharedCartFetchSessionId === sessionId) {
+      return this.sharedCartFetchPromise
     }
+
+    this.sharedCartFetchSessionId = sessionId
+    this.sharedCartFetchPromise = (async () => {
+      try {
+        const requestData = {
+          action: 'get',
+          sessionId,
+          tableNumber: this.data.tableNumber
+        }
+        if (force || !this.data.sharedCartHydrated) {
+          requestData.force = true
+        } else {
+          requestData.cartVersion = this.data.sharedCartVersion
+        }
+
+        const result = apiClient.isEnabled()
+          ? await apiClient.call('sharedCart.get', requestData)
+          : (await wx.cloud.callFunction({
+            name: 'sharedCart',
+            data: requestData
+          })).result || {}
+        if (!result.success) {
+          throw new Error(result.message || '同步购物车失败')
+        }
+        if (this.data.sharedSessionId !== sessionId) return
+        if (this.isSharedSessionClosed(result)) {
+          this.handleSharedSessionClosed('本桌订单已结账，请重新扫码开台')
+          return
+        }
+        this.applySharedPeopleState(result)
+        this.setData({
+          sharedCartVersion: Number(result.cartVersion || 0),
+          sharedCartHydrated: this.data.sharedCartHydrated || !result.unchanged
+        })
+        if (!result.unchanged) {
+          this.applySharedCartDocs(result.items || [])
+        }
+      } catch (err) {
+        console.error('拉取共同点单购物车失败', err)
+        if (showError) {
+          wx.showToast({ title: '同步失败', icon: 'none' })
+        }
+      } finally {
+        if (this.sharedCartFetchSessionId === sessionId) {
+          this.sharedCartFetchPromise = null
+          this.sharedCartFetchSessionId = ''
+        }
+      }
+    })()
+
+    return this.sharedCartFetchPromise
   },
 
   applySharedCartDocs(docs) {
@@ -587,7 +638,15 @@ Page({
         }
       })
 
-    request.catch(err => {
+    request.then(res => {
+      const result = apiClient.isEnabled() ? (res || {}) : (res.result || {})
+      if (result && Number.isFinite(Number(result.cartVersion))) {
+        this.setData({
+          sharedCartVersion: Number(result.cartVersion),
+          sharedCartHydrated: true
+        })
+      }
+    }).catch(err => {
       console.error('同步共同点单购物车失败', err)
       if (err.code === 'SESSION_CLOSED' ||
           err.code === 'TABLE_SESSION_CLOSED' ||
@@ -639,6 +698,65 @@ Page({
       }
     } catch (err) {
       console.error('加载店铺信息失败', err)
+    }
+  },
+
+  async loadInitialOrderData(showLoading = true) {
+    if (!apiClient.isEnabled()) {
+      await Promise.all([
+        this.loadShopInfo(),
+        this.loadMenu(showLoading),
+        this.loadNotices()
+      ])
+      return
+    }
+
+    if (showLoading) {
+      this.setData({ menuLoading: true })
+      this.startOrderLoadingAnimation()
+    }
+
+    try {
+      const result = await apiClient.call('menu.bootstrap', {
+        menuType: 'dineIn',
+        initialCategoryCount: this.data.categoryBatchSize
+      })
+      const data = result.data || {}
+      const menuList = data.categories || []
+      const categorySections = (data.sections || []).map(section => ({
+        ...section,
+        goods: (section.goods || []).map(item => this.normalizeGoodsItem(item))
+      }))
+      const noticeList = data.notices || []
+      const goodsList = categorySections.reduce((list, section) => list.concat(section.goods), [])
+
+      this.setData({
+        shopInfo: data.shopInfo || {},
+        noticeList,
+        noticeText: noticeList.map(item => item.content).join('    '),
+        menuList,
+        currentMenuId: menuList[0] ? menuList[0]._id : '',
+        goodsPage: 0,
+        goodsHasMore: categorySections.length < menuList.length,
+        categorySections,
+        loadedCategoryCount: categorySections.length,
+        goodsList,
+        searchKeyword: '',
+        isSearching: false,
+        searchLoading: false,
+        searchGoodsList: [],
+        scrollIntoSection: ''
+      }, () => {
+        this.measureCategorySections()
+      })
+    } catch (err) {
+      console.error('加载点单初始数据失败', err)
+      wx.showToast({ title: '加载失败', icon: 'none' })
+    } finally {
+      if (showLoading) {
+        this.stopOrderLoadingAnimation()
+        this.setData({ menuLoading: false })
+      }
     }
   },
 
@@ -2249,10 +2367,8 @@ Page({
 
       // 并行刷新所有数据（不显示 loading，使用系统下拉刷新动画）
       await Promise.all([
-        this.loadShopInfo(),
-        this.loadMenu(false), // 不显示 loading
-        this.loadUserInfo(),
-        this.loadNotices()
+        this.loadInitialOrderData(false),
+        this.loadUserInfo()
       ])
     } catch (err) {
       console.error('刷新失败', err)

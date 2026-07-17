@@ -51,7 +51,6 @@ const printService = createPrintService({
 })
 
 let ensureSessionCollectionPromise = null
-let ensureCoreCollectionsPromise = null
 
 function parseJson(text) {
   if (!text || typeof text !== 'string') return {}
@@ -295,34 +294,6 @@ async function ensureSessionCollection() {
     ensureSessionCollectionPromise = ensureCollection('tenantSession')
   }
   return ensureSessionCollectionPromise
-}
-
-async function ensureCoreCollections() {
-  if (!ensureCoreCollectionsPromise) {
-    ensureCoreCollectionsPromise = Promise.all([
-      ensureCollection('tenantLicense'),
-      ensureCollection('tenantSession'),
-      ensureCollection('user'),
-      ensureCollection('counter'),
-      ensureCollection('order'),
-      ensureCollection('dishCategory'),
-      ensureCollection('dish'),
-      ensureCollection('admin'),
-      ensureCollection('shopInfo'),
-      ensureCollection('notice'),
-      ensureCollection('orderDraft'),
-      ensureCollection('tableOrderSession'),
-      ensureCollection('tableCartItem'),
-      ensureCollection('tableGroup'),
-      ensureCollection('queue'),
-      ensureCollection('reservation'),
-      ensureCollection('printer'),
-      ensureCollection('tableCode'),
-      ensureCollection('rechargeOptions'),
-      ...printService.collectionNames.map(name => ensureCollection(name))
-    ])
-  }
-  return ensureCoreCollectionsPromise
 }
 
 async function getWechatSession(code) {
@@ -3635,7 +3606,10 @@ function buildSharedCartSessionState(session) {
     sessionActive,
     sessionClosed: !session || !sessionActive,
     sessionStatus: String(session && session.status || ''),
-    checkoutStatus: String(session && session.checkoutStatus || '')
+    checkoutStatus: String(session && session.checkoutStatus || ''),
+    // Changes whenever cart items change. Clients can skip re-reading all items
+    // when the version they already hold is still current.
+    cartVersion: Math.max(0, Math.floor(Number(session && session.cartVersion || 0)))
   }
 }
 
@@ -3693,6 +3667,7 @@ async function joinSharedCart(payload) {
       updateData.peopleCount = 0
       updateData.peopleConfirmed = false
       updateData.peopleConfirmedAt = null
+      updateData.cartVersion = 0
       await clearSharedCartItemsBySessionId(sessionId)
       clearedForNewSession = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date())
     }
@@ -3704,7 +3679,8 @@ async function joinSharedCart(payload) {
         tableNumber,
         status: 'ordering',
         peopleCount: 0,
-        peopleConfirmed: false
+        peopleConfirmed: false,
+        cartVersion: 0
       }
       : oldSession
   } else {
@@ -3715,6 +3691,7 @@ async function joinSharedCart(payload) {
         peopleCount: 0,
         peopleConfirmed: false,
         peopleConfirmedAt: null,
+        cartVersion: 0,
         memberOpenids: [auth.data.openid],
         createTime: db.serverDate(),
         updateTime: db.serverDate()
@@ -3725,7 +3702,8 @@ async function joinSharedCart(payload) {
       tableNumber,
       status: 'ordering',
       peopleCount: 0,
-      peopleConfirmed: false
+      peopleConfirmed: false,
+      cartVersion: 0
     }
   }
 
@@ -3759,6 +3737,20 @@ async function getSharedCart(payload) {
     return {
       success: true,
       items: [],
+      ...buildSharedCartPeopleState(sessionRes.data),
+      ...sessionState
+    }
+  }
+
+  const clientCartVersion = Math.max(0, Math.floor(Number(payload.cartVersion || 0)))
+  const shouldSkipItemQuery = payload.force !== true &&
+    payload.cartVersion !== undefined &&
+    clientCartVersion === sessionState.cartVersion
+
+  if (shouldSkipItemQuery) {
+    return {
+      success: true,
+      unchanged: true,
       ...buildSharedCartPeopleState(sessionRes.data),
       ...sessionState
     }
@@ -3950,12 +3942,14 @@ async function patchSharedCart(payload) {
     data: {
       tableNumber,
       memberOpenids: _.addToSet(auth.data.openid),
+      cartVersion: _.inc(1),
       updateTime: db.serverDate()
     }
   })
 
   return {
-    success: true
+    success: true,
+    cartVersion: Math.max(0, Math.floor(Number(sessionRes.data && sessionRes.data.cartVersion || 0))) + 1
   }
 }
 
@@ -3987,6 +3981,7 @@ async function clearSharedCart(payload) {
 
   await db.collection('tableOrderSession').doc(sessionId).update({
     data: {
+      cartVersion: _.inc(1),
       updateTime: db.serverDate()
     }
   })
@@ -4143,6 +4138,8 @@ const DEFAULT_DISH_IMAGE_FILES = [
 ]
 
 const DEFAULT_DISH_IMAGE_BASE_URL = 'cloud://zhrcloud-d1gsjuhij11024f72.7a68-zhrcloud-d1gsjuhij11024f72-1449718669/dish pic'
+const DEFAULT_DISH_IMAGE_FILE_ID_PREFIX = DEFAULT_DISH_IMAGE_BASE_URL.replace(/\/dish pic$/, '')
+const DEFAULT_DISH_IMAGE_CDN_HOST = '7a68-zhrcloud-d1gsjuhij11024f72-1449718669.tcb.qcloud.la'
 
 const DISH_IMAGE_NAME_ALIASES = {
   '蒜香口蘑': ['蒜蓉口蘑']
@@ -4216,10 +4213,30 @@ function isCloudFileID(value) {
   return /^cloud:\/\//i.test(String(value || '').trim())
 }
 
+function getLegacyDishImageFileID(value) {
+  const image = String(value || '').trim()
+  if (!image || isCloudFileID(image)) return image
+
+  try {
+    const url = new URL(image)
+    if (url.hostname !== DEFAULT_DISH_IMAGE_CDN_HOST) return ''
+    const cloudPath = decodeURIComponent(url.pathname || '').replace(/^\/+/, '')
+    return cloudPath ? `${DEFAULT_DISH_IMAGE_FILE_ID_PREFIX}/${cloudPath}` : ''
+  } catch (err) {
+    return ''
+  }
+}
+
 async function resolveDishImageUrls(list = []) {
-  const dishes = (list || []).map(item => ({ ...item }))
+  const dishes = (list || []).map(item => {
+    const image = String(item && item.image || '').trim()
+    const imageFileID = isCloudFileID(image) ? image : getLegacyDishImageFileID(image)
+    return imageFileID && imageFileID !== image
+      ? { ...item, imageFileID }
+      : { ...item }
+  })
   const fileIDs = Array.from(new Set(dishes
-    .map(item => String(item.image || '').trim())
+    .map(item => String(item.imageFileID || item.image || '').trim())
     .filter(isCloudFileID)))
 
   if (fileIDs.length === 0) {
@@ -4240,22 +4257,22 @@ async function resolveDishImageUrls(list = []) {
     }
 
     return dishes.map(item => {
-      const image = String(item.image || '').trim()
-      if (!isCloudFileID(image)) return item
+      const imageFileID = String(item.imageFileID || item.image || '').trim()
+      if (!isCloudFileID(imageFileID)) return item
       return {
         ...item,
-        imageFileID: image,
-        image: tempMap[image] || ''
+        imageFileID,
+        image: tempMap[imageFileID] || ''
       }
     })
   } catch (err) {
     console.error('resolve dish image urls failed', err)
     return dishes.map(item => {
-      const image = String(item.image || '').trim()
-      if (!isCloudFileID(image)) return item
+      const imageFileID = String(item.imageFileID || item.image || '').trim()
+      if (!isCloudFileID(imageFileID)) return item
       return {
         ...item,
-        imageFileID: image,
+        imageFileID,
         image: ''
       }
     })
@@ -4891,6 +4908,40 @@ async function listCategoryGoods(payload) {
     page,
     limit,
     hasMore: (res.data || []).length === limit
+  }
+}
+
+async function getMenuBootstrap(payload = {}) {
+  const menuType = getMenuType(payload.menuType)
+  const initialCategoryCount = Math.min(Math.max(Number(payload.initialCategoryCount) || 3, 1), 3)
+  const [categoryResult, shopResult, noticeResult] = await Promise.all([
+    listCategories({ menuType }),
+    getShopInfo(),
+    listNotices({ target: menuType })
+  ])
+  const categories = categoryResult.data || []
+  const initialCategories = categories.slice(0, initialCategoryCount)
+  const sectionResults = await Promise.all(initialCategories.map(category => (
+    listCategoryGoods({
+      menuType,
+      categoryId: category._id,
+      limit: 100
+    })
+  )))
+  const sections = initialCategories.map((category, index) => ({
+    id: category._id,
+    name: category.name,
+    goods: sectionResults[index].data || []
+  }))
+
+  return {
+    success: true,
+    data: {
+      categories,
+      sections,
+      shopInfo: shopResult.data || null,
+      notices: noticeResult.data || []
+    }
   }
 }
 
@@ -5752,6 +5803,7 @@ async function handleAction(action, payload) {
     }
   }
 
+  if (action === 'menu.bootstrap') return getMenuBootstrap(payload)
   if (action === 'menu.categories') return listCategories(payload)
   if (action === 'menu.categoryGoods') return listCategoryGoods(payload)
   if (action === 'menu.search') return searchGoods(payload)
@@ -5852,8 +5904,6 @@ exports.main = async (event = {}) => {
   }
 
   try {
-    await ensureCoreCollections()
-
     const payload = parsePayload(event)
     const action = String(payload.action || '').trim()
     if (!action) {

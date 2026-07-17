@@ -340,21 +340,17 @@
           data-count="{{item}}"
           bindtap="selectPeopleOption"
         >{{item}}人</view>
-        <view
-          class="people-option custom {{selectedPeopleMode === 'custom' ? 'active' : ''}}"
-          bindtap="chooseCustomPeople"
-        >自定义</view>
-      </view>
-      <view class="people-custom-row" wx:if="{{selectedPeopleMode === 'custom'}}">
         <input
-          class="people-custom-input"
+          class="people-option custom people-custom-inline {{selectedPeopleMode === 'custom' ? 'active' : ''}}"
           type="number"
           value="{{customPeopleInput}}"
           maxlength="2"
-          placeholder="输入人数"
+          placeholder="{{customPeopleFocused ? '' : '自定义'}}"
+          placeholder-class="people-custom-inline-placeholder"
+          bindfocus="focusCustomPeople"
+          bindblur="blurCustomPeople"
           bindinput="onCustomPeopleInput"
         />
-        <text class="people-custom-unit">人</text>
       </view>
       <view class="people-modal-tip" wx:if="{{peopleModalTip}}">{{peopleModalTip}}</view>
       <view class="people-confirm-btn {{selectedPeopleCount > 0 ? 'active' : ''}}" bindtap="confirmPeopleCount">
