@@ -44,16 +44,12 @@
 
   <!-- 轮播公告 -->
   <view class="notice-wrapper" wx:if="{{noticeList.length > 0}}">
-    <van-notice-bar
-      class="notice-component"
-      custom-class="notice-bar"
-      left-icon="volume-o"
-      color="#7A4A1F"
-      background="transparent"
-      text="{{noticeText}}"
-      scrollable="{{true}}"
-      speed="{{22}}"
-    />
+    <view class="notice-bar">
+      <image class="notice-speaker-icon" src="/images/volume-2.svg" mode="aspectFit"></image>
+      <view class="notice-text-clip">
+        <view class="notice-text-track">{{noticeText}}</view>
+      </view>
+    </view>
   </view>
   <!-- 主内容区 -->
   <view class="main-content">

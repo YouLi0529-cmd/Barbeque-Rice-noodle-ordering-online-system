@@ -766,10 +766,12 @@ async function createOrder(payload) {
     ? 'camping'
     : 'dineIn'
   const tableNumber = String(payload.tableNumber || '').trim()
-  const parentOrderId = String(payload.parentOrderId || '').trim()
-  const isAddOnOrder = !!parentOrderId
-  const addOnIndex = Math.max(0, Math.floor(Number(payload.addOnIndex) || 0))
+  let parentOrderId = String(payload.parentOrderId || '').trim()
+  let isAddOnOrder = !!parentOrderId
+  let addOnIndex = Math.max(0, Math.floor(Number(payload.addOnIndex) || 0))
   let effectiveTableNumber = tableNumber
+  let sharedSessionId = ''
+  let sharedSession = null
 
   if (orderScene !== 'camping' && !tableNumber) {
     return {
@@ -780,22 +782,28 @@ async function createOrder(payload) {
   }
 
   if (orderScene !== 'camping') {
-    const sharedSessionId = String(payload.sharedSessionId || getSharedCartSessionId(tableNumber)).trim()
+    sharedSessionId = String(payload.sharedSessionId || getSharedCartSessionId(tableNumber)).trim()
     const sessionRes = await db.collection('tableOrderSession').doc(sharedSessionId).get()
-    const session = sessionRes.data
-    if (!isActiveTableSession(session)) {
+    sharedSession = sessionRes.data
+    if (!isActiveTableSession(sharedSession)) {
       return {
         success: false,
         code: 'TABLE_SESSION_CLOSED',
         message: '本桌订单已结账，请重新扫码开台'
       }
     }
-    if (!buildSharedCartPeopleState(session).peopleConfirmed) {
+    if (!buildSharedCartPeopleState(sharedSession).peopleConfirmed) {
       return {
         success: false,
         code: 'TABLE_PEOPLE_REQUIRED',
         message: '请先确认用餐人数'
       }
+    }
+
+    if (!parentOrderId && sharedSession.activeOrderRootId) {
+      parentOrderId = String(sharedSession.activeOrderRootId)
+      isAddOnOrder = true
+      addOnIndex = Math.max(1, Math.floor(Number(sharedSession.addOnCount || 0)) + 1)
     }
   }
 
@@ -816,7 +824,12 @@ async function createOrder(payload) {
       if (!parentOrder) {
         throw new Error('parent order not found')
       }
-      if (parentOrder._openid !== openid) {
+      const canAppendFromSharedTable = orderScene !== 'camping' &&
+        sharedSession &&
+        String(sharedSession.activeOrderRootId || '') === parentOrderId &&
+        Array.isArray(sharedSession.memberOpenids) &&
+        sharedSession.memberOpenids.includes(openid)
+      if (parentOrder._openid !== openid && !canAppendFromSharedTable) {
         throw new Error('cannot append to another user order')
       }
       if (parentOrder.orderScene !== orderScene) {
@@ -852,7 +865,7 @@ async function createOrder(payload) {
       parentOrderId: isAddOnOrder ? parentOrderId : '',
       rootOrderId,
       addOnIndex: isAddOnOrder ? addOnIndex : 0,
-      orderCardTitle: payload.orderCardTitle || (isAddOnOrder ? `加菜单${addOnIndex}` : '首单'),
+      orderCardTitle: isAddOnOrder ? `加菜单${addOnIndex}` : (payload.orderCardTitle || '首单'),
       goods: priceResult.goods,
       totalPrice: priceResult.totalPrice,
       finalPrice: priceResult.finalPrice,
@@ -907,6 +920,18 @@ async function createOrder(payload) {
       }
     }
   })
+
+  if (orderScene !== 'camping' && sharedSessionId && result && result.order) {
+    await db.collection('tableOrderSession').doc(sharedSessionId).update({
+      data: {
+        activeOrderRootId: result.order.rootOrderId || result.order._id || '',
+        addOnCount: isAddOnOrder ? addOnIndex : 0,
+        updateTime: db.serverDate()
+      }
+    }).catch(err => {
+      console.error('save active table order context failed', err)
+    })
+  }
 
   return result
 }
@@ -3835,6 +3860,8 @@ function buildSharedCartSessionState(session) {
     checkoutStatus: String(session && session.checkoutStatus || ''),
     sharedCartSyncActive: sessionActive && sharedCartActiveUntil > Date.now(),
     sharedCartActiveUntil,
+    activeOrderRootId: String(session && session.activeOrderRootId || ''),
+    addOnCount: Math.max(0, Math.floor(Number(session && session.addOnCount || 0))),
     // Changes whenever cart items change. Clients can skip re-reading all items
     // when the version they already hold is still current.
     cartVersion: Math.max(0, Math.floor(Number(session && session.cartVersion || 0)))
@@ -3890,6 +3917,47 @@ function normalizeSharedCartItem(item) {
   }
 }
 
+async function getActiveTableOrderContext(tableNumber) {
+  const normalizedTableNumber = normalizeTableNumber(tableNumber)
+  if (!normalizedTableNumber) {
+    return {
+      activeOrderRootId: '',
+      addOnCount: 0
+    }
+  }
+
+  const orderRes = await db.collection('order')
+    .where({
+      type: 'order',
+      tableNumber: normalizedTableNumber
+    })
+    .orderBy('createTime', 'asc')
+    .limit(100)
+    .get()
+
+  const activeOrders = (orderRes.data || []).filter(order => {
+    return order &&
+      order.orderScene !== 'camping' &&
+      order.deleted !== true &&
+      !isAdminPaidOrder(order)
+  })
+
+  if (!activeOrders.length) {
+    return {
+      activeOrderRootId: '',
+      addOnCount: 0
+    }
+  }
+
+  const firstOrder = activeOrders[0]
+  return {
+    activeOrderRootId: String(firstOrder.rootOrderId || firstOrder._id || ''),
+    addOnCount: activeOrders.reduce((max, order) => {
+      return Math.max(max, Math.floor(Number(order.addOnIndex || 0)))
+    }, 0)
+  }
+}
+
 async function joinSharedCart(payload) {
   const auth = await getAuthSession(payload)
   if (!auth.success) return auth
@@ -3927,12 +3995,21 @@ async function joinSharedCart(payload) {
       sharedCartActiveUntil,
       updateTime: db.serverDate()
     }
+    const inferredOrderContext = !shouldResetSession && !oldSession.activeOrderRootId
+      ? await getActiveTableOrderContext(tableNumber)
+      : null
+    if (inferredOrderContext && inferredOrderContext.activeOrderRootId) {
+      updateData.activeOrderRootId = inferredOrderContext.activeOrderRootId
+      updateData.addOnCount = inferredOrderContext.addOnCount
+    }
     if (shouldResetSession) {
       updateData.createTime = db.serverDate()
       updateData.peopleCount = 0
       updateData.peopleConfirmed = false
       updateData.peopleConfirmedAt = null
       updateData.cartVersion = 0
+      updateData.activeOrderRootId = ''
+      updateData.addOnCount = 0
       await clearSharedCartItemsBySessionId(sessionId)
       clearedForNewSession = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date())
     }
@@ -3946,10 +4023,13 @@ async function joinSharedCart(payload) {
         peopleCount: 0,
         peopleConfirmed: false,
         cartVersion: 0,
+        activeOrderRootId: '',
+        addOnCount: 0,
         sharedCartActiveUntil
       }
       : {
         ...oldSession,
+        ...(inferredOrderContext || {}),
         sharedCartActiveUntil
       }
   } else {
@@ -3961,6 +4041,8 @@ async function joinSharedCart(payload) {
         peopleConfirmed: false,
         peopleConfirmedAt: null,
         cartVersion: 0,
+        activeOrderRootId: '',
+        addOnCount: 0,
         sharedCartActiveUntil,
         memberOpenids: [auth.data.openid],
         createTime: db.serverDate(),
@@ -3974,6 +4056,8 @@ async function joinSharedCart(payload) {
       peopleCount: 0,
       peopleConfirmed: false,
       cartVersion: 0,
+      activeOrderRootId: '',
+      addOnCount: 0,
       sharedCartActiveUntil
     }
   }

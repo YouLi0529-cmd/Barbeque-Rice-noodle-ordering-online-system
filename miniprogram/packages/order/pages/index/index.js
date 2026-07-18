@@ -40,6 +40,7 @@ Page({
     noticeText: '', // 公告文本（用于vant组件）
     shopInfo: {}, // 店铺信息
     showTagModal: false, // 显示标签选择弹窗
+    isTagModalClosing: false,
     currentDish: null, // 当前选择的菜品
     selectedTags: {}, // 当前选择的标签 {tagId: [选项]}
     modalDishCount: 1, // 弹窗中选择的商品数量
@@ -66,6 +67,8 @@ Page({
     sharedCartHydrated: false,
     sharedCartSyncActive: false,
     sharedCartActiveUntil: 0,
+    sharedOrderRootId: '',
+    sharedOrderAddOnCount: 0,
     orderSessionClosed: false,
     showPeopleModal: false,
     peopleOptions: [1, 2, 3, 4, 5, 6, 7, 8],
@@ -183,6 +186,10 @@ Page({
       this.searchTimer = null
     }
     this.clearCartFxTimers()
+    if (this.tagModalCloseTimer) {
+      clearTimeout(this.tagModalCloseTimer)
+      this.tagModalCloseTimer = null
+    }
     this.stopOrderLoadingAnimation()
     this.stopSharedCartSync()
   },
@@ -210,6 +217,8 @@ Page({
       sharedCartHydrated: false,
       sharedCartSyncActive: false,
       sharedCartActiveUntil: 0,
+      sharedOrderRootId: '',
+      sharedOrderAddOnCount: 0,
       orderSessionClosed: true,
       sharedPeopleCount: 0,
       sharedPeopleConfirmed: false,
@@ -417,6 +426,8 @@ Page({
         sharedCartHydrated: false,
         sharedCartSyncActive: result.sharedCartSyncActive !== false,
         sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0),
+        sharedOrderRootId: result.activeOrderRootId || '',
+        sharedOrderAddOnCount: Number(result.addOnCount || 0),
         orderSessionClosed: false
       })
       this.applySharedPeopleState(result)
@@ -574,7 +585,9 @@ Page({
           this.setData({
             sharedCartVersion: currentCartVersion,
             sharedCartSyncActive: statusResult.sharedCartSyncActive === true,
-            sharedCartActiveUntil: Number(statusResult.sharedCartActiveUntil || 0)
+            sharedCartActiveUntil: Number(statusResult.sharedCartActiveUntil || 0),
+            sharedOrderRootId: statusResult.activeOrderRootId || '',
+            sharedOrderAddOnCount: Number(statusResult.addOnCount || 0)
           })
             if (currentCartVersion === previousCartVersion) return
             requestData.force = true
@@ -608,7 +621,9 @@ Page({
           sharedCartSyncActive: typeof result.sharedCartSyncActive === 'boolean'
             ? result.sharedCartSyncActive
             : this.data.sharedCartSyncActive,
-          sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0)
+          sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0),
+          sharedOrderRootId: result.activeOrderRootId || '',
+          sharedOrderAddOnCount: Number(result.addOnCount || 0)
         })
         if (!result.unchanged) {
           this.applySharedCartDocs(result.items || [])
@@ -1503,9 +1518,32 @@ Page({
 
     const goods = e.currentTarget.dataset.goods
     const specAddOriginPoint = this.getTapPoint(e)
-    const flavorOptions = goods.flavorOptions && goods.flavorOptions.length
-      ? goods.flavorOptions
-      : ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3']
+    this.openDishModal(goods, specAddOriginPoint)
+  },
+
+  // 菜品图片用于查看大图，无规格菜品也可以打开这个展示面板。
+  openDishPreview(e) {
+    const goods = e.currentTarget.dataset.goods
+    this.openDishModal(goods, null)
+  },
+
+  openDishModal(goods, specAddOriginPoint) {
+    if (!goods) return
+
+    if (this.tagModalCloseTimer) {
+      clearTimeout(this.tagModalCloseTimer)
+      this.tagModalCloseTimer = null
+    }
+
+    const hasSelectableSpecs = goods.needSpec !== false ||
+      (Array.isArray(goods.tags) && goods.tags.length > 0) ||
+      (Array.isArray(goods.optionGroups) && goods.optionGroups.length > 0) ||
+      (Array.isArray(goods.flavorOptions) && goods.flavorOptions.length > 0)
+    const flavorOptions = hasSelectableSpecs
+      ? (goods.flavorOptions && goods.flavorOptions.length
+        ? goods.flavorOptions
+        : ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'])
+      : []
     const defaultFlavor = this.getDefaultOption(flavorOptions)
     const optionGroups = (goods.optionGroups || []).map(group => ({
       ...group,
@@ -1525,6 +1563,7 @@ Page({
     // 总是显示弹窗，让用户选择数量
     this.setData({
       showTagModal: true,
+      isTagModalClosing: false,
       currentDish: {
         ...goods,
         tags: []
@@ -1664,7 +1703,11 @@ Page({
     if (!this.requirePeopleBeforeOrder()) return
 
     const goods = e.currentTarget.dataset.goods
-    if (goods.needSpec !== false) {
+    const needsSpecModal = goods.needSpec !== false ||
+      (Array.isArray(goods.tags) && goods.tags.length > 0) ||
+      (Array.isArray(goods.optionGroups) && goods.optionGroups.length > 0) ||
+      (Array.isArray(goods.flavorOptions) && goods.flavorOptions.length > 0)
+    if (needsSpecModal) {
       this.addToCart(e)
       return
     }
@@ -1696,9 +1739,6 @@ Page({
         icon: 'success',
         duration: 1000
       })
-    } else {
-      // 有标签，显示弹窗让用户选择
-      this.addToCart(e)
     }
   },
 
@@ -1964,19 +2004,29 @@ Page({
   },
 
   closeTagModal() {
+    if (!this.data.showTagModal || this.data.isTagModalClosing) return
+
     this.setData({
-      showTagModal: false,
-      currentDish: null,
-      selectedTags: {},
-      modalFlavorTitle: '\u53e3\u5473',
-      modalFlavorOptions: ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'],
-      modalOptionGroups: [],
-      modalRemark: '',
-      modalRemarkCount: 0,
-      modalDishCount: 1,
-      modalTotalPrice: 0,
-      specAddOriginPoint: null
+      isTagModalClosing: true
     })
+
+    this.tagModalCloseTimer = setTimeout(() => {
+      this.tagModalCloseTimer = null
+      this.setData({
+        showTagModal: false,
+        isTagModalClosing: false,
+        currentDish: null,
+        selectedTags: {},
+        modalFlavorTitle: '\u53e3\u5473',
+        modalFlavorOptions: ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'],
+        modalOptionGroups: [],
+        modalRemark: '',
+        modalRemarkCount: 0,
+        modalDishCount: 1,
+        modalTotalPrice: 0,
+        specAddOriginPoint: null
+      })
+    }, 300)
   },
 
   // 增加弹窗商品数量
@@ -2315,7 +2365,13 @@ Page({
         orderType: 'dineIn',
         orderScene: 'dineIn',
         sharedSessionId: this.data.sharedSessionId || '',
-        activeOrderSession: this.getActiveOrderSessionForSettle()
+        activeOrderSession: this.getActiveOrderSessionForSettle(),
+        sharedOrderContext: this.data.sharedOrderRootId
+          ? {
+              rootOrderId: this.data.sharedOrderRootId,
+              addOnCount: Number(this.data.sharedOrderAddOnCount || 0)
+            }
+          : null
       })
       
       // 跳转到结算页面

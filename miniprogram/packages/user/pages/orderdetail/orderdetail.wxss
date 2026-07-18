@@ -78,6 +78,39 @@
   box-sizing: border-box;
 }
 
+.submitted-actions {
+  display: flex;
+  gap: 18rpx;
+  padding: 18rpx 24rpx calc(18rpx + env(safe-area-inset-bottom));
+  background: #f5e7d5;
+  border-top: 1rpx solid rgba(95, 61, 32, 0.1);
+  box-sizing: border-box;
+}
+
+.submitted-action {
+  flex: 1;
+  height: 78rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+.checkout-action {
+  color: #fff;
+  background: #c88824;
+}
+
+.add-more-action {
+  color: #785426;
+  background: rgba(255, 250, 241, 0.95);
+  border: 1rpx solid rgba(182, 132, 65, 0.55);
+}
+
 .detail-card {
   margin: 26rpx 24rpx 48rpx;
   padding: 26rpx 24rpx 24rpx;

@@ -61,7 +61,7 @@
       <text wx:else>提交订单</text>
     </view>
     <view wx:else class="footer-actions">
-      <view class="footer-action primary" bindtap="confirmSubmittedOrder">确定提交</view>
+      <view class="footer-action primary" bindtap="goToFrontDeskCheckout">结账</view>
       <view class="footer-action secondary" bindtap="addMoreDishes">再加一点</view>
     </view>
   </view>

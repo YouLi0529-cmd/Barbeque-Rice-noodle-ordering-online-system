@@ -199,31 +199,53 @@ page {
   overflow: visible;
 }
 
-.notice-component {
-  display: block;
-  width: 100%;
-}
-
 .notice-bar {
   width: 100%;
-  height: 52rpx !important;
-  --notice-bar-height: 52rpx;
-  --notice-bar-line-height: 52rpx;
-  --notice-bar-padding: 0 18rpx;
-  --notice-bar-font-size: 22rpx;
-  --notice-bar-icon-size: 24rpx;
-  --notice-bar-icon-min-width: 30rpx;
-  display: flex !important;
-  align-items: center !important;
+  height: 52rpx;
+  display: flex;
+  align-items: center;
   overflow: hidden;
   border-radius: 999rpx;
-  background: rgba(255, 250, 241, 0.78) !important;
+  background: rgba(255, 250, 241, 0.78);
   border: 1rpx solid rgba(216, 180, 126, 0.38);
   box-shadow: 0 5rpx 14rpx rgba(95, 61, 32, 0.05);
   box-sizing: border-box;
-  color: #7A4A1F !important;
-  font-size: 22rpx !important;
-  line-height: 52rpx !important;
+  color: #7A4A1F;
+}
+
+.notice-speaker-icon {
+  width: 28rpx;
+  height: 28rpx;
+  flex-shrink: 0;
+  margin: 0 16rpx 0 20rpx;
+}
+
+.notice-text-clip {
+  flex: 1;
+  min-width: 0;
+  height: 52rpx;
+  overflow: hidden;
+}
+
+.notice-text-track {
+  display: inline-block;
+  min-width: 100%;
+  padding-right: 44rpx;
+  color: #7A4A1F;
+  font-size: 22rpx;
+  line-height: 52rpx;
+  white-space: nowrap;
+  box-sizing: border-box;
+  animation: notice-scroll 24s linear infinite;
+}
+
+@keyframes notice-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
 }
 /* 顶部用户信息栏 */
 .user-bar {
@@ -1317,68 +1339,104 @@ page {
   align-items: flex-end;
   justify-content: center;
   background: rgba(0, 0, 0, 0.48);
+  animation: spec-mask-in 300ms ease-out both;
+}
+
+.modal-mask.is-closing {
+  animation: spec-mask-out 300ms ease-in both;
 }
 
 .spec-modal {
   position: relative;
   width: 100%;
-  height: 64vh;
+  height: 72vh;
   background: #fffaf1;
   border-radius: 42rpx 42rpx 0 0;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  padding-top: 112rpx;
-  overflow: visible;
+  overflow: hidden;
+  will-change: transform, opacity;
+  animation: spec-modal-rise 320ms cubic-bezier(0.22, 0.8, 0.25, 1) both;
+}
+
+.spec-modal.is-closing {
+  animation: spec-modal-drop 300ms cubic-bezier(0.55, 0, 0.78, 0.2) both;
+}
+
+@keyframes spec-mask-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes spec-mask-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes spec-modal-rise {
+  from {
+    opacity: 0.85;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes spec-modal-drop {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0.85;
+    transform: translateY(100%);
+  }
 }
 
 .spec-product-card {
-  position: absolute;
-  left: 32rpx;
-  right: 32rpx;
-  top: -64rpx;
-  min-height: 168rpx;
-  padding: 22rpx;
-  border-radius: 16rpx;
-  background: #fffaf1;
-  box-shadow: 0 16rpx 40rpx rgba(95, 61, 32, 0.16);
-  display: flex;
-  align-items: center;
+  width: 100%;
+  height: 30vh;
+  flex-shrink: 0;
+  background: #f2e0c6;
   box-sizing: border-box;
 }
 
 .spec-product-image {
-  width: 132rpx;
-  height: 132rpx;
-  border-radius: 14rpx;
+  width: 100%;
+  height: 100%;
+  border-radius: 42rpx 42rpx 0 0;
   background: #f2e0c6;
-  flex-shrink: 0;
   overflow: hidden;
 }
 
 .spec-product-info {
-  flex: 1;
+  flex-shrink: 0;
   min-width: 0;
-  margin-left: 24rpx;
+  padding: 20rpx 32rpx 12rpx;
+  box-sizing: border-box;
 }
 
 .spec-product-name {
   color: #2f241b;
-  font-size: 36rpx;
+  font-size: 34rpx;
   font-weight: 700;
   line-height: 1.25;
   letter-spacing: 2rpx;
 }
 
 .spec-product-desc {
-  margin-top: 10rpx;
+  margin-top: 6rpx;
   color: #8c7a66;
-  font-size: 24rpx;
+  font-size: 22rpx;
   line-height: 1.45;
 }
 
 .spec-content {
-  flex: 1;
+  flex: 0 0 16vh;
+  height: 16vh;
   min-height: 0;
   padding: 0 32rpx 24rpx;
   box-sizing: border-box;
@@ -1460,6 +1518,7 @@ page {
 }
 
 .spec-footer {
+  margin-top: auto;
   flex-shrink: 0;
   background: #fffaf1;
   border-top: 2rpx solid rgba(234, 214, 184, 0.78);

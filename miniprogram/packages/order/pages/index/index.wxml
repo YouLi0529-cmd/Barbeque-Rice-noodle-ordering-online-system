@@ -52,16 +52,12 @@
 
   <!-- 轮播公告 -->
   <view class="notice-wrapper" wx:if="{{noticeList.length > 0}}">
-    <van-notice-bar
-      class="notice-component"
-      custom-class="notice-bar"
-      left-icon="volume-o"
-      color="#7A4A1F"
-      background="transparent"
-      text="{{noticeText}}"
-      scrollable="{{true}}"
-      speed="{{22}}"
-    />
+    <view class="notice-bar">
+      <image class="notice-speaker-icon" src="/images/volume-2.svg" mode="aspectFit"></image>
+      <view class="notice-text-clip">
+        <view class="notice-text-track">{{noticeText}}</view>
+      </view>
+    </view>
   </view>
   <!-- 主内容区 -->
   <view class="main-content">
@@ -87,7 +83,7 @@
 
       <block wx:elif="{{isSearching}}">
         <view class="goods-item" wx:for="{{searchGoodsList}}" wx:for-item="item" wx:key="_id">
-          <image wx:if="{{item.hasImage}}" class="goods-image" src="{{item.image}}" mode="aspectFill"></image>
+          <image wx:if="{{item.hasImage}}" class="goods-image" src="{{item.image}}" mode="aspectFill" bindtap="openDishPreview" data-goods="{{item}}"></image>
           <view wx:else class="goods-image goods-image-placeholder"></view>
           <view class="goods-info">
             <view class="goods-name">{{item.name}}</view>
@@ -126,7 +122,7 @@
             <view class="divider-line right"></view>
           </view>
           <view class="goods-item" wx:for="{{section.goods}}" wx:for-item="item" wx:key="_id">
-            <image wx:if="{{item.hasImage}}" class="goods-image" src="{{item.image}}" mode="aspectFill"></image>
+            <image wx:if="{{item.hasImage}}" class="goods-image" src="{{item.image}}" mode="aspectFill" bindtap="openDishPreview" data-goods="{{item}}"></image>
             <view wx:else class="goods-image goods-image-placeholder"></view>
             <view class="goods-info">
               <view class="goods-name">{{item.name}}</view>
@@ -252,19 +248,20 @@
   </view>
 
   <!-- 菜品规格选择弹窗 -->
-  <view class="modal-mask" wx:if="{{showTagModal}}" catchtap="closeTagModal">
-    <view class="spec-modal" catchtap="stopPropagation">
+  <view class="modal-mask {{isTagModalClosing ? 'is-closing' : ''}}" wx:if="{{showTagModal}}" catchtap="closeTagModal">
+    <view class="spec-modal {{isTagModalClosing ? 'is-closing' : ''}}" catchtap="stopPropagation">
       <view class="spec-product-card">
         <image wx:if="{{currentDish.hasImage}}" class="spec-product-image" src="{{currentDish.image}}" mode="aspectFill"></image>
         <view wx:else class="spec-product-image spec-product-image-placeholder"></view>
-        <view class="spec-product-info">
-          <view class="spec-product-name">{{currentDish.name}}</view>
-          <view class="spec-product-desc" wx:if="{{currentDish.description || currentDish.desc}}">{{currentDish.description || currentDish.desc}}</view>
-        </view>
+      </view>
+
+      <view class="spec-product-info">
+        <view class="spec-product-name">{{currentDish.name}}</view>
+        <view class="spec-product-desc" wx:if="{{currentDish.description || currentDish.desc}}">{{currentDish.description || currentDish.desc}}</view>
       </view>
 
       <scroll-view class="spec-content" scroll-y>
-        <view class="spec-section">
+        <view class="spec-section" wx:if="{{modalFlavorOptions.length > 0}}">
           <view class="spec-title">{{modalFlavorTitle}}</view>
           <view class="flavor-options">
             <view

@@ -70,7 +70,8 @@ Page({
         tableNumberValue: this.getTableNumberValue(order),
         orderNoText: this.getOrderNoText(order),
         isSavedOrder: !isCampingOrder && statusText === '已保存',
-        isCompletedOrder: !isCampingOrder && statusText === '已完成'
+        isCompletedOrder: !isCampingOrder && statusText === '已完成',
+        canManageSubmittedOrder: !isCampingOrder && statusText === '已提交'
       },
       goods,
       empty: false
@@ -284,6 +285,32 @@ Page({
 
     wx.redirectTo({
       url: '/packages/user/pages/myorder/myorder'
+    })
+  },
+
+  goToFrontDeskCheckout() {
+    wx.showModal({
+      title: '结账提示',
+      content: '请前往前台结账。',
+      showCancel: false,
+      confirmText: '知道了'
+    })
+  },
+
+  addMoreDishes() {
+    const order = this.data.order || {}
+    const tableNumber = String(order.tableNumber || order.tableCode || order.tableName || '').trim()
+
+    if (!tableNumber) {
+      wx.showToast({
+        title: '未找到桌号，无法继续加菜',
+        icon: 'none'
+      })
+      return
+    }
+
+    wx.navigateTo({
+      url: `/packages/order/pages/index/index?scene=${encodeURIComponent(tableNumber)}`
     })
   }
 })
