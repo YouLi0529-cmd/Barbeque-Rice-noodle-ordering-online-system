@@ -18,7 +18,8 @@ data class PrinterConfig(
   val port: Int,
   val usbVendorId: String,
   val usbProductId: String,
-  val usbDeviceName: String
+  val usbDeviceName: String,
+  val escpos: Boolean
 )
 
 data class PrintJob(
@@ -55,7 +56,8 @@ class AgentApi(private val apiUrl: String, private val tenantId: String) {
         port = item.optInt("port", 9100),
         usbVendorId = usb.optString("vendorId"),
         usbProductId = usb.optString("productId"),
-        usbDeviceName = usb.optString("deviceName")
+        usbDeviceName = usb.optString("deviceName"),
+        escpos = item.optJSONObject("capabilities")?.optBoolean("escpos", true) ?: true
       )
     }
   }
@@ -96,6 +98,10 @@ class AgentApi(private val apiUrl: String, private val tenantId: String) {
 
   fun reportUsbDevices(agentId: String, token: String, devices: JSONArray) {
     post("print.agent.usbDevices", auth(agentId, token).put("usbDevices", devices))
+  }
+
+  fun reportPrinterHealth(agentId: String, token: String, printers: JSONArray) {
+    post("print.agent.printerHealth", auth(agentId, token).put("printers", printers))
   }
 
   private fun auth(agentId: String, token: String): JSONObject = JSONObject()

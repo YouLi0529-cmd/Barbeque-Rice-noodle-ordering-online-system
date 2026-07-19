@@ -7,6 +7,16 @@ android {
   namespace = "com.zhangnan.printagent"
   compileSdk = 35
 
+  // Keep Java and Kotlin bytecode targets aligned for a reproducible Android build.
+  compileOptions {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+
   defaultConfig {
     applicationId = "com.zhangnan.printagent"
     minSdk = 26

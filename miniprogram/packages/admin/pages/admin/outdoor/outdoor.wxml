@@ -50,6 +50,17 @@
           </view>
         </view>
 
+        <view class="kitchen-failure-banner" wx:if="{{selectedOrder && hasKitchenPrintFailure}}">
+          <view class="kitchen-failure-copy">
+            <view class="kitchen-failure-title">{{ui.kitchenPrintFailed}}</view>
+            <view class="kitchen-failure-dishes">{{ui.failedDishesPrefix}}{{kitchenFailedDishText}}</view>
+          </view>
+          <view
+            class="kitchen-failure-retry {{retryingKitchen ? 'kitchen-failure-retry-disabled' : ''}}"
+            catchtap="retryFailedKitchenItems"
+          >{{ui.retryFailedKitchen}}</view>
+        </view>
+
         <view class="empty-bill" wx:if="{{loading}}">
           <view class="empty-title">{{ui.loading}}</view>
         </view>
@@ -71,9 +82,10 @@
                   <view class="dish-name">
                     <text class="dish-paid-tag" wx:if="{{item.isPaid}}">{{ui.paidItem}}</text>
                     <text class="dish-name-text">{{item.name}}</text>
-                    <text class="dish-sent-tag" wx:if="{{item.kitchenSent}}">已发送</text>
+                    <text class="dish-sent-tag" wx:if="{{item.kitchenSent}}">{{ui.sentToKitchen}}</text>
                   </view>
                   <view class="dish-tags" wx:if="{{item.optionText}}">{{item.optionText}}</view>
+                  <view class="dish-print-error" wx:if="{{item.kitchenFailed}}">{{ui.kitchenPrintFailed}}</view>
                 </view>
                 <view class="dish-count">x{{item.count}}</view>
                 <view class="dish-price">{{ui.moneySymbol}}{{item.subtotalText}}</view>

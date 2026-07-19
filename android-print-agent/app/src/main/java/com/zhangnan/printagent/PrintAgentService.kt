@@ -35,6 +35,7 @@ class PrintAgentService : Service() {
   private var socket: WebSocket? = null
   private val client = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
   private var printers = emptyMap<String, PrinterConfig>()
+  private var refreshHealthAt = 0L
 
   override fun onCreate() {
     super.onCreate()
@@ -78,6 +79,10 @@ class PrintAgentService : Service() {
             printers = api.bootstrap(prefs.agentId, prefs.agentToken).associateBy { it.id }
             refreshConfigAt = System.currentTimeMillis() + 60_000
           }
+          if (System.currentTimeMillis() >= refreshHealthAt) {
+            reportNetworkPrinterHealth(api)
+            refreshHealthAt = System.currentTimeMillis() + PRINTER_HEALTH_INTERVAL_MS
+          }
           val job = api.claim(prefs.agentId, prefs.agentToken)
           if (job != null) executeJob(api, job)
           else delay(POLL_INTERVAL_MS)
@@ -106,7 +111,7 @@ class PrintAgentService : Service() {
       jobs.clearInFlight(job.id)
       try {
         api.reportResult(prefs.agentId, prefs.agentToken, job, true)
-        api.log(prefs.agentId, prefs.agentToken, "printed", "Print job completed", printer.id)
+        api.log(prefs.agentId, prefs.agentToken, "sent_to_printer", "Print bytes sent to printer", printer.id)
       } catch (_: Exception) {
         // The local completed-job marker prevents a duplicate physical print after a network interruption.
       }
@@ -135,6 +140,23 @@ class PrintAgentService : Service() {
         .put("permission", manager.hasPermission(device)))
     }
     api.reportUsbDevices(prefs.agentId, prefs.agentToken, devices)
+  }
+
+  private fun reportNetworkPrinterHealth(api: AgentApi) {
+    val reports = JSONArray()
+    printers.values
+      .filter { it.enabled && it.connectionType == "network" && it.ip.isNotBlank() }
+      .forEach { printer ->
+        val health = TcpPrinterHealthProbe(printer.ip, printer.port, printer.escpos).check()
+        reports.put(org.json.JSONObject()
+          .put("printerId", printer.id)
+          .put("networkStatus", health.networkStatus)
+          .put("networkLatencyMs", health.networkLatencyMs)
+          .put("networkError", health.networkError)
+          .put("hardwareStatus", health.hardwareStatus)
+          .put("hardwareStatusSource", health.hardwareStatusSource))
+      }
+    if (reports.length() > 0) api.reportPrinterHealth(prefs.agentId, prefs.agentToken, reports)
   }
 
   private fun safeLog(api: AgentApi, status: String, message: String, printerId: String = "", level: String = "info") {
@@ -186,5 +208,6 @@ class PrintAgentService : Service() {
     private const val NOTIFICATION_ID = 4101
     private const val POLL_INTERVAL_MS = 5_000L
     private const val RECONNECT_INTERVAL_MS = 8_000L
+    private const val PRINTER_HEALTH_INTERVAL_MS = 60_000L
   }
 }

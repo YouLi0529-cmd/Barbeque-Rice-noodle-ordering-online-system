@@ -16,6 +16,80 @@ interface PrinterTransport {
   fun send(bytes: ByteArray)
 }
 
+data class PrinterHealth(
+  val networkStatus: String,
+  val networkLatencyMs: Long = 0,
+  val networkError: String = "",
+  val hardwareStatus: String = "unknown",
+  val hardwareStatusSource: String = "network_only"
+)
+
+/**
+ * A TCP connection proves that the printer port is reachable.  ESC/POS real-time
+ * status queries are attempted only for configured ESC/POS printers: many basic
+ * network printers accept print bytes but do not answer status commands.
+ */
+class TcpPrinterHealthProbe(
+  private val host: String,
+  private val port: Int,
+  private val supportsEscPos: Boolean
+) {
+  fun check(): PrinterHealth {
+    val startedAt = System.nanoTime()
+    return try {
+      Socket().use { socket ->
+        socket.connect(InetSocketAddress(host, port), HEALTH_CONNECT_TIMEOUT_MS)
+        val latency = (System.nanoTime() - startedAt) / 1_000_000
+        if (!supportsEscPos) return PrinterHealth("reachable", latency)
+
+        socket.soTimeout = HEALTH_STATUS_TIMEOUT_MS
+        val output = socket.getOutputStream()
+        val input = socket.getInputStream()
+        val offline = requestStatus(output, input, 2)
+        val error = requestStatus(output, input, 3)
+        val paper = requestStatus(output, input, 4)
+
+        val hardware = when {
+          paper >= 0 && paper and 0x60 != 0 -> "paper_out"
+          offline >= 0 && offline and 0x04 != 0 -> "cover_open"
+          error >= 0 && error and 0x08 != 0 -> "jammed"
+          offline >= 0 || error >= 0 || paper >= 0 -> "ok"
+          else -> "unknown"
+        }
+        PrinterHealth(
+          networkStatus = "reachable",
+          networkLatencyMs = latency,
+          hardwareStatus = hardware,
+          hardwareStatusSource = if (hardware == "unknown") "network_only" else "escpos_realtime"
+        )
+      }
+    } catch (error: Exception) {
+      PrinterHealth(
+        networkStatus = "unreachable",
+        networkLatencyMs = (System.nanoTime() - startedAt) / 1_000_000,
+        networkError = error.message ?: error.javaClass.simpleName,
+        hardwareStatus = "unknown",
+        hardwareStatusSource = "network_only"
+      )
+    }
+  }
+
+  private fun requestStatus(output: java.io.OutputStream, input: java.io.InputStream, type: Int): Int {
+    return try {
+      output.write(byteArrayOf(0x10, 0x04, type.toByte()))
+      output.flush()
+      input.read()
+    } catch (_: Exception) {
+      -1
+    }
+  }
+
+  companion object {
+    private const val HEALTH_CONNECT_TIMEOUT_MS = 3_500
+    private const val HEALTH_STATUS_TIMEOUT_MS = 450
+  }
+}
+
 class TcpPrinterTransport(private val host: String, private val port: Int) : PrinterTransport {
   override fun send(bytes: ByteArray) {
     Socket().use { socket ->
