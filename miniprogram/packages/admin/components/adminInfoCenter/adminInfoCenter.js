@@ -60,6 +60,26 @@ function saveDismissedMap(value) {
 }
 
 Component({
+  properties: {
+    enabled: {
+      type: Boolean,
+      value: true,
+      observer(enabled) {
+        if (!this.componentAttached) return
+        if (enabled) {
+          this.activate()
+          this.startPolling()
+          return
+        }
+        this.stopPolling()
+        this.setData({
+          visible: false,
+          panelOpen: false
+        })
+      }
+    }
+  },
+
   data: {
     visible: false,
     panelOpen: false,
@@ -80,17 +100,25 @@ Component({
 
   lifetimes: {
     attached() {
+      this.componentAttached = true
+      if (!this.data.enabled) return
       this.activate()
       this.startPolling()
     },
     detached() {
+      this.componentAttached = false
       this.stopPolling()
     }
   },
 
   pageLifetimes: {
     show() {
+      if (!this.data.enabled) return
       this.activate()
+      this.startPolling()
+    },
+    hide() {
+      this.stopPolling()
     }
   },
 
@@ -109,7 +137,7 @@ Component({
     },
 
     togglePanel() {
-      if (!apiClient.getAdminAuthToken()) return
+      if (!this.data.enabled || !apiClient.getAdminAuthToken()) return
       this.setData({ visible: true })
       const panelOpen = !this.data.panelOpen
       this.setData({ panelOpen })
@@ -117,7 +145,7 @@ Component({
     },
 
     activate(silent = false) {
-      if (!apiClient.getAdminAuthToken()) {
+      if (!this.data.enabled || !apiClient.getAdminAuthToken()) {
         this.setData({
           visible: false,
           panelOpen: false
@@ -128,12 +156,16 @@ Component({
       this.loadNotifications(silent)
     },
 
+    closePanel() {
+      this.setData({ panelOpen: false })
+    },
+
     async refreshNotifications() {
       await this.loadNotifications()
     },
 
     async loadNotifications(silent = false) {
-      if (this.data.loading || !apiClient.getAdminAuthToken()) return
+      if (this.data.loading || !this.data.enabled || !apiClient.getAdminAuthToken()) return
 
       this.setData({ loading: true })
       try {

@@ -242,28 +242,42 @@ Page({
 
   onLoad() {
     this.rawTables = getBaseTableSections()
+    this.tableBoardVersion = 0
+    this.tableBoardStatusSupported = true
+    this.tableBoardRefreshInFlight = false
     this.syncTransferState()
     this.syncMergeState()
     this.refreshTables()
     this.loadTables()
-    this.loadReservationReminders(true)
-    this.timer = setInterval(() => {
-      this.loadTables(true)
-      this.loadReservationReminders(true)
-    }, 15000)
-    this.clockTimer = setInterval(() => {
-      this.refreshTables()
-    }, 60000)
+    this.startAutoRefresh()
   },
 
   onShow() {
     this.syncTransferState()
     this.syncMergeState()
     this.loadTables(true)
-    this.loadReservationReminders(true)
+    this.startAutoRefresh()
+  },
+
+  onHide() {
+    this.stopAutoRefresh()
   },
 
   onUnload() {
+    this.stopAutoRefresh()
+  },
+
+  startAutoRefresh() {
+    if (this.timer) return
+    this.timer = setInterval(() => {
+      this.refreshTableBoard(true)
+    }, 15000)
+    this.clockTimer = setInterval(() => {
+      this.refreshTables()
+    }, 60000)
+  },
+
+  stopAutoRefresh() {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
@@ -284,10 +298,19 @@ Page({
       const sections = res && res.data && Array.isArray(res.data.sections)
         ? res.data.sections
         : []
+      const hasReservations = !!(res && res.data && Array.isArray(res.data.reservations))
+      const reservations = hasReservations ? res.data.reservations : []
+      const boardVersion = Number(res && res.data && res.data.boardVersion)
 
       if (sections.length > 0) {
         this.rawTables = sections
         this.refreshTables()
+      }
+      if (Number.isFinite(boardVersion)) this.tableBoardVersion = boardVersion
+      if (hasReservations) {
+        this.applyReservationReminders(reservations)
+      } else {
+        this.loadReservationReminders(true)
       }
     } catch (err) {
       console.error('load admin table orders failed', err)
@@ -305,6 +328,60 @@ Page({
     }
   },
 
+  async refreshTableBoard(silent = false) {
+    if (this.tableBoardRefreshInFlight) return
+    this.tableBoardRefreshInFlight = true
+    try {
+      if (this.tableBoardStatusSupported === false) {
+        await this.loadTables(silent)
+        return
+      }
+
+      const res = await apiClient.call('admin.table.status', {
+        boardVersion: this.tableBoardVersion
+      })
+      const status = res && res.data ? res.data : {}
+      const boardVersion = Number(status.boardVersion)
+      if (Number.isFinite(boardVersion)) this.tableBoardVersion = boardVersion
+      if (status.changed || !Number.isFinite(boardVersion)) {
+        await this.loadTables(silent)
+      }
+    } catch (err) {
+      if (String(err && err.message || '').indexOf('unknown action') >= 0) {
+        this.tableBoardStatusSupported = false
+      }
+      await this.loadTables(silent)
+    } finally {
+      this.tableBoardRefreshInFlight = false
+    }
+  },
+
+  applyReservationReminders(reservations = []) {
+    const expiredReservations = reservations.filter(isReservationExpired)
+    if (expiredReservations.length > 0) {
+      this.autoCancelExpiredReservations(expiredReservations)
+    }
+
+    const reservationReminders = reservations
+      .filter(item => !isReservationExpired(item))
+      .filter(isUpcomingReservation)
+      .map(formatReservationReminder)
+      .sort((a, b) => {
+        const leftTime = getReservationTime(a) || Number.MAX_SAFE_INTEGER
+        const rightTime = getReservationTime(b) || Number.MAX_SAFE_INTEGER
+        if (leftTime !== rightTime) return leftTime - rightTime
+        return String(a.createTime || '').localeCompare(String(b.createTime || ''))
+      })
+    const selectedReservationReminderId = reservationReminders.some(item => item._id === this.data.selectedReservationReminderId)
+      ? this.data.selectedReservationReminderId
+      : ''
+
+    this.setData({
+      reservationReminders,
+      selectedReservationReminderId
+    })
+  },
+
   async loadReservationReminders(silent = false) {
     try {
       const res = await apiClient.call('admin.collection.list', {
@@ -315,29 +392,7 @@ Page({
         limit: 100
       })
       const reservations = res.data || []
-      const expiredReservations = reservations.filter(isReservationExpired)
-      if (expiredReservations.length > 0) {
-        this.autoCancelExpiredReservations(expiredReservations)
-      }
-
-      const reservationReminders = reservations
-        .filter(item => !isReservationExpired(item))
-        .filter(isUpcomingReservation)
-        .map(formatReservationReminder)
-        .sort((a, b) => {
-          const leftTime = getReservationTime(a) || Number.MAX_SAFE_INTEGER
-          const rightTime = getReservationTime(b) || Number.MAX_SAFE_INTEGER
-          if (leftTime !== rightTime) return leftTime - rightTime
-          return String(a.createTime || '').localeCompare(String(b.createTime || ''))
-        })
-      const selectedReservationReminderId = reservationReminders.some(item => item._id === this.data.selectedReservationReminderId)
-        ? this.data.selectedReservationReminderId
-        : ''
-
-      this.setData({
-        reservationReminders,
-        selectedReservationReminderId
-      })
+      this.applyReservationReminders(reservations)
     } catch (err) {
       console.error('load table reservation reminders failed', err)
       if (!silent) {

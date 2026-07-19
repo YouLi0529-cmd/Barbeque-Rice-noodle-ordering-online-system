@@ -38,7 +38,6 @@
         "pages/admin/outdoorDetail/outdoorDetail",
         "pages/admin/dish/dish",
         "pages/admin/notice/notice",
-        "pages/admin/shopInfo/shopInfo",
         "pages/admin/tableCode/tableCode",
         "pages/admin/printer/printer"
       ]

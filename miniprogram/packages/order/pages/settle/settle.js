@@ -106,36 +106,42 @@ Page({
   },
 
   getValidActiveOrderSession(cartData) {
-    const session = cartData.activeOrderSession || wx.getStorageSync('activeOrderSession')
-    if (!session || !session.rootOrderId) {
-      return null
-    }
-
     const orderScene = cartData.orderScene === 'camping' || cartData.orderType === 'camping'
       ? 'camping'
       : 'dineIn'
+    const session = cartData.activeOrderSession || wx.getStorageSync('activeOrderSession')
 
-    if (session.orderScene !== orderScene) {
-      return null
-    }
+    const localSessionMatches = session &&
+      session.rootOrderId &&
+      session.orderScene === orderScene &&
+      (orderScene === 'camping' || (
+        String(session.tableNumber || '') &&
+        String(session.tableNumber || '') === String(cartData.tableNumber || '')
+      ))
 
-    if (orderScene !== 'camping') {
-      const sessionTable = String(session.tableNumber || '')
-      const currentTable = String(cartData.tableNumber || '')
-      if (!sessionTable || sessionTable !== currentTable) {
-        return null
+    if (localSessionMatches) {
+      const cards = this.normalizeStoredCards(session.cards)
+      if (cards.length > 0) {
+        return {
+          ...session,
+          cards
+        }
       }
     }
 
-    const cards = this.normalizeStoredCards(session.cards)
-    if (cards.length === 0) {
-      return null
+    const sharedOrderContext = cartData.sharedOrderContext || {}
+    if (orderScene !== 'camping' && sharedOrderContext.rootOrderId && cartData.tableNumber) {
+      return {
+        rootOrderId: sharedOrderContext.rootOrderId,
+        orderScene,
+        orderType: 'dineIn',
+        tableNumber: String(cartData.tableNumber || ''),
+        cards: [],
+        addOnCount: Math.max(0, Number(sharedOrderContext.addOnCount || 0))
+      }
     }
 
-    return {
-      ...session,
-      cards
-    }
+    return null
   },
 
   saveActiveOrderSession(orderCards, submittedOrderId) {
@@ -151,7 +157,7 @@ Page({
       orderType: this.data.orderType,
       tableNumber: this.data.orderScene === 'camping' ? '' : this.data.tableNumber,
       cards: submittedCards,
-      addOnCount: Math.max(submittedCards.length - 1, 0),
+      addOnCount: Math.max(this.data.addOnIndex || 0, submittedCards.length - 1, 0),
       updateTime: Date.now()
     }
 
@@ -516,14 +522,19 @@ Page({
     wx.navigateBack()
   },
 
-  confirmSubmittedOrder() {
+  goToFrontDeskCheckout() {
     if (!this.data.orderSubmitted) {
       return
     }
 
-    this.clearActiveOrderSession()
-    wx.reLaunch({
-      url: '/pages/covertest/covertest'
+    wx.showModal({
+      title: '结账提示',
+      content: '订单已提交，请前往前台结账。',
+      showCancel: false,
+      confirmText: '知道了',
+      success: () => {
+        this.clearActiveOrderSession()
+      }
     })
   },
 

@@ -1,6 +1,0 @@
-{
-  "navigationBarTitleText": "\u5e97\u94fa\u8bbe\u7f6e",
-  "usingComponents": {
-    "admin-info-center": "/packages/admin/components/adminInfoCenter/adminInfoCenter"
-  }
-}

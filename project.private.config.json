@@ -22,23 +22,23 @@
     "miniprogram": {
       "list": [
         {
+          "name": "堂食扫码点单",
+          "pathName": "packages/order/pages/index/index",
+          "query": "scene=12",
+          "scene": null,
+          "launchMode": "default"
+        },
+        {
           "name": "用户端首页",
           "pathName": "pages/covertest/covertest",
           "query": "scene=01",
-          "scene": null,
-          "launchMode": "default"
+          "launchMode": "default",
+          "scene": null
         },
         {
           "name": "商户后台入口",
           "pathName": "packages/admin/pages/admin/admin",
           "query": "",
-          "launchMode": "default",
-          "scene": null
-        },
-        {
-          "name": "堂食扫码点单",
-          "pathName": "packages/order/pages/index/index",
-          "query": "scene=01",
           "launchMode": "default",
           "scene": null
         },

@@ -7,7 +7,6 @@
   "backgroundColorTop": "#f5e7d5",
   "backgroundColorBottom": "#f5e7d5",
   "usingComponents": {
-    "van-notice-bar": "/vant/notice-bar/index",
     "van-empty": "/vant/empty/index",
     "avatar-nickname-modal": "/components/avatarNicknameModal/avatarNicknameModal"
   }

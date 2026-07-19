@@ -1,19 +1,17 @@
 <view class="print-page">
   <view class="page-head">
-    <view>
-      <view class="eyebrow">STORE PRINTING</view>
-      <view class="page-title">打印中心</view>
-      <view class="page-desc">任务统一由店内平板代理发送至实体打印机</view>
-    </view>
+    <view class="page-title">打印中心</view>
     <view class="refresh-icon" bindtap="refreshCurrent">刷新</view>
   </view>
 
-  <scroll-view class="tab-scroll" scroll-x enable-flex>
+  <view class="print-workspace">
+  <scroll-view class="tab-scroll" scroll-y enable-flex>
     <view class="tabs">
       <view wx:for="{{tabs}}" wx:key="key" class="tab {{activeTab === item.key ? 'active' : ''}}" bindtap="switchTab" data-key="{{item.key}}">{{item.label}}</view>
     </view>
   </scroll-view>
 
+  <view class="print-content">
   <view wx:if="{{loading}}" class="loading-bar">正在同步云端打印数据...</view>
   <view wx:if="{{backendError}}" class="backend-error">
     <view class="backend-error-title">打印管理服务尚未就绪</view>
@@ -144,6 +142,8 @@
       <view wx:if="{{!logs.length}}" class="empty-state">暂无对应的设备日志</view>
     </view>
   </scroll-view>
+  </view>
+  </view>
 </view>
 
 <view wx:if="{{showPrinterForm}}" class="modal-mask" catchtap="closePrinterForm"><view class="modal-card" catchtap="stopPropagation"><view class="modal-title">{{printerForm._id ? '编辑打印机' : '新增打印机'}}</view><scroll-view class="modal-body" scroll-y><view class="form-grid"><view class="form-item"><text>名称</text><input value="{{printerForm.name}}" data-key="name" bindinput="onPrinterInput" placeholder="例如：后厨" /></view><view class="form-item"><text>品牌</text><picker range="{{brandOptions}}" bindchange="onPrinterPick" data-key="brand" data-options="brandOptions"><view class="picker-value">{{printerForm.brand}} ›</view></picker></view><view class="form-item"><text>型号</text><input value="{{printerForm.model}}" data-key="model" bindinput="onPrinterInput" placeholder="可选" /></view><view class="form-item"><text>连接方式</text><view class="segmented"><view class="segment {{printerForm.connectionType === 'network' ? 'active' : ''}}" bindtap="setPrinterConnection" data-value="network">网口</view><view class="segment {{printerForm.connectionType === 'usb' ? 'active' : ''}}" bindtap="setPrinterConnection" data-value="usb">USB</view></view></view><block wx:if="{{printerForm.connectionType === 'network'}}"><view class="form-item"><text>IP 地址</text><input value="{{printerForm.ip}}" data-key="ip" bindinput="onPrinterInput" placeholder="192.168.10.42" /></view><view class="form-item"><text>端口</text><input type="number" value="{{printerForm.port}}" data-key="port" bindinput="onPrinterNumberInput" /></view></block><block wx:else><view class="form-item full"><text>USB 设备名</text><input value="{{printerForm.usbBinding.deviceName}}" data-key="usbBinding.deviceName" bindinput="onPrinterInput" placeholder="代理发现设备后可自动绑定" /></view><view class="form-item"><text>VID</text><input value="{{printerForm.usbBinding.vendorId}}" data-key="usbBinding.vendorId" bindinput="onPrinterInput" /></view><view class="form-item"><text>PID</text><input value="{{printerForm.usbBinding.productId}}" data-key="usbBinding.productId" bindinput="onPrinterInput" /></view></block><view class="form-item"><text>纸宽</text><picker range="{{paperOptions}}" bindchange="onPrinterPick" data-key="paperWidth" data-options="paperOptions"><view class="picker-value">{{printerForm.paperWidth}}mm ›</view></picker></view><view class="form-item"><text>分辨率</text><picker range="{{resolutionOptions}}" bindchange="onPrinterPick" data-key="resolution" data-options="resolutionOptions"><view class="picker-value">{{printerForm.resolution}}dpi ›</view></picker></view><view class="form-item"><text>用途</text><view class="segmented"><view class="segment {{printerForm.usage === 'cashier' ? 'active' : ''}}" bindtap="setPrinterUsage" data-value="cashier">收银</view><view class="segment {{printerForm.usage === 'kitchen' ? 'active' : ''}}" bindtap="setPrinterUsage" data-value="kitchen">后厨</view></view></view><view class="form-item"><text>启用</text><switch checked="{{printerForm.status}}" color="#E54A1D" data-key="status" bindchange="onPrinterSwitch" /></view></view><view class="subhead">高级设置</view><view class="form-grid"><view class="form-item"><text>走纸行数</text><input type="number" value="{{printerForm.feedLines}}" data-key="feedLines" bindinput="onPrinterNumberInput" /></view><view class="form-item"><text>重试次数</text><input type="number" value="{{printerForm.retryLimit}}" data-key="retryLimit" bindinput="onPrinterNumberInput" /></view><view class="form-item"><text>蜂鸣次数</text><input disabled="{{!printerForm.capabilities.beep}}" type="number" value="{{printerForm.beepCount}}" data-key="beepCount" bindinput="onPrinterNumberInput" /></view><view class="form-item"><text>蜂鸣等级</text><input disabled="{{!printerForm.capabilities.beep}}" type="number" value="{{printerForm.beepLevel}}" data-key="beepLevel" bindinput="onPrinterNumberInput" /></view></view><view class="capability-list"><view class="capability"><text>ESC/POS</text><switch checked="{{printerForm.capabilities.escpos}}" color="#E54A1D" data-key="capabilities.escpos" bindchange="onPrinterSwitch" /></view><view class="capability"><text>蜂鸣</text><switch checked="{{printerForm.capabilities.beep}}" color="#E54A1D" data-key="capabilities.beep" bindchange="onPrinterSwitch" /></view><view class="capability"><text>开钱箱</text><switch checked="{{printerForm.capabilities.cashDrawer}}" color="#E54A1D" data-key="capabilities.cashDrawer" bindchange="onPrinterSwitch" /></view><view class="capability"><text>切纸</text><switch checked="{{printerForm.capabilities.cutPaper}}" color="#E54A1D" data-key="capabilities.cutPaper" bindchange="onPrinterSwitch" /></view><view class="capability"><text>开钱箱指令</text><switch disabled="{{!printerForm.capabilities.cashDrawer}}" checked="{{printerForm.openCashDrawer}}" color="#E54A1D" data-key="openCashDrawer" bindchange="onPrinterSwitch" /></view></view></scroll-view><view class="modal-footer"><view class="modal-btn cancel" bindtap="closePrinterForm">取消</view><view class="modal-btn confirm" bindtap="savePrinter">保存</view></view></view></view>

@@ -4,6 +4,8 @@ const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()
 const _ = db ? db.command : null
 const { getCustomNavOptions } = require('../../../../utils/customNav')
+const SHARED_CART_ACTIVE_POLL_MS = 8000
+const SHARED_CART_IDLE_POLL_MS = 20000
 
 Page({
   data: {
@@ -38,6 +40,7 @@ Page({
     noticeText: '', // 公告文本（用于vant组件）
     shopInfo: {}, // 店铺信息
     showTagModal: false, // 显示标签选择弹窗
+    isTagModalClosing: false,
     currentDish: null, // 当前选择的菜品
     selectedTags: {}, // 当前选择的标签 {tagId: [选项]}
     modalDishCount: 1, // 弹窗中选择的商品数量
@@ -57,14 +60,22 @@ Page({
     shopNavTotalHeight: 84,
     tableNumber: '', // 桌码号
     sharedSessionId: '',
+    sharedCartAccessToken: '',
     sharedCartReady: false,
     sharedCartWatchReady: false,
+    sharedCartVersion: 0,
+    sharedCartHydrated: false,
+    sharedCartSyncActive: false,
+    sharedCartActiveUntil: 0,
+    sharedOrderRootId: '',
+    sharedOrderAddOnCount: 0,
     orderSessionClosed: false,
     showPeopleModal: false,
     peopleOptions: [1, 2, 3, 4, 5, 6, 7, 8],
     selectedPeopleCount: 0,
     selectedPeopleMode: '',
     customPeopleInput: '',
+    customPeopleFocused: false,
     sharedPeopleCount: 0,
     sharedPeopleConfirmed: false,
     pendingSettleAfterPeopleConfirm: false,
@@ -136,10 +147,9 @@ Page({
       }
     }
     
-    this.loadShopInfo()
-    this.loadMenu()
+    this.skipInitialUserInfoReload = true
+    this.loadInitialOrderData()
     this.loadUserInfo()
-    this.loadNotices()
     if (scannedTableNumber) {
       this.initSharedCart(scannedTableNumber)
     }
@@ -152,12 +162,22 @@ Page({
 
   onShow() {
     this.refreshCustomNav()
-    this.loadUserInfo()
+    if (this.skipInitialUserInfoReload) {
+      this.skipInitialUserInfoReload = false
+    } else {
+      this.loadUserInfo()
+    }
     if (this.data.tableNumber && !this.data.sharedSessionId) {
       this.initSharedCart(this.data.tableNumber)
     } else if (this.data.sharedSessionId) {
-      this.fetchSharedCart(false)
+      this.fetchSharedCart(false, true)
+      this.startSharedCartWatch(this.data.sharedSessionId)
     }
+  },
+
+  onHide() {
+    // Avoid spending database reads while the user is on another page or app.
+    this.stopSharedCartSync()
   },
 
   onUnload() {
@@ -166,6 +186,10 @@ Page({
       this.searchTimer = null
     }
     this.clearCartFxTimers()
+    if (this.tagModalCloseTimer) {
+      clearTimeout(this.tagModalCloseTimer)
+      this.tagModalCloseTimer = null
+    }
     this.stopOrderLoadingAnimation()
     this.stopSharedCartSync()
   },
@@ -186,8 +210,15 @@ Page({
     this.setData({
       tableNumber: '',
       sharedSessionId: '',
+      sharedCartAccessToken: '',
       sharedCartReady: false,
       sharedCartWatchReady: false,
+      sharedCartVersion: 0,
+      sharedCartHydrated: false,
+      sharedCartSyncActive: false,
+      sharedCartActiveUntil: 0,
+      sharedOrderRootId: '',
+      sharedOrderAddOnCount: 0,
       orderSessionClosed: true,
       sharedPeopleCount: 0,
       sharedPeopleConfirmed: false,
@@ -261,17 +292,27 @@ Page({
       selectedPeopleCount: count,
       selectedPeopleMode: 'preset',
       customPeopleInput: '',
+      customPeopleFocused: false,
       peopleModalTip: ''
     })
   },
 
-  chooseCustomPeople() {
+  focusCustomPeople() {
+    if (this.data.selectedPeopleMode === 'custom') {
+      this.setData({ customPeopleFocused: true })
+      return
+    }
     this.setData({
       selectedPeopleMode: 'custom',
       selectedPeopleCount: 0,
       customPeopleInput: '',
+      customPeopleFocused: true,
       peopleModalTip: ''
     })
+  },
+
+  blurCustomPeople() {
+    this.setData({ customPeopleFocused: false })
   },
 
   onCustomPeopleInput(e) {
@@ -280,6 +321,7 @@ Page({
       selectedPeopleMode: 'custom',
       customPeopleInput: value,
       selectedPeopleCount: Math.floor(Number(value || 0)),
+      customPeopleFocused: true,
       peopleModalTip: ''
     })
   },
@@ -378,12 +420,19 @@ Page({
       this.setData({
         tableNumber: currentTable,
         sharedSessionId: result.sessionId,
+        sharedCartAccessToken: result.sharedCartAccessToken || '',
         sharedCartReady: true,
+        sharedCartVersion: Number(result.cartVersion || 0),
+        sharedCartHydrated: false,
+        sharedCartSyncActive: result.sharedCartSyncActive !== false,
+        sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0),
+        sharedOrderRootId: result.activeOrderRootId || '',
+        sharedOrderAddOnCount: Number(result.addOnCount || 0),
         orderSessionClosed: false
       })
       this.applySharedPeopleState(result)
 
-      await this.fetchSharedCart(false)
+      await this.fetchSharedCart(false, true)
       if (localCartBeforeJoin) {
         const mergedCart = { ...this.data.cart }
         Object.keys(localCartBeforeJoin).forEach(cartKey => {
@@ -460,14 +509,19 @@ Page({
 
   startSharedCartFallback() {
     if (!this.data.sharedSessionId || this.sharedCartFallbackTimer) return
-    this.sharedCartFallbackTimer = setInterval(() => {
-      this.fetchSharedCart(false)
-    }, 2000)
+    const delay = this.data.sharedCartSyncActive
+      ? SHARED_CART_ACTIVE_POLL_MS
+      : SHARED_CART_IDLE_POLL_MS
+    this.sharedCartFallbackTimer = setTimeout(async () => {
+      this.sharedCartFallbackTimer = null
+      await this.fetchSharedCart(false)
+      this.startSharedCartFallback()
+    }, delay)
   },
 
   stopSharedCartFallback() {
     if (this.sharedCartFallbackTimer) {
-      clearInterval(this.sharedCartFallbackTimer)
+      clearTimeout(this.sharedCartFallbackTimer)
       this.sharedCartFallbackTimer = null
     }
   },
@@ -477,39 +531,117 @@ Page({
     this.stopSharedCartFallback()
   },
 
-  async fetchSharedCart(showError = true) {
-    if (!this.data.sharedSessionId) return
-
-    try {
-      const result = apiClient.isEnabled()
-        ? await apiClient.call('sharedCart.get', {
-          action: 'get',
-          sessionId: this.data.sharedSessionId,
-          tableNumber: this.data.tableNumber
-        })
-        : (await wx.cloud.callFunction({
-          name: 'sharedCart',
-          data: {
-            action: 'get',
-            sessionId: this.data.sharedSessionId,
-            tableNumber: this.data.tableNumber
-          }
-        })).result || {}
-      if (!result.success) {
-        throw new Error(result.message || '同步购物车失败')
-      }
-      if (this.isSharedSessionClosed(result)) {
-        this.handleSharedSessionClosed('本桌订单已结账，请重新扫码开台')
-        return
-      }
-      this.applySharedPeopleState(result)
-      this.applySharedCartDocs(result.items || [])
-    } catch (err) {
-      console.error('拉取共同点单购物车失败', err)
-      if (showError) {
-        wx.showToast({ title: '同步失败', icon: 'none' })
-      }
+  async fetchSharedCart(showError = true, force = false) {
+    const sessionId = this.data.sharedSessionId
+    if (!sessionId) return
+    if (this.sharedCartFetchPromise && this.sharedCartFetchSessionId === sessionId) {
+      return this.sharedCartFetchPromise
     }
+
+    this.sharedCartFetchSessionId = sessionId
+    this.sharedCartFetchPromise = (async () => {
+      try {
+        const requestData = {
+          action: 'get',
+          sessionId,
+          tableNumber: this.data.tableNumber
+        }
+
+        // Steady-state sync only checks the session version. The full cart is
+        // requested only after another diner changes it.
+        const canCheckStatusOnly = apiClient.isEnabled() &&
+          this.sharedCartStatusSupported !== false &&
+          !force &&
+          this.data.sharedCartHydrated
+        if (canCheckStatusOnly) {
+          const previousCartVersion = Number(this.data.sharedCartVersion || 0)
+          let statusResult = null
+          try {
+            statusResult = await apiClient.call('sharedCart.status', {
+              sessionId,
+              tableNumber: this.data.tableNumber,
+              sharedCartAccessToken: this.data.sharedCartAccessToken
+            })
+          } catch (err) {
+            if (err.code !== 'ACTION_NOT_FOUND') throw err
+            // Let an older backend keep using the legacy version-aware get API.
+            this.sharedCartStatusSupported = false
+          }
+          if (!statusResult) {
+            requestData.cartVersion = previousCartVersion
+          }
+          if (statusResult && !statusResult.success) {
+            throw new Error(statusResult.message || '同步购物车失败')
+          }
+          if (statusResult && this.data.sharedSessionId !== sessionId) return
+          if (statusResult && this.isSharedSessionClosed(statusResult)) {
+            this.handleSharedSessionClosed('本桌订单已结账，请重新扫码开台')
+            return
+          }
+
+          if (statusResult) {
+          const currentCartVersion = Number(statusResult.cartVersion || 0)
+          this.applySharedPeopleState(statusResult)
+          this.setData({
+            sharedCartVersion: currentCartVersion,
+            sharedCartSyncActive: statusResult.sharedCartSyncActive === true,
+            sharedCartActiveUntil: Number(statusResult.sharedCartActiveUntil || 0),
+            sharedOrderRootId: statusResult.activeOrderRootId || '',
+            sharedOrderAddOnCount: Number(statusResult.addOnCount || 0)
+          })
+            if (currentCartVersion === previousCartVersion) return
+            requestData.force = true
+          }
+        }
+
+        if (force || !this.data.sharedCartHydrated) {
+          requestData.force = true
+        } else if (!requestData.force) {
+          requestData.cartVersion = this.data.sharedCartVersion
+        }
+
+        const result = apiClient.isEnabled()
+          ? await apiClient.call('sharedCart.get', requestData)
+          : (await wx.cloud.callFunction({
+            name: 'sharedCart',
+            data: requestData
+          })).result || {}
+        if (!result.success) {
+          throw new Error(result.message || '同步购物车失败')
+        }
+        if (this.data.sharedSessionId !== sessionId) return
+        if (this.isSharedSessionClosed(result)) {
+          this.handleSharedSessionClosed('本桌订单已结账，请重新扫码开台')
+          return
+        }
+        this.applySharedPeopleState(result)
+        this.setData({
+          sharedCartVersion: Number(result.cartVersion || 0),
+          sharedCartHydrated: this.data.sharedCartHydrated || !result.unchanged,
+          sharedCartSyncActive: typeof result.sharedCartSyncActive === 'boolean'
+            ? result.sharedCartSyncActive
+            : this.data.sharedCartSyncActive,
+          sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0),
+          sharedOrderRootId: result.activeOrderRootId || '',
+          sharedOrderAddOnCount: Number(result.addOnCount || 0)
+        })
+        if (!result.unchanged) {
+          this.applySharedCartDocs(result.items || [])
+        }
+      } catch (err) {
+        console.error('拉取共同点单购物车失败', err)
+        if (showError) {
+          wx.showToast({ title: '同步失败', icon: 'none' })
+        }
+      } finally {
+        if (this.sharedCartFetchSessionId === sessionId) {
+          this.sharedCartFetchPromise = null
+          this.sharedCartFetchSessionId = ''
+        }
+      }
+    })()
+
+    return this.sharedCartFetchPromise
   },
 
   applySharedCartDocs(docs) {
@@ -587,7 +719,21 @@ Page({
         }
       })
 
-    request.catch(err => {
+    request.then(res => {
+      const result = apiClient.isEnabled() ? (res || {}) : (res.result || {})
+      if (result && Number.isFinite(Number(result.cartVersion))) {
+        this.setData({
+          sharedCartVersion: Number(result.cartVersion),
+          sharedCartHydrated: true,
+          sharedCartSyncActive: typeof result.sharedCartSyncActive === 'boolean'
+            ? result.sharedCartSyncActive
+            : this.data.sharedCartSyncActive,
+          sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0)
+        })
+        this.stopSharedCartFallback()
+        this.startSharedCartFallback()
+      }
+    }).catch(err => {
       console.error('同步共同点单购物车失败', err)
       if (err.code === 'SESSION_CLOSED' ||
           err.code === 'TABLE_SESSION_CLOSED' ||
@@ -639,6 +785,65 @@ Page({
       }
     } catch (err) {
       console.error('加载店铺信息失败', err)
+    }
+  },
+
+  async loadInitialOrderData(showLoading = true) {
+    if (!apiClient.isEnabled()) {
+      await Promise.all([
+        this.loadShopInfo(),
+        this.loadMenu(showLoading),
+        this.loadNotices()
+      ])
+      return
+    }
+
+    if (showLoading) {
+      this.setData({ menuLoading: true })
+      this.startOrderLoadingAnimation()
+    }
+
+    try {
+      const result = await apiClient.call('menu.bootstrap', {
+        menuType: 'dineIn',
+        initialCategoryCount: this.data.categoryBatchSize
+      })
+      const data = result.data || {}
+      const menuList = data.categories || []
+      const categorySections = (data.sections || []).map(section => ({
+        ...section,
+        goods: (section.goods || []).map(item => this.normalizeGoodsItem(item))
+      }))
+      const noticeList = data.notices || []
+      const goodsList = categorySections.reduce((list, section) => list.concat(section.goods), [])
+
+      this.setData({
+        shopInfo: data.shopInfo || {},
+        noticeList,
+        noticeText: noticeList.map(item => item.content).join('    '),
+        menuList,
+        currentMenuId: menuList[0] ? menuList[0]._id : '',
+        goodsPage: 0,
+        goodsHasMore: categorySections.length < menuList.length,
+        categorySections,
+        loadedCategoryCount: categorySections.length,
+        goodsList,
+        searchKeyword: '',
+        isSearching: false,
+        searchLoading: false,
+        searchGoodsList: [],
+        scrollIntoSection: ''
+      }, () => {
+        this.measureCategorySections()
+      })
+    } catch (err) {
+      console.error('加载点单初始数据失败', err)
+      wx.showToast({ title: '加载失败', icon: 'none' })
+    } finally {
+      if (showLoading) {
+        this.stopOrderLoadingAnimation()
+        this.setData({ menuLoading: false })
+      }
     }
   },
 
@@ -1313,9 +1518,32 @@ Page({
 
     const goods = e.currentTarget.dataset.goods
     const specAddOriginPoint = this.getTapPoint(e)
-    const flavorOptions = goods.flavorOptions && goods.flavorOptions.length
-      ? goods.flavorOptions
-      : ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3']
+    this.openDishModal(goods, specAddOriginPoint)
+  },
+
+  // 菜品图片用于查看大图，无规格菜品也可以打开这个展示面板。
+  openDishPreview(e) {
+    const goods = e.currentTarget.dataset.goods
+    this.openDishModal(goods, null)
+  },
+
+  openDishModal(goods, specAddOriginPoint) {
+    if (!goods) return
+
+    if (this.tagModalCloseTimer) {
+      clearTimeout(this.tagModalCloseTimer)
+      this.tagModalCloseTimer = null
+    }
+
+    const hasSelectableSpecs = goods.needSpec !== false ||
+      (Array.isArray(goods.tags) && goods.tags.length > 0) ||
+      (Array.isArray(goods.optionGroups) && goods.optionGroups.length > 0) ||
+      (Array.isArray(goods.flavorOptions) && goods.flavorOptions.length > 0)
+    const flavorOptions = hasSelectableSpecs
+      ? (goods.flavorOptions && goods.flavorOptions.length
+        ? goods.flavorOptions
+        : ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'])
+      : []
     const defaultFlavor = this.getDefaultOption(flavorOptions)
     const optionGroups = (goods.optionGroups || []).map(group => ({
       ...group,
@@ -1335,6 +1563,7 @@ Page({
     // 总是显示弹窗，让用户选择数量
     this.setData({
       showTagModal: true,
+      isTagModalClosing: false,
       currentDish: {
         ...goods,
         tags: []
@@ -1474,7 +1703,11 @@ Page({
     if (!this.requirePeopleBeforeOrder()) return
 
     const goods = e.currentTarget.dataset.goods
-    if (goods.needSpec !== false) {
+    const needsSpecModal = goods.needSpec !== false ||
+      (Array.isArray(goods.tags) && goods.tags.length > 0) ||
+      (Array.isArray(goods.optionGroups) && goods.optionGroups.length > 0) ||
+      (Array.isArray(goods.flavorOptions) && goods.flavorOptions.length > 0)
+    if (needsSpecModal) {
       this.addToCart(e)
       return
     }
@@ -1506,9 +1739,6 @@ Page({
         icon: 'success',
         duration: 1000
       })
-    } else {
-      // 有标签，显示弹窗让用户选择
-      this.addToCart(e)
     }
   },
 
@@ -1774,19 +2004,29 @@ Page({
   },
 
   closeTagModal() {
+    if (!this.data.showTagModal || this.data.isTagModalClosing) return
+
     this.setData({
-      showTagModal: false,
-      currentDish: null,
-      selectedTags: {},
-      modalFlavorTitle: '\u53e3\u5473',
-      modalFlavorOptions: ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'],
-      modalOptionGroups: [],
-      modalRemark: '',
-      modalRemarkCount: 0,
-      modalDishCount: 1,
-      modalTotalPrice: 0,
-      specAddOriginPoint: null
+      isTagModalClosing: true
     })
+
+    this.tagModalCloseTimer = setTimeout(() => {
+      this.tagModalCloseTimer = null
+      this.setData({
+        showTagModal: false,
+        isTagModalClosing: false,
+        currentDish: null,
+        selectedTags: {},
+        modalFlavorTitle: '\u53e3\u5473',
+        modalFlavorOptions: ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'],
+        modalOptionGroups: [],
+        modalRemark: '',
+        modalRemarkCount: 0,
+        modalDishCount: 1,
+        modalTotalPrice: 0,
+        specAddOriginPoint: null
+      })
+    }, 300)
   },
 
   // 增加弹窗商品数量
@@ -2125,7 +2365,13 @@ Page({
         orderType: 'dineIn',
         orderScene: 'dineIn',
         sharedSessionId: this.data.sharedSessionId || '',
-        activeOrderSession: this.getActiveOrderSessionForSettle()
+        activeOrderSession: this.getActiveOrderSessionForSettle(),
+        sharedOrderContext: this.data.sharedOrderRootId
+          ? {
+              rootOrderId: this.data.sharedOrderRootId,
+              addOnCount: Number(this.data.sharedOrderAddOnCount || 0)
+            }
+          : null
       })
       
       // 跳转到结算页面
@@ -2249,10 +2495,8 @@ Page({
 
       // 并行刷新所有数据（不显示 loading，使用系统下拉刷新动画）
       await Promise.all([
-        this.loadShopInfo(),
-        this.loadMenu(false), // 不显示 loading
-        this.loadUserInfo(),
-        this.loadNotices()
+        this.loadInitialOrderData(false),
+        this.loadUserInfo()
       ])
     } catch (err) {
       console.error('刷新失败', err)

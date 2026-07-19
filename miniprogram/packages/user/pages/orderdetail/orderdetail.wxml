@@ -81,4 +81,9 @@
     <view class="empty-title">暂无订单详情</view>
     <view class="empty-back" bindtap="goBack">返回订单</view>
   </view>
+
+  <view class="submitted-actions" wx:if="{{!empty && order.canManageSubmittedOrder}}">
+    <view class="submitted-action checkout-action" bindtap="goToFrontDeskCheckout">结账</view>
+    <view class="submitted-action add-more-action" bindtap="addMoreDishes">再加一点</view>
+  </view>
 </view>

@@ -80,7 +80,7 @@ const UI = {
   searchResult: '\u641c\u7d22\u7ed3\u679c',
   emptySearch: '\u672a\u627e\u5230\u83dc\u54c1',
   clearSearch: '\u6e05\u7a7a',
-  imageTip: '\u4ec5\u652f\u6301 jpg/png/webp\uff0c\u538b\u7f29\u540e\u9700\u5c0f\u4e8e1MB\u3002'
+  imageTip: '\u4ec5\u652f\u6301 jpg/png/webp\uff0c\u9009\u56fe\u540e\u53ef\u88c1\u526a\u4e3a\u65b9\u56fe\uff0c\u7cfb\u7edf\u4f1a\u81ea\u52a8\u538b\u7f29\u3002'
 }
 
 const DEFAULT_CATEGORY = {
@@ -773,7 +773,9 @@ Page({
           if (!filePath) return
 
           try {
-            await this.uploadDishImage(filePath)
+            const croppedPath = await this.cropDishImage(filePath)
+            if (!croppedPath) return
+            await this.uploadDishImage(croppedPath)
           } catch (err) {
             wx.hideLoading()
             console.error('upload dish image failed', err)
@@ -793,13 +795,34 @@ Page({
         if (!file || !file.tempFilePath) return
 
         try {
-          await this.uploadDishImage(file.tempFilePath, file.size || 0)
+          const croppedPath = await this.cropDishImage(file.tempFilePath)
+          if (!croppedPath) return
+          await this.uploadDishImage(croppedPath, file.size || 0)
         } catch (err) {
           wx.hideLoading()
           console.error('upload dish image failed', err)
           showToast(err.message || UI.imageUploadFailed)
         }
       }
+    })
+  },
+
+  cropDishImage(filePath) {
+    if (!wx.cropImage) return Promise.resolve(filePath)
+
+    return new Promise((resolve, reject) => {
+      wx.cropImage({
+        src: filePath,
+        cropScale: '1:1',
+        success: res => resolve(res.tempFilePath || filePath),
+        fail: err => {
+          if (/cancel/i.test(String(err && err.errMsg || ''))) {
+            resolve('')
+            return
+          }
+          reject(err)
+        }
+      })
     })
   },
 
@@ -813,23 +836,48 @@ Page({
     })
   },
 
-  compressImage(filePath) {
+  compressImage(filePath, quality = 72) {
     return new Promise(resolve => {
       wx.compressImage({
         src: filePath,
-        quality: 72,
+        quality,
         success: res => resolve(res.tempFilePath || filePath),
         fail: () => resolve(filePath)
       })
     })
   },
 
-  readFileBase64(filePath) {
+  uploadDishImageFile(filePath, dish = {}) {
     return new Promise((resolve, reject) => {
-      wx.getFileSystemManager().readFile({
+      wx.uploadFile({
+        url: apiClient.getBaseUrl(),
         filePath,
-        encoding: 'base64',
-        success: res => resolve(res.data || ''),
+        name: 'file',
+        formData: {
+          tenantId: apiClient.TENANT_ID,
+          adminAuthToken: apiClient.getAdminAuthToken(),
+          action: 'admin.dish.uploadFile',
+          dishId: dish._id || '',
+          dishName: dish.name || ''
+        },
+        timeout: 30000,
+        success: res => {
+          let result = {}
+          try {
+            result = typeof res.data === 'string' ? JSON.parse(res.data) : (res.data || {})
+          } catch (err) {
+            result = {}
+          }
+
+          if (res.statusCode >= 200 && res.statusCode < 300 && result.success !== false) {
+            resolve(result.data || {})
+            return
+          }
+
+          const error = new Error(result.message || `upload failed: ${res.statusCode}`)
+          error.code = result.code || ''
+          reject(error)
+        },
         fail: reject
       })
     })
@@ -844,28 +892,29 @@ Page({
 
     wx.showLoading({ title: UI.imageUploading })
 
-    const compressTarget = ext === 'webp' ? filePath : await this.compressImage(filePath)
-    const fileInfo = await this.getFileInfo(compressTarget)
-    const finalSize = fileInfo.size || originalSize || 0
+    let compressTarget = ext === 'webp' ? filePath : await this.compressImage(filePath)
+    let fileInfo = await this.getFileInfo(compressTarget)
+    let finalSize = fileInfo.size || originalSize || 0
+    if (finalSize > MAX_IMAGE_SIZE && ext !== 'webp') {
+      compressTarget = await this.compressImage(filePath, 45)
+      fileInfo = await this.getFileInfo(compressTarget)
+      finalSize = fileInfo.size || originalSize || 0
+    }
+
     if (finalSize > MAX_IMAGE_SIZE) {
       wx.hideLoading()
       showToast(UI.imageTooLarge)
       return
     }
 
-    const fileBase64 = await this.readFileBase64(compressTarget)
     const currentDish = this.data.currentDish || {}
-    const result = await apiClient.call('admin.dish.uploadImage', {
-      dishId: currentDish._id || '',
-      dishName: currentDish.name || '',
-      fileBase64
-    })
-    const data = result.data || {}
+    const data = await this.uploadDishImageFile(compressTarget, currentDish)
+    const fileID = data.fileID || ''
 
     wx.hideLoading()
     this.setData({
-      'currentDish.image': data.fileID || '',
-      'currentDish.imageFileID': data.fileID || '',
+      'currentDish.image': fileID,
+      'currentDish.imageFileID': fileID,
       'currentDish.imagePreview': data.image || compressTarget
     })
     showToast(UI.imageUploaded, 'success')

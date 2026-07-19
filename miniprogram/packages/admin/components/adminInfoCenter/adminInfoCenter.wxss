@@ -5,6 +5,16 @@
   z-index: 9999;
 }
 
+.info-panel-mask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 9998;
+  background: transparent;
+}
+
 .info-fab {
   position: relative;
   width: 38rpx;

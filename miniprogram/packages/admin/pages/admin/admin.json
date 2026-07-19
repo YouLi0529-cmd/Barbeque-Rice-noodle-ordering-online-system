@@ -1,5 +1,6 @@
 {
   "navigationBarTitleText": "\u7ba1\u7406\u5458\u540e\u53f0",
+  "navigationStyle": "custom",
   "pageOrientation": "landscape",
   "disableScroll": true,
   "usingComponents": {
