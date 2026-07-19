@@ -1535,20 +1535,19 @@ Page({
       this.tagModalCloseTimer = null
     }
 
-    const hasSelectableSpecs = goods.needSpec !== false ||
-      (Array.isArray(goods.tags) && goods.tags.length > 0) ||
-      (Array.isArray(goods.optionGroups) && goods.optionGroups.length > 0) ||
-      (Array.isArray(goods.flavorOptions) && goods.flavorOptions.length > 0)
+    const hasSelectableSpecs = goods.needSpec !== false
     const flavorOptions = hasSelectableSpecs
       ? (goods.flavorOptions && goods.flavorOptions.length
         ? goods.flavorOptions
         : ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'])
       : []
     const defaultFlavor = this.getDefaultOption(flavorOptions)
-    const optionGroups = (goods.optionGroups || []).map(group => ({
-      ...group,
-      selectedOption: this.getDefaultOption(group.options)
-    }))
+    const optionGroups = hasSelectableSpecs
+      ? (goods.optionGroups || []).map(group => ({
+        ...group,
+        selectedOption: this.getDefaultOption(group.options)
+      }))
+      : []
     
     // 初始化标签选择状态，多选标签初始化为数组
     const selectedTags = {}
@@ -1703,43 +1702,38 @@ Page({
     if (!this.requirePeopleBeforeOrder()) return
 
     const goods = e.currentTarget.dataset.goods
-    const needsSpecModal = goods.needSpec !== false ||
-      (Array.isArray(goods.tags) && goods.tags.length > 0) ||
-      (Array.isArray(goods.optionGroups) && goods.optionGroups.length > 0) ||
-      (Array.isArray(goods.flavorOptions) && goods.flavorOptions.length > 0)
+    const needsSpecModal = goods.needSpec !== false
     if (needsSpecModal) {
       this.addToCart(e)
       return
     }
     
-    // 如果菜品没有标签，直接添加（使用菜品ID作为key）
-    if (!goods.tags || goods.tags.length === 0) {
-      const cart = { ...this.data.cart }
-      const cartKey = goods._id
-      const minOrderCount = goods.minOrderCount || 1
+    // 规格弹窗关闭时，旧标签字段不应阻止直接加入。
+    const cart = { ...this.data.cart }
+    const cartKey = goods._id
+    const minOrderCount = goods.minOrderCount || 1
       
-      if (cart[cartKey]) {
-        // 已存在，增加数量
-        cart[cartKey].count++
-      } else {
-        // 不存在，创建新项
-        cart[cartKey] = {
-          info: goods,
-          count: minOrderCount,
-          tags: {},
-          tagLabels: [],
-          dishId: goods._id
-        }
+    if (cart[cartKey]) {
+      // 已存在，增加数量
+      cart[cartKey].count++
+    } else {
+      // 不存在，创建新项
+      cart[cartKey] = {
+        info: goods,
+        count: minOrderCount,
+        tags: {},
+        tagLabels: [],
+        dishId: goods._id
       }
-      
-      this.updateCart(cart)
-      this.playCartAddEffect(e)
-      wx.showToast({
-        title: '已添加',
-        icon: 'success',
-        duration: 1000
-      })
     }
+
+    this.updateCart(cart)
+    this.playCartAddEffect(e)
+    wx.showToast({
+      title: '已添加',
+      icon: 'success',
+      duration: 1000
+    })
   },
 
   // 从菜品列表减少数量（无标签版本）

@@ -83,8 +83,10 @@
 
       <block wx:elif="{{isSearching}}">
         <view class="goods-item" wx:for="{{searchGoodsList}}" wx:for-item="item" wx:key="_id">
-          <image wx:if="{{item.hasImage}}" class="goods-image" src="{{item.image}}" mode="aspectFill" bindtap="openDishPreview" data-goods="{{item}}"></image>
-          <view wx:else class="goods-image goods-image-placeholder"></view>
+          <view class="goods-image goods-image-trigger" catchtap="openDishPreview" data-goods="{{item}}">
+            <image wx:if="{{item.hasImage}}" class="goods-image-content" src="{{item.image}}" mode="aspectFill"></image>
+            <view wx:else class="goods-image-placeholder"></view>
+          </view>
           <view class="goods-info">
             <view class="goods-name">{{item.name}}</view>
             <view class="goods-desc" wx:if="{{item.description || item.desc}}">{{item.description || item.desc}}</view>
@@ -122,8 +124,10 @@
             <view class="divider-line right"></view>
           </view>
           <view class="goods-item" wx:for="{{section.goods}}" wx:for-item="item" wx:key="_id">
-            <image wx:if="{{item.hasImage}}" class="goods-image" src="{{item.image}}" mode="aspectFill" bindtap="openDishPreview" data-goods="{{item}}"></image>
-            <view wx:else class="goods-image goods-image-placeholder"></view>
+            <view class="goods-image goods-image-trigger" catchtap="openDishPreview" data-goods="{{item}}">
+              <image wx:if="{{item.hasImage}}" class="goods-image-content" src="{{item.image}}" mode="aspectFill"></image>
+              <view wx:else class="goods-image-placeholder"></view>
+            </view>
             <view class="goods-info">
               <view class="goods-name">{{item.name}}</view>
               <view class="goods-desc" wx:if="{{item.description || item.desc}}">{{item.description || item.desc}}</view>

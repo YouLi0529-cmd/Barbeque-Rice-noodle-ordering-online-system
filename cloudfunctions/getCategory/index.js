@@ -892,7 +892,23 @@ function pickCategoryCandidate(current, candidate, menuConfig) {
     : current
 }
 
-async function syncDishes(category, menuConfig) {
+function buildDishSpecData(dish) {
+  const needSpec = dish.needSpec !== false
+
+  return {
+    needSpec,
+    flavorTitle: dish.flavorTitle || '\u53e3\u5473',
+    flavorOptions: needSpec
+      ? (dish.flavorOptions || ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'])
+      : [],
+    flavorNote: dish.flavorNote || '',
+    optionGroups: dish.optionGroups || [],
+    tags: []
+  }
+}
+
+async function syncDishes(category, menuConfig, options = {}) {
+  const specOnly = options.specOnly === true
   const dishes = menuConfig.dishSeeds[category.name]
   if (!dishes || dishes.length === 0) {
     return
@@ -923,6 +939,7 @@ async function syncDishes(category, menuConfig) {
 
   await Promise.all(dishes.map(async dish => {
     const existing = existingByName[dish.name]
+    const specData = buildDishSpecData(dish)
     const dishData = {
       name: dish.name,
       price: dish.price,
@@ -931,27 +948,27 @@ async function syncDishes(category, menuConfig) {
       categoryId: category._id,
       categoryName: category.name,
       menuType: menuConfig.menuType,
-      image: '',
+      image: existing && existing.image ? existing.image : '',
       status: 1,
-      needSpec: dish.needSpec !== false,
+      ...specData,
       minOrderCount: dish.minOrderCount || 1,
       maxOrderCount: dish.maxOrderCount || 0,
       quantityMode: dish.quantityMode || '',
       exclusiveGroup: dish.exclusiveGroup || '',
       freeThreshold: dish.freeThreshold || 0,
       returnRequired: !!dish.returnRequired,
-      flavorTitle: dish.flavorTitle || '\u53e3\u5473',
-      flavorOptions: dish.flavorOptions || ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3'],
-      flavorNote: dish.flavorNote || '',
-      optionGroups: dish.optionGroups || [],
       sort: dish.sort,
-      tags: [],
       updateTime: new Date()
     }
 
     if (existing) {
       await db.collection('dish').doc(existing._id).update({
-        data: dishData
+        data: specOnly
+          ? {
+              ...specData,
+              updateTime: new Date()
+            }
+          : dishData
       })
     } else {
       await db.collection('dish').add({
@@ -963,7 +980,7 @@ async function syncDishes(category, menuConfig) {
     }
   }))
 
-  if (menuConfig.menuType === 'camping') {
+  if (menuConfig.menuType === 'camping' && !specOnly) {
     const allDishRes = await db.collection('dish')
       .where({
         categoryId: category._id,
@@ -987,6 +1004,7 @@ async function syncDishes(category, menuConfig) {
 exports.main = async (event = {}) => {
   try {
     const shouldSync = event && event.sync === true
+    const specOnly = shouldSync && event && event.specOnly === true
     const menuConfig = getMenuConfig(event && event.menuType === 'camping' ? 'camping' : 'dineIn')
     const syncCategoryNames = Array.isArray(event.categoryNames)
       ? event.categoryNames
@@ -1073,12 +1091,13 @@ exports.main = async (event = {}) => {
       ? data.filter(category => syncCategoryNames.includes(category.name))
       : data
 
-    await Promise.all(syncTargets.map(category => syncDishes(category, menuConfig)))
+    await Promise.all(syncTargets.map(category => syncDishes(category, menuConfig, { specOnly })))
 
     return {
       success: true,
       data,
-      syncedCategoryNames: syncTargets.map(category => category.name)
+      syncedCategoryNames: syncTargets.map(category => category.name),
+      specOnly
     }
   } catch (err) {
     console.error('getCategory failed', err)

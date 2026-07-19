@@ -20,6 +20,7 @@ const SHARED_CART_ACCESS_TOKEN_TTL_MS = 4 * 60 * 60 * 1000
 const SHARED_CART_ACTIVE_WINDOW_MS = 2 * 60 * 1000
 const ADMIN_TABLE_BOARD_STATE_ID = '__admin_table_board__'
 const MAX_DISH_IMAGE_SIZE = 1024 * 1024
+const DISH_IMAGE_TEMP_URL_MAX_AGE = 60 * 60 * 24
 const DISH_IMAGE_TYPES = {
   jpg: 'image/jpeg',
   png: 'image/png',
@@ -4646,7 +4647,10 @@ async function resolveDishImageUrls(list = []) {
     const tempMap = {}
     for (let index = 0; index < fileIDs.length; index += 50) {
       const res = await cloud.getTempFileURL({
-        fileList: fileIDs.slice(index, index + 50)
+        fileList: fileIDs.slice(index, index + 50).map(fileID => ({
+          fileID,
+          maxAge: DISH_IMAGE_TEMP_URL_MAX_AGE
+        }))
       })
       ;(res.fileList || []).forEach(item => {
         if (item && item.fileID && item.tempFileURL) {
@@ -5041,7 +5045,10 @@ async function storeDishImageFile({ tenantId, dishId, dishName, fileContent }) {
   if (fileID) {
     try {
       const tempRes = await cloud.getTempFileURL({
-        fileList: [fileID]
+        fileList: [{
+          fileID,
+          maxAge: DISH_IMAGE_TEMP_URL_MAX_AGE
+        }]
       })
       image = tempRes.fileList && tempRes.fileList[0] && tempRes.fileList[0].tempFileURL || ''
     } catch (err) {
@@ -5415,7 +5422,8 @@ async function syncMenu(payload) {
       data: {
         sync: true,
         menuType,
-        categoryNames
+        categoryNames,
+        specOnly: payload.specOnly === true
       }
     })
 
@@ -5432,7 +5440,8 @@ async function syncMenu(payload) {
     return {
       success: true,
       data: result.data || [],
-      syncedCategoryNames: result.syncedCategoryNames || []
+      syncedCategoryNames: result.syncedCategoryNames || [],
+      specOnly: result.specOnly === true
     }
   } catch (err) {
     console.error('menu sync failed', err)

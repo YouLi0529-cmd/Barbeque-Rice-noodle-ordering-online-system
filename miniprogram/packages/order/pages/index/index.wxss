@@ -434,6 +434,18 @@ page {
   background: rgba(255, 241, 220, 0.72);
 }
 
+.goods-image-trigger {
+  position: relative;
+}
+
+.goods-image-content,
+.goods-image-placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
 .goods-info {
   flex: 1;
   margin-left: 20rpx;
