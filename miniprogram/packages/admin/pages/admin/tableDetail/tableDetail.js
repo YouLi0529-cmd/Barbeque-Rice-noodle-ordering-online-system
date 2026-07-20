@@ -54,12 +54,18 @@ const UI = {
   actualReceived: '\u5b9e\u6536',
   finishCheckout: '\u4ed8\u6b3e\u5b8c\u6210\uff0c\u786e\u5b9a\u7ed3\u8d26',
   sendKitchen: '\u53d1\u9001\u540e\u53a8',
+  sentToKitchen: '\u5df2\u53d1\u9001',
   refundSuccess: '\u5df2\u9000\u83dc',
   giftSuccess: '\u5df2\u8d60\u83dc',
   giftConfirmTitle: '\u786e\u8ba4\u8d60\u83dc',
   giftConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u5728\u672c\u6b21\u8ba2\u5355\u4e2d\u6309 0 \u5143\u7ed3\u7b97\u5417',
   sendKitchenConfirmTitle: '\u53d1\u9001\u540e\u53a8',
   sendKitchenConfirmContent: '\u786e\u5b9a\u53d1\u9001\u9009\u4e2d\u83dc\u54c1\u5230\u540e\u53a8\u5417',
+  kitchenPrintFailed: '\u540e\u53a8\u6253\u5370\u5f02\u5e38',
+  failedDishesPrefix: '\u5931\u8d25\u83dc\u54c1\uff1a',
+  retryFailedKitchen: '\u91cd\u8bd5\u5931\u8d25\u83dc\u54c1',
+  retryKitchenConfirmContent: '\u786e\u5b9a\u53ea\u91cd\u8bd5\u672c\u5355\u5931\u8d25\u7684\u540e\u53a8\u6253\u5370\u4efb\u52a1\u5417',
+  retryKitchenSuccess: '\u5df2\u91cd\u65b0\u52a0\u5165\u540e\u53a8\u6253\u5370\u961f\u5217',
   paidOrderCannotSendKitchen: '\u5df2\u7ed3\u8d26\u83dc\u54c1\u4e0d\u80fd\u53d1\u9001\u540e\u53a8',
   urgeSuccess: '\u5df2\u50ac\u83dc',
   urgeConfirmTitle: '\u786e\u8ba4\u50ac\u83dc',
@@ -227,24 +233,29 @@ function normalizeBillGroups(groups) {
   if (!Array.isArray(groups)) return []
   return groups.map((group, index) => {
     const groupId = group.id || group.orderId || `group-${index}`
-    const goods = Array.isArray(group.goods) ? group.goods.map((goodsItem, goodsIndex) => ({
-      ...goodsItem,
-      rowId: `${groupId}-${goodsItem.dishId || 'dish'}-${goodsIndex}`,
-      tagText: goodsItem.tagText || (Array.isArray(goodsItem.tags) ? goodsItem.tags.join('\u3001') : ''),
-      remarkText: goodsItem.remark ? `\u5907\u6ce8\uff1a${goodsItem.remark}` : '',
-      kitchenSent: goodsItem.kitchenSent === true || goodsItem.kitchenStatus === 'sent',
-      subtotalText: goodsItem.subtotalText || formatPrice(goodsItem.subtotal)
-    })) : []
+    const goods = Array.isArray(group.goods) ? group.goods.map((goodsItem, goodsIndex) => {
+      const kitchenStatus = goodsItem.kitchenStatus || ''
+      return {
+        ...goodsItem,
+        rowId: `${groupId}-${goodsItem.dishId || 'dish'}-${goodsIndex}`,
+        tagText: goodsItem.tagText || (Array.isArray(goodsItem.tags) ? goodsItem.tags.join('\u3001') : ''),
+        remarkText: goodsItem.remark ? `\u5907\u6ce8\uff1a${goodsItem.remark}` : '',
+        kitchenStatus,
+        kitchenSent: goodsItem.kitchenSent === true || kitchenStatus === 'queued' || kitchenStatus === 'claimed' || kitchenStatus === 'sending' || kitchenStatus === 'printed' || kitchenStatus === 'sent',
+        kitchenFailed: kitchenStatus === 'failed',
+        subtotalText: goodsItem.subtotalText || formatPrice(goodsItem.subtotal)
+      }
+    }) : []
+    const failedKitchenDishes = goods.filter(item => item.kitchenFailed)
 
     return {
       ...group,
       id: groupId,
       title: group.title || `\u70b9\u9910\u5355${index + 1}`,
-      canSendKitchen: group.canSendKitchen !== false &&
-        group.status !== 'paid' &&
-        group.status !== 'completed' &&
-        group.statusText !== '\u5df2\u652f\u4ed8',
+      canSendKitchen: group.canSendKitchen !== false,
       goods,
+      hasKitchenPrintFailure: group.hasKitchenPrintFailure === true || failedKitchenDishes.length > 0,
+      kitchenFailedDishText: failedKitchenDishes.map(item => item.dishName).filter(Boolean).join('\u3001'),
       goodsCount: Number(group.goodsCount || goods.reduce((sum, item) => sum + (Number(item.count) || 0), 0)),
       finalPriceText: group.finalPriceText || formatPrice(group.finalPrice)
     }
@@ -371,6 +382,7 @@ Page({
     paySummary: buildPaySummary(0, 'wechat_alipay', '', '', ''),
     loading: false,
     sendingKitchen: false,
+    retryingKitchen: false,
     urgingKitchen: false,
     savingPeople: false,
     savingDishEdit: false,
@@ -1399,7 +1411,7 @@ Page({
     }
     if (selectedItems.some(item => item.canSendKitchen === false)) {
       wx.showToast({
-        title: UI.paidOrderCannotSendKitchen,
+        title: '\u5f53\u524d\u8ba2\u5355\u5df2\u7ed3\u675f\uff0c\u4e0d\u80fd\u53d1\u9001\u540e\u53a8',
         icon: 'none'
       })
       await this.loadDetail(true)
@@ -1445,17 +1457,52 @@ Page({
       await this.loadDetail(true)
     } catch (err) {
       console.error('send table orders to kitchen failed', err)
-      if (err.code === 'ORDER_PAID' || /paid order/.test(err.message || '')) {
-        await this.loadDetail(true)
-      }
       wx.showToast({
-        title: err.code === 'ORDER_PAID' || /paid order/.test(err.message || '')
-          ? UI.paidOrderCannotSendKitchen
-          : err.message || '\u53d1\u9001\u5931\u8d25',
+        title: err.message || '\u53d1\u9001\u5931\u8d25',
         icon: 'none'
       })
     } finally {
       this.setData({ sendingKitchen: false })
+    }
+  },
+
+  async retryFailedKitchenItems(event) {
+    if (this.data.retryingKitchen) return
+    const groupId = String(event && event.currentTarget && event.currentTarget.dataset && event.currentTarget.dataset.groupId || '').trim()
+    const group = (this.data.billGroups || []).find(item => item.id === groupId)
+    if (!group || !group.hasKitchenPrintFailure) return
+
+    const confirmed = await new Promise(resolve => {
+      wx.showModal({
+        title: UI.retryFailedKitchen,
+        content: UI.retryKitchenConfirmContent,
+        confirmText: UI.retryFailedKitchen,
+        cancelText: '\u53d6\u6d88',
+        success: res => resolve(res.confirm === true),
+        fail: () => resolve(false)
+      })
+    })
+    if (!confirmed) return
+
+    try {
+      this.setData({ retryingKitchen: true })
+      const res = await apiClient.call('admin.table.retryFailedKitchenItems', {
+        orderId: groupId
+      })
+      const retriedCount = Number(res && res.data && res.data.retriedCount || 0)
+      wx.showToast({
+        title: retriedCount > 0 ? UI.retryKitchenSuccess : UI.noOrder,
+        icon: retriedCount > 0 ? 'success' : 'none'
+      })
+      await this.loadDetail(true)
+    } catch (err) {
+      console.error('retry failed kitchen dishes failed', err)
+      wx.showToast({
+        title: err.message || UI.actionTodo,
+        icon: 'none'
+      })
+    } finally {
+      this.setData({ retryingKitchen: false })
     }
   },
 

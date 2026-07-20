@@ -30,7 +30,11 @@ const TICKET_TYPE_OPTIONS = [
   { key: 'prebill', label: '预结单' },
   { key: 'checkout', label: '结账单' },
   { key: 'refund', label: '退单' },
-  { key: 'kitchen_order', label: '制作单' }
+  { key: 'kitchen_order', label: '制作单' },
+  { key: 'kitchen_add', label: '加菜单' },
+  { key: 'kitchen_urge', label: '催菜单' },
+  { key: 'kitchen_refund', label: '退菜通知' },
+  { key: 'kitchen_split', label: '制作分单' }
 ]
 const FIELD_LIBRARY = [
   { key: 'title', label: '票据名称', sample: '结账单' },
@@ -107,6 +111,7 @@ Page({
     backendError: '',
     dashboard: { agentOnline: false, agents: [], printers: [], metrics: { queued: 0, failed: 0, unassigned: 0 }, alerts: [] },
     printers: [],
+    kitchenPrinters: [],
     usbPrinterNames: [],
     usbDevices: [],
     cashierConfigs: [],
@@ -115,8 +120,17 @@ Page({
     categories: [],
     categoryOptions: [{ _id: '', name: '所有分类' }],
     templates: [],
+    templateBindingScopes: ['global', 'station', 'printer'],
+    templateBindingScopeLabels: ['全店默认', '按后厨档口', '按具体打印机'],
+    templateTestPrinters: [],
+    templateTestPrinterId: '',
+    templateTestPrinterName: '请选择要测试的打印机',
     jobs: [],
+    jobsHasMore: false,
+    jobsNextCursor: '',
     logs: [],
+    logsHasMore: false,
+    logsNextCursor: '',
     brandOptions: BRAND_OPTIONS,
     paperOptions: PAPER_OPTIONS,
     resolutionOptions: RESOLUTION_OPTIONS,
@@ -190,6 +204,7 @@ Page({
     const printers = res.data || []
     this.setData({
       printers,
+      kitchenPrinters: printers.filter(item => item.usage === 'kitchen' || item.usage === 'both'),
       usbPrinterNames: printers.filter(item => item.connectionType === 'usb').map(item => item.name)
     })
   },
@@ -199,9 +214,25 @@ Page({
     this.setData({ cashierConfigs: res.data || [] })
   },
 
+  normalizeStations(stations, printers) {
+    const printerMap = (printers || this.data.printers || []).reduce((map, printer) => {
+      map[printer._id] = printer
+      return map
+    }, {})
+    return (stations || []).map(station => {
+      const printer = station.printer || printerMap[station.printerId] || null
+      return {
+        ...station,
+        printer,
+        printerName: station.printerName || (printer && printer.name) || '',
+        bindingLabel: station.printerName || (printer && printer.name) || (station.printerId ? '已绑定的打印机已不存在' : '未绑定打印机')
+      }
+    })
+  },
+
   async loadStations() {
     const res = await this.call('admin.print.stations.list')
-    this.setData({ stations: res.data || [] })
+    this.setData({ stations: this.normalizeStations(res.data) })
   },
 
   async loadDishes() {
@@ -216,8 +247,7 @@ Page({
     this.setData({
       dishes: (data.list || []).map(item => ({ ...item, selected: selected.indexOf(item.dishId) >= 0 })),
       categories,
-      categoryOptions: [{ _id: '', name: '所有分类' }].concat(categories),
-      stations: data.stations || this.data.stations
+      categoryOptions: [{ _id: '', name: '所有分类' }].concat(categories)
     })
   },
 
@@ -229,11 +259,17 @@ Page({
       return
     }
     const editTemplate = clone(selected)
+    const kitchenTicket = String(editTemplate.ticketType || '').indexOf('kitchen_') === 0
+    const templateTestPrinters = this.data.printers.filter(printer => !kitchenTicket || printer.usage === 'kitchen' || printer.usage === 'both')
+    const selectedTestPrinter = templateTestPrinters.find(printer => printer._id === editTemplate.printerId)
     this.setData({
       selectedTemplateId: selected._id,
       editTemplate,
       previewFields: makePreviewFields(editTemplate.fields),
-      selectedTemplateFieldIndex: editTemplate.fields && editTemplate.fields.length ? 0 : -1
+      selectedTemplateFieldIndex: editTemplate.fields && editTemplate.fields.length ? 0 : -1,
+      templateTestPrinters,
+      templateTestPrinterId: selectedTestPrinter ? selectedTestPrinter._id : '',
+      templateTestPrinterName: selectedTestPrinter ? selectedTestPrinter.name : '请选择要测试的打印机'
     })
   },
 
@@ -245,14 +281,34 @@ Page({
     this.selectTemplate(current, templates)
   },
 
-  async loadJobs() {
-    const res = await this.call('admin.print.jobs.list', this.data.jobFilter)
-    this.setData({ jobs: (res.data || []).map(item => ({ ...item, displayTime: formatTime(item.createTime) })) })
+  async loadJobs(append) {
+    const res = await this.call('admin.print.jobs.list', {
+      ...this.data.jobFilter,
+      pageSize: 30,
+      cursor: append ? this.data.jobsNextCursor : ''
+    })
+    const page = Array.isArray(res.data) ? { list: res.data, hasMore: false, nextCursor: '' } : (res.data || {})
+    const rows = (page.list || []).map(item => ({ ...item, displayTime: formatTime(item.createTime) }))
+    this.setData({
+      jobs: append ? this.data.jobs.concat(rows) : rows,
+      jobsHasMore: !!page.hasMore,
+      jobsNextCursor: page.nextCursor || ''
+    })
   },
 
-  async loadLogs() {
-    const res = await this.call('admin.print.logs.list', this.data.logFilter)
-    this.setData({ logs: (res.data || []).map(item => ({ ...item, displayTime: formatTime(item.createTime) })) })
+  async loadLogs(append) {
+    const res = await this.call('admin.print.logs.list', {
+      ...this.data.logFilter,
+      pageSize: 30,
+      cursor: append ? this.data.logsNextCursor : ''
+    })
+    const page = Array.isArray(res.data) ? { list: res.data, hasMore: false, nextCursor: '' } : (res.data || {})
+    const rows = (page.list || []).map(item => ({ ...item, displayTime: formatTime(item.createTime) }))
+    this.setData({
+      logs: append ? this.data.logs.concat(rows) : rows,
+      logsHasMore: !!page.hasMore,
+      logsNextCursor: page.nextCursor || ''
+    })
   },
 
   async refreshCurrent() {
@@ -348,6 +404,29 @@ Page({
     } catch (err) { toast(err.message || '操作失败') }
   },
 
+  setPrinterHardware(e) {
+    const printer = e.currentTarget.dataset.item
+    const choices = ['硬件正常', '疑似缺纸', '疑似开盖', '人工标记卡纸', '无法确认']
+    const statuses = ['ok', 'paper_out', 'cover_open', 'jammed', 'unknown']
+    wx.showActionSheet({
+      itemList: choices,
+      success: async result => {
+        try {
+          await this.call('admin.print.printers.hardwareStatus', {
+            printerId: printer._id,
+            hardwareStatus: statuses[result.tapIndex]
+          })
+          await Promise.all([this.loadPrinters(), this.loadLogs()])
+          toast('硬件状态已更新', 'success')
+        } catch (err) {
+          const message = String(err.message || '')
+          const backendOutdated = err.code === 'UNKNOWN_ACTION' || message.indexOf('unknown action') >= 0
+          toast(backendOutdated ? '云端 tenantApi 尚未更新，请上传完整 tenantApi 后重试' : (message || '更新失败'))
+        }
+      }
+    })
+  },
+
   async confirmPrinterAction(e) {
     const { action, id, name } = e.currentTarget.dataset
     const actionMap = {
@@ -410,7 +489,24 @@ Page({
 
   openStationForm(e) {
     const station = e && e.currentTarget.dataset.item
-    this.setData({ showStationForm: true, stationForm: station ? clone(station) : { name: '', code: '', printerId: '', status: true, isDefault: false } })
+    const printerMap = (this.data.kitchenPrinters || []).reduce((map, printer) => {
+      map[printer._id] = printer
+      return map
+    }, {})
+    const selectedPrinter = station && (station.printer || printerMap[station.printerId])
+    const printerIndex = selectedPrinter
+      ? this.data.kitchenPrinters.findIndex(printer => printer._id === selectedPrinter._id)
+      : -1
+    const stationForm = station
+      ? {
+          ...clone(station),
+          printerId: selectedPrinter ? selectedPrinter._id : '',
+          printerName: selectedPrinter ? selectedPrinter.name : '',
+          printer: selectedPrinter || null,
+          printerIndex
+        }
+      : { name: '', code: '', printerId: '', printerName: '', printer: null, printerIndex: -1, status: true, isDefault: false }
+    this.setData({ showStationForm: true, stationForm })
   },
 
   closeStationForm() { this.setData({ showStationForm: false }) },
@@ -418,15 +514,27 @@ Page({
   onStationInput(e) { this.setData({ stationForm: setNested(this.data.stationForm, e.currentTarget.dataset.key, e.detail.value) }) },
   onStationSwitch(e) { this.setData({ stationForm: setNested(this.data.stationForm, e.currentTarget.dataset.key, e.detail.value) }) },
   onStationPrinter(e) {
-    const printer = this.data.printers[Number(e.detail.value)]
+    const printerIndex = Number(e.detail.value)
+    const printer = this.data.kitchenPrinters[printerIndex]
     const stationForm = setNested(this.data.stationForm, 'printerId', printer ? printer._id : '')
+    stationForm.printerName = printer ? printer.name : ''
     stationForm.printer = printer || null
+    stationForm.printerIndex = printer ? printerIndex : -1
     this.setData({ stationForm })
   },
 
   async saveStation() {
+    const station = this.data.stationForm || {}
+    if (!station.printerId) {
+      toast('请先选择要绑定的后厨打印机')
+      return
+    }
     try {
-      await this.call('admin.print.stations.save', { station: this.data.stationForm })
+      const res = await this.call('admin.print.stations.save', { station })
+      if (res.success === false) throw new Error(res.message || '保存失败')
+      if (!res.data || !res.data.printerId) {
+        throw new Error('云端未保存打印机绑定，请更新完整 tenantApi 后重试')
+      }
       this.closeStationForm()
       await Promise.all([this.loadStations(), this.loadDishes(), this.loadDashboard()])
       toast('档口已保存', 'success')
@@ -535,11 +643,47 @@ Page({
     this.setData({ editTemplate: template })
   },
 
+  onTemplateBindingScope(e) {
+    const bindScope = this.data.templateBindingScopes[Number(e.detail.value)] || 'global'
+    if (bindScope === 'station' && String(this.data.editTemplate.ticketType || '').indexOf('kitchen_') !== 0) {
+      toast('只有后厨票据可以按档口配置')
+      return
+    }
+    const template = clone(this.data.editTemplate)
+    template.bindScope = bindScope
+    if (bindScope !== 'station') template.stationId = ''
+    if (bindScope !== 'printer') template.printerId = ''
+    this.setData({ editTemplate: template })
+  },
+
+  onTemplateStation(e) {
+    const station = this.data.stations[Number(e.detail.value)]
+    let template = setNested(this.data.editTemplate, 'stationId', station ? station._id : '')
+    template = setNested(template, 'stationName', station ? station.name : '')
+    this.setData({ editTemplate: template })
+  },
+
+  onTemplatePrinter(e) {
+    const printer = this.data.templateTestPrinters[Number(e.detail.value)]
+    let template = setNested(this.data.editTemplate, 'printerId', printer ? printer._id : '')
+    template = setNested(template, 'printerName', printer ? printer.name : '')
+    this.setData({ editTemplate: template })
+  },
+
+  onTemplateTestPrinter(e) {
+    const printer = this.data.templateTestPrinters[Number(e.detail.value)]
+    this.setData({
+      templateTestPrinterId: printer ? printer._id : '',
+      templateTestPrinterName: printer ? printer.name : '请选择要测试的打印机'
+    })
+  },
+
   async saveTemplate() {
     if (!this.data.editTemplate) return
     try {
-      await this.call('admin.print.templates.save', { template: this.data.editTemplate })
+      const res = await this.call('admin.print.templates.save', { template: this.data.editTemplate })
       await this.loadTemplates()
+      if (res.data && res.data._id) this.selectTemplate(res.data._id)
       toast('票据模板已保存', 'success')
     } catch (err) { toast(err.message || '模板保存失败') }
   },
@@ -549,10 +693,21 @@ Page({
     const template = this.data.editTemplate
     if (!template) return
     try {
-      if (action === 'test') await this.call('admin.print.templates.test', { ticketType: template.ticketType })
-      if (action === 'reset') await this.call('admin.print.templates.reset', { ticketType: template.ticketType })
+      if (action === 'test') {
+        if (!this.data.templateTestPrinterId) {
+          toast('请先选择要测试的具体打印机')
+          return
+        }
+        await this.call('admin.print.templates.test', {
+          templateId: template._id,
+          ticketType: template.ticketType,
+          stationId: template.stationId || '',
+          printerId: this.data.templateTestPrinterId
+        })
+      }
+      if (action === 'reset') await this.call('admin.print.templates.reset', { templateId: template._id, ticketType: template.ticketType })
       if (action === 'history') {
-        const res = await this.call('admin.print.templates.history', { ticketType: template.ticketType })
+        const res = await this.call('admin.print.templates.history', { templateId: template._id, ticketType: template.ticketType })
         const latest = (res.data || []).slice(0, 5).map(item => `v${item.version} ${formatTime(item.createTime)}`).join('\n') || '暂无历史版本'
         wx.showModal({ title: '模板版本', content: latest, showCancel: false })
         return
@@ -576,6 +731,7 @@ Page({
     this.loadJobs()
   },
   clearJobFilter() { this.setData({ jobFilter: { printerId: '', ticketType: '', deviceName: '', orderTail: '' } }); this.loadJobs() },
+  loadMoreJobs() { if (this.data.jobsHasMore) this.loadJobs(true) },
 
   async openJob(e) {
     try {
@@ -600,11 +756,33 @@ Page({
     this.loadLogs()
   },
   setLogRange(e) { this.setData({ logFilter: setNested(this.data.logFilter, 'range', e.currentTarget.dataset.range) }); this.loadLogs() },
+  loadMoreLogs() { if (this.data.logsHasMore) this.loadLogs(true) },
   clearLogs() {
-    wx.showModal({ title: '清空日志', content: '将删除当前打印机筛选下的操作日志。', success: async modal => {
+    wx.showModal({ title: '清空当前日志页', content: '一次最多删除当前筛选下的 100 条日志；较早日志建议使用“归档90天前”。', success: async modal => {
       if (!modal.confirm) return
-      try { await this.call('admin.print.logs.clear', { printerId: this.data.logFilter.printerId }); await this.loadLogs(); toast('日志已清空', 'success') } catch (err) { toast(err.message || '清空失败') }
+      try {
+        const res = await this.call('admin.print.logs.clear', { printerId: this.data.logFilter.printerId })
+        await this.loadLogs()
+        const data = res.data || {}
+        toast(data.hasMore ? `已清空 ${data.removed || 0} 条，本筛选下仍有更多日志` : `已清空 ${data.removed || 0} 条`, 'success')
+      } catch (err) { toast(err.message || '清空失败') }
     } })
+  },
+
+  archiveHistory() {
+    wx.showModal({
+      title: '归档历史数据',
+      content: '将归档 90 天前的已发送、失败或已取消任务与日志，不影响当前未完成任务。',
+      success: async modal => {
+        if (!modal.confirm) return
+        try {
+          const res = await this.call('admin.print.history.archive', { retentionDays: 90, limit: 500 })
+          await Promise.all([this.loadJobs(), this.loadLogs()])
+          const data = res.data || {}
+          toast('已归档 ' + (data.archivedJobs || 0) + ' 任务 / ' + (data.archivedLogs || 0) + ' 日志' + (data.hasMore ? '，可再次归档剩余历史' : ''), 'success')
+        } catch (err) { toast(err.message || '归档失败') }
+      }
+    })
   },
 
   async createRegistration() {

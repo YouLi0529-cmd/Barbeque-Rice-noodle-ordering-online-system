@@ -12,6 +12,7 @@ const UI = {
   moneySymbol: '\uffe5',
   loading: '\u52a0\u8f7d\u4e2d',
   sendKitchen: '\u53d1\u9001\u540e\u53a8',
+  sentToKitchen: '\u5df2\u53d1\u9001',
   orderActions: '\u8ba2\u5355\u64cd\u4f5c',
   payTitle: '\u652f\u4ed8\u7ed3\u7b97',
   billSummary: '\u8d26\u5355\u660e\u7ec6',
@@ -47,6 +48,11 @@ const UI = {
   sendKitchenConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u53d1\u9001\u5230\u540e\u53a8\u5417',
   sendSuccess: '\u5df2\u53d1\u9001',
   sendFailed: '\u53d1\u9001\u5931\u8d25',
+  kitchenPrintFailed: '\u540e\u53a8\u6253\u5370\u5f02\u5e38',
+  failedDishesPrefix: '\u5931\u8d25\u83dc\u54c1\uff1a',
+  retryFailedKitchen: '\u91cd\u8bd5\u5931\u8d25\u83dc\u54c1',
+  retryKitchenConfirmContent: '\u4ec5\u4f1a\u91cd\u65b0\u6d3e\u9001\u6253\u5370\u5931\u8d25\u7684\u83dc\u54c1\uff0c\u786e\u5b9a\u7ee7\u7eed\u5417',
+  retryKitchenSuccess: '\u5df2\u91cd\u8bd5\u6d3e\u5355',
   paidOrderCannotSendKitchen: '\u5df2\u652f\u4ed8\u8ba2\u5355\u4e0d\u80fd\u5728\u8fd9\u91cc\u53d1\u9001\u540e\u53a8',
   paidItemsSkipped: '\u5df2\u8df3\u8fc7\u5df2\u652f\u4ed8\u83dc\u54c1',
   paidItem: '\u5df2\u652f\u4ed8',
@@ -190,6 +196,7 @@ function normalizeGoods(order, selectedGoodsMap = {}, options = {}) {
     const total = getLineTotal(item)
     const key = `${sourceOrderId || 'order'}-${item._id || item.dishId || item.id || 'dish'}-${index}`
 
+    const kitchenStatus = item.kitchenStatus || ''
     return {
       key,
       sourceOrderId,
@@ -201,7 +208,8 @@ function normalizeGoods(order, selectedGoodsMap = {}, options = {}) {
       count,
       optionText: getGoodsOptions(item),
       subtotalText: formatPrice(total),
-      kitchenSent: item.kitchenSent === true || item.kitchenStatus === 'sent',
+      kitchenSent: item.kitchenSent === true || ['sent', 'queued', 'claimed', 'sending', 'printed'].includes(kitchenStatus),
+      kitchenFailed: kitchenStatus === 'failed',
       isPaid: isPaidOrder(order),
       selected: !!selectedGoodsMap[key]
     }
@@ -212,8 +220,35 @@ function calculateGoodsTotal(goods) {
   return (goods || []).reduce((sum, item) => sum + getLineTotal(item), 0)
 }
 
+function getKitchenFailedDishes(order) {
+  const orderDocs = order && Array.isArray(order._orders) && order._orders.length ? order._orders : [order]
+  const dishes = []
+  orderDocs.filter(Boolean).forEach(orderDoc => {
+    const goods = getGoodsSource(orderDoc).goods
+    ;(goods || []).forEach((item, index) => {
+      if (item && item.kitchenStatus === 'failed') {
+        dishes.push({
+          orderId: orderDoc._id || '',
+          dishIndex: index,
+          dishName: getGoodsName(item, index)
+        })
+      }
+    })
+  })
+  return dishes
+}
+
+function hasKitchenPrintFailure(order) {
+  if (!order) return false
+  if (order.kitchenPrintStatus === 'partial_failed') return true
+  const orderDocs = Array.isArray(order._orders) && order._orders.length ? order._orders : [order]
+  return orderDocs.some(orderDoc => orderDoc && orderDoc.kitchenPrintStatus === 'partial_failed') ||
+    getKitchenFailedDishes(order).length > 0
+}
+
 function getStatusText(order) {
   if (!order) return ''
+  if (hasKitchenPrintFailure(order)) return UI.kitchenPrintFailed
   if (order.payStatus === true && order.status === 'completed') return STATUS_TEXT.paid
   if (order.status === 'paid') return STATUS_TEXT.submitted
   if (order.payStatus === true) return STATUS_TEXT.submitted
@@ -222,6 +257,7 @@ function getStatusText(order) {
 
 function getStatusClass(order) {
   if (!order) return ''
+  if (hasKitchenPrintFailure(order)) return 'kitchen-failed'
   const statusText = getStatusText(order)
   if (statusText === STATUS_TEXT.paid || order.status === 'completed') return 'paid'
   if (statusText === STATUS_TEXT.submitted || order.status === 'submitted' || order.status === 'waiting_pay') return 'submitted'
@@ -330,6 +366,7 @@ function buildMergedOutdoorOrder(orders) {
   const latestTime = sortedOrders.reduce((latest, order) => Math.max(latest, getTimeValue(order.createTime)), 0)
   const allPaid = sortedOrders.every(order => order.status === 'completed' || order.status === 'paid' || order.payStatus === true)
   const groupStatus = allPaid ? 'completed' : 'submitted'
+  const kitchenFailedDishes = getKitchenFailedDishes({ _orders: sortedOrders })
 
   return {
     ...primary,
@@ -343,7 +380,9 @@ function buildMergedOutdoorOrder(orders) {
     payStatus: allPaid,
     finalPrice: totalPrice,
     totalPrice,
-    createTime: primary.createTime
+    createTime: primary.createTime,
+    hasKitchenPrintFailure: kitchenFailedDishes.length > 0 || sortedOrders.some(order => order.kitchenPrintStatus === 'partial_failed'),
+    kitchenFailedDishes
   }
 }
 
@@ -422,6 +461,7 @@ Page({
     loading: false,
     saving: false,
     sendingKitchen: false,
+    retryingKitchen: false,
     selectedOrderId: '',
     selectedOrder: null,
     orderTitle: '',
@@ -434,6 +474,8 @@ Page({
     goodsList: [],
     selectedGoodsMap: {},
     selectedGoodsCount: 0,
+    hasKitchenPrintFailure: false,
+    kitchenFailedDishText: '',
     orderActions: ORDER_ACTIONS,
     discountOptions: DISCOUNT_OPTIONS,
     paymentOptions: PAYMENT_OPTIONS,
@@ -520,6 +562,8 @@ Page({
         goodsList: [],
         selectedGoodsMap: {},
         selectedGoodsCount: 0,
+        hasKitchenPrintFailure: false,
+        kitchenFailedDishText: '',
         discountType: '',
         discountInput: '',
         discountValue: '',
@@ -540,6 +584,7 @@ Page({
     const goodsCount = goodsList.reduce((sum, goods) => sum + goods.count, 0)
     const totalPrice = getOrderTotal(order)
     const paySummary = buildPaySummary(totalPrice, this.data.paymentMethod, discountType, discountValue, directReduceValue)
+    const kitchenFailedDishes = getKitchenFailedDishes(order)
 
     this.setData({
       selectedOrder: order,
@@ -554,6 +599,8 @@ Page({
       goodsList,
       selectedGoodsMap,
       selectedGoodsCount: goodsList.filter(item => item.selected).length,
+      hasKitchenPrintFailure: hasKitchenPrintFailure(order),
+      kitchenFailedDishText: kitchenFailedDishes.map(item => item.dishName).filter(Boolean).join('\u3001'),
       discountType,
       discountInput,
       discountValue,
@@ -844,10 +891,10 @@ Page({
 
   async sendKitchen() {
     if (this.data.sendingKitchen) return
-    const selectedRefs = this.getSelectedGoodsRefs().filter(item => !item.isPaid)
+    const selectedRefs = this.getSelectedGoodsRefs()
     if (!selectedRefs.length) {
       wx.showToast({
-        title: (this.data.selectedGoodsCount || 0) > 0 ? UI.paidOrderCannotSendKitchen : UI.noSelectedKitchenGoods,
+        title: UI.noSelectedKitchenGoods,
         icon: 'none'
       })
       return
@@ -877,11 +924,8 @@ Page({
         }))
       })
       const sentCount = Number(res && res.data && res.data.sentCount || 0)
-      const skippedPaidCount = Array.isArray(res && res.data && res.data.skippedPaidOrderIds)
-        ? res.data.skippedPaidOrderIds.length
-        : 0
       wx.showToast({
-        title: sentCount > 0 ? UI.sendSuccess : (skippedPaidCount > 0 ? UI.paidItemsSkipped : UI.actionFailed),
+        title: sentCount > 0 ? UI.sendSuccess : UI.actionFailed,
         icon: sentCount > 0 ? 'success' : 'none'
       })
       this.setData({
@@ -895,20 +939,52 @@ Page({
     } catch (err) {
       console.error('send outdoor order to kitchen failed', err)
       wx.showToast({
-        title: err.code === 'ORDER_PAID' || /paid order/.test(err.message || '')
-          ? UI.paidOrderCannotSendKitchen
-          : err.message || UI.sendFailed,
+        title: err.message || UI.sendFailed,
         icon: 'none'
       })
-      if (err.code === 'ORDER_PAID' || /paid order/.test(err.message || '')) {
-        this.loadList({
-          selectedId: order && (order._rootOrderId || order._id),
-          resetSelection: true,
-          resetPay: false
-        })
-      }
     } finally {
       this.setData({ sendingKitchen: false })
+    }
+  },
+
+  async retryFailedKitchenItems() {
+    if (this.data.retryingKitchen) return
+    const order = this.data.selectedOrder
+    const failedKitchenDishes = getKitchenFailedDishes(order)
+    if (!order || !failedKitchenDishes.length) return
+
+    const confirmed = await new Promise(resolve => {
+      wx.showModal({
+        title: UI.retryFailedKitchen,
+        content: UI.retryKitchenConfirmContent,
+        confirmText: UI.retryFailedKitchen,
+        cancelText: '\u53d6\u6d88',
+        success: res => resolve(res.confirm === true),
+        fail: () => resolve(false)
+      })
+    })
+    if (!confirmed) return
+
+    try {
+      this.setData({ retryingKitchen: true })
+      const res = await apiClient.call('admin.order.retryFailedKitchenItems', {
+        orderIds: getSelectedOrderDocs(order).map(item => item._id).filter(Boolean)
+      })
+      const retriedCount = Number(res && res.data && res.data.retriedCount || 0)
+      wx.showToast({
+        title: retriedCount > 0 ? UI.retryKitchenSuccess : UI.actionFailed,
+        icon: retriedCount > 0 ? 'success' : 'none'
+      })
+      this.loadList({
+        selectedId: order._rootOrderId || order._id,
+        resetSelection: true,
+        resetPay: false
+      })
+    } catch (err) {
+      console.error('retry outdoor kitchen items failed', err)
+      wx.showToast({ title: err.message || UI.sendFailed, icon: 'none' })
+    } finally {
+      this.setData({ retryingKitchen: false })
     }
   },
 

@@ -1709,10 +1709,11 @@ function isAdminTableOrder(order) {
 function isKitchenPrintableOrder(order) {
   if (!order || order.type !== 'order') return false
   if (order.deleted === true) return false
+  if (order.tableCleared === true) return false
   if (isSavedOrder(order)) return false
 
   const status = String(order.status || '')
-  if (status === 'cancelled' || status === '3') return false
+  if (status === 'cancelled' || status === 'closed' || status === '3') return false
   return true
 }
 
@@ -1880,9 +1881,16 @@ function buildAdminTableSections(orders, tableGroups = [], tableSessions = []) {
 }
 
 function getAdminOrderStatusText(order) {
+  if (hasKitchenPrintFailure(order)) return '\u540e\u53a8\u6253\u5370\u5f02\u5e38'
   if (isAdminPaidOrder(order)) return '已支付'
   if (isAdminPreparingOrder(order)) return '制作中'
   return '已提交'
+}
+
+function hasKitchenPrintFailure(order) {
+  if (!order) return false
+  if (order.kitchenPrintStatus === 'partial_failed') return true
+  return (Array.isArray(order.goods) ? order.goods : []).some(item => item && item.kitchenStatus === 'failed')
 }
 
 function formatAdminGoods(goods) {
@@ -1911,7 +1919,10 @@ function formatAdminGoods(goods) {
       remark,
       isGift: item.isGift === true || item.giftDish === true,
       kitchenSent: item.kitchenSent === true,
-      kitchenStatus: item.kitchenStatus || ''
+      kitchenStatus: item.kitchenStatus || '',
+      kitchenPrintError: item.kitchenPrintError || '',
+      kitchenSentAt: item.kitchenSentAt || null,
+      kitchenPrintedAt: item.kitchenPrintedAt || null
     }
   })
 }
@@ -2018,6 +2029,13 @@ function buildAdminBillGroups(orders) {
   return (orders || []).filter(isAdminTableOrder).map((order, index) => {
     const goods = formatAdminGoods(order.goods)
     const finalPrice = roundMoney(order.finalPrice || order.totalPrice || 0)
+    const kitchenFailedDishes = goods
+      .filter(item => item.kitchenStatus === 'failed')
+      .map(item => ({
+        dishId: item.dishId,
+        dishName: item.dishName,
+        kitchenPrintError: item.kitchenPrintError || ''
+      }))
     return {
       id: order._id,
       orderId: order._id,
@@ -2035,8 +2053,12 @@ function buildAdminBillGroups(orders) {
       finalPrice,
       finalPriceText: String(finalPrice),
       kitchenPrinted: order.kitchenPrinted === true,
+      kitchenPrintStatus: order.kitchenPrintStatus || '',
+      hasKitchenPrintFailure: hasKitchenPrintFailure(order),
+      kitchenFailedDishes,
       frontDeskConfirmed: order.frontDeskConfirmed === true,
-      canSendKitchen: !isAdminPaidOrder(order) && isKitchenPrintableOrder(order)
+      // Payment confirmation and kitchen dispatch are separate front-desk actions.
+      canSendKitchen: isKitchenPrintableOrder(order)
     }
   })
 }
@@ -2809,7 +2831,7 @@ async function adminClearTable(payload) {
 
 async function adminSendTableToKitchen(payload) {
   const orders = await getAdminTableOrders(payload)
-  const targetOrders = orders.filter(order => !isAdminPaidOrder(order) && !isAdminPreparingOrder(order))
+  const targetOrders = orders.filter(order => isKitchenPrintableOrder(order) && !isAdminPreparingOrder(order))
   const results = []
   for (const order of targetOrders) {
     const indexes = (Array.isArray(order.goods) ? order.goods : []).map((_, index) => index)
@@ -2827,7 +2849,7 @@ async function adminSendTableToKitchen(payload) {
     }
   }
 }
-async function sendOrderDishesToKitchen(orderId, dishIndexes) {
+async function sendOrderDishesToKitchen(orderId, dishIndexes, options = {}) {
   if (!orderId) {
     return {
       success: false,
@@ -2857,14 +2879,6 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes) {
       message: 'order not found'
     }
   }
-  if (isAdminPaidOrder(order)) {
-    return {
-      success: false,
-      code: 'ORDER_PAID',
-      message: 'paid order cannot send kitchen here'
-    }
-  }
-
   const goods = Array.isArray(order.goods) ? order.goods : []
   const missingIndex = validIndexes.find(index => !goods[index])
   if (missingIndex !== undefined) {
@@ -2880,22 +2894,30 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes) {
     index,
     item: goods[index] || {}
   })))
-  const printerDispatch = await dispatchKitchenPrint('kitchen', order, dishEntries)
+  const printerDispatch = await dispatchKitchenPrint('kitchen', order, dishEntries, options.eventKey)
   const indexSet = new Set(validIndexes)
   const nextGoods = goods.map((item, index) => {
     if (!indexSet.has(index)) return item
     const dispatch = printerDispatch.byDishIndex[index] || {}
     const queued = dispatch.status === 'queued' || dispatch.status === 'claimed' || dispatch.status === 'sending'
+    const printed = dispatch.status === 'printed'
     const skipped = dispatch.status === 'skipped'
     return {
       ...item,
-      kitchenSent: queued || skipped,
-      kitchenStatus: queued ? 'queued' : (skipped ? 'not_required' : 'failed'),
-      kitchenSentAt: queued ? sendTime : item.kitchenSentAt || null,
+      kitchenSent: queued || printed || skipped,
+      kitchenStatus: printed ? 'printed' : (queued ? 'queued' : (skipped ? 'not_required' : 'failed')),
+      kitchenSentAt: queued || printed ? sendTime : item.kitchenSentAt || null,
+      kitchenPrintedAt: printed ? sendTime : item.kitchenPrintedAt || null,
       kitchenPrintError: dispatch.message || ''
     }
   })
-  const allSent = nextGoods.length > 0 && nextGoods.every(item => item.kitchenSent === true || item.kitchenStatus === 'sent')
+  const hasDispatchFailure = nextGoods.some(item => item.kitchenStatus === 'failed')
+  const allSent = nextGoods.length > 0 && nextGoods.every(item => {
+    return item.kitchenSent === true || item.kitchenStatus === 'sent' || item.kitchenStatus === 'printed' || item.kitchenStatus === 'not_required'
+  })
+  const allPrinted = nextGoods.length > 0 && nextGoods.every(item => {
+    return item.kitchenStatus === 'printed' || item.kitchenStatus === 'sent' || item.kitchenStatus === 'not_required'
+  })
   const kitchenLogs = dishEntries.map(entry => {
     const index = entry.index
     const item = entry.item || {}
@@ -2916,10 +2938,11 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes) {
   await db.collection('order').doc(orderId).update({
     data: {
       goods: nextGoods,
-      status: 'pending_prepare',
+      // Do not overwrite a completed payment status when a paid order is re-sent to the kitchen.
+      status: isAdminPaidOrder(order) ? order.status : 'pending_prepare',
       frontDeskConfirmed: true,
-      kitchenPrinted: allSent,
-      kitchenPrintStatus: allSent ? 'queued' : 'partial_failed',
+      kitchenPrinted: allPrinted,
+      kitchenPrintStatus: hasDispatchFailure ? 'partial_failed' : (allPrinted ? 'printed' : 'queued'),
       kitchenLogs: [
         ...(Array.isArray(order.kitchenLogs) ? order.kitchenLogs : []),
         ...kitchenLogs
@@ -2934,6 +2957,8 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes) {
       orderId,
       sentCount: validIndexes.length,
       allSent,
+      allPrinted,
+      hasDispatchFailure,
       printers: printerDispatch.results
     }
   }
@@ -2961,14 +2986,9 @@ async function adminSendKitchenItems(payload) {
   }
 
   const results = []
-  const skippedPaidOrderIds = []
   for (const orderId of orderIds) {
     const result = await sendOrderDishesToKitchen(orderId, groupedItems[orderId])
     if (!result.success) {
-      if (result.code === 'ORDER_PAID') {
-        skippedPaidOrderIds.push(orderId)
-        continue
-      }
       return result
     }
     results.push(result.data)
@@ -2979,7 +2999,54 @@ async function adminSendKitchenItems(payload) {
     data: {
       updatedOrders: results.length,
       sentCount: results.reduce((sum, item) => sum + Number(item.sentCount || 0), 0),
-      skippedPaidOrderIds,
+      results
+    }
+  }
+}
+
+async function adminRetryFailedKitchenItems(payload) {
+  const rawOrderIds = Array.isArray(payload.orderIds)
+    ? payload.orderIds
+    : [payload.orderId || payload.groupId]
+  const orderIds = Array.from(new Set(rawOrderIds.map(item => String(item || '').trim()).filter(Boolean)))
+  if (orderIds.length === 0) {
+    return {
+      success: false,
+      code: 'ORDER_ID_REQUIRED',
+      message: 'order id required'
+    }
+  }
+
+  const results = []
+  for (const orderId of orderIds) {
+    const orderRes = await db.collection('order').doc(orderId).get()
+    const order = orderRes.data
+    if (!order || !isKitchenPrintableOrder(order)) {
+      return {
+        success: false,
+        code: 'ORDER_NOT_FOUND',
+        message: 'order not found'
+      }
+    }
+
+    const failedIndexes = (Array.isArray(order.goods) ? order.goods : [])
+      .map((item, index) => item && item.kitchenStatus === 'failed' ? index : -1)
+      .filter(index => index >= 0)
+    if (failedIndexes.length === 0) continue
+
+    const result = await sendOrderDishesToKitchen(orderId, failedIndexes, {
+      // A retry must create a fresh print task instead of reusing the failed one.
+      eventKey: `retry:${Date.now()}:${failedIndexes.join(',')}`
+    })
+    if (!result.success) return result
+    results.push(result.data)
+  }
+
+  return {
+    success: true,
+    data: {
+      updatedOrders: results.length,
+      retriedCount: results.reduce((sum, item) => sum + Number(item.sentCount || 0), 0),
       results
     }
   }
@@ -3051,13 +3118,13 @@ async function dispatchPrinterPayload(printerId, payload) {
   }
 }
 
-async function dispatchKitchenPrint(type, order, dishEntries) {
+async function dispatchKitchenPrint(type, order, dishEntries, eventKey = '') {
   return printService.queueKitchenJobs({
     id: String(order.storeId || getTenantId({})).trim(),
     order,
     dishEntries,
     kind: type === 'urge' ? 'urge' : 'kitchen_order',
-    eventKey: `${type}:${dishEntries.map(entry => entry.index).join(',')}`
+    eventKey: eventKey || `${type}:${dishEntries.map(entry => entry.index).join(',')}`
   })
 }
 
@@ -6317,10 +6384,12 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.clear') return completeAdminTableMutation(adminClearTable(payload))
   if (action === 'admin.table.sendKitchen') return completeAdminTableMutation(adminSendTableToKitchen(payload))
   if (action === 'admin.table.sendKitchenItems') return completeAdminTableMutation(adminSendKitchenItems(payload))
+  if (action === 'admin.table.retryFailedKitchenItems') return completeAdminTableMutation(adminRetryFailedKitchenItems(payload))
   if (action === 'admin.table.urgeKitchenItems') return completeAdminTableMutation(adminUrgeKitchenItems(payload))
   if (action === 'admin.tableCode.list') return adminListTableCodes(payload)
   if (action === 'admin.tableCode.generate') return adminGenerateTableCode(payload)
   if (action === 'admin.order.sendKitchenItems') return completeAdminTableMutation(adminSendKitchenItems(payload))
+  if (action === 'admin.order.retryFailedKitchenItems') return completeAdminTableMutation(adminRetryFailedKitchenItems(payload))
   if (action === 'admin.order.urgeKitchenItems') return completeAdminTableMutation(adminUrgeKitchenItems(payload))
   if (action === 'admin.table.refundDish') return completeAdminTableMutation(adminRefundDish(payload))
   if (action === 'admin.table.refundDishes') return completeAdminTableMutation(adminRefundDishes(payload))

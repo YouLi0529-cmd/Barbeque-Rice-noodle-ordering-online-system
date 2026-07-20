@@ -47,6 +47,18 @@
               <view class="bill-group-price">{{ui.moneySymbol}}{{item.finalPriceText}}</view>
             </view>
 
+            <view class="kitchen-failure-banner" wx:if="{{item.hasKitchenPrintFailure}}">
+              <view class="kitchen-failure-copy">
+                <view class="kitchen-failure-title">{{ui.kitchenPrintFailed}}</view>
+                <view class="kitchen-failure-dishes">{{ui.failedDishesPrefix}}{{item.kitchenFailedDishText}}</view>
+              </view>
+              <view
+                class="kitchen-failure-retry {{retryingKitchen ? 'kitchen-failure-retry-disabled' : ''}}"
+                data-group-id="{{item.id}}"
+                catchtap="retryFailedKitchenItems"
+              >{{ui.retryFailedKitchen}}</view>
+            </view>
+
             <view
               class="dish-row {{dish.selected ? 'dish-row-active' : ''}}"
               wx:for="{{item.goods}}"
@@ -76,10 +88,11 @@
               <view class="dish-main">
                 <view class="dish-name">
                   <text class="dish-name-text">{{dish.dishName}}</text>
-                  <text class="dish-sent-tag" wx:if="{{dish.kitchenSent}}">已发送</text>
+                  <text class="dish-sent-tag" wx:if="{{dish.kitchenSent}}">{{ui.sentToKitchen}}</text>
                 </view>
                 <view class="dish-tags" wx:if="{{dish.tagText}}">{{dish.tagText}}</view>
                 <view class="dish-tags" wx:if="{{dish.remarkText}}">{{dish.remarkText}}</view>
+                <view class="dish-print-error" wx:if="{{dish.kitchenFailed}}">{{ui.kitchenPrintFailed}}</view>
               </view>
               <view class="dish-count">x{{dish.count}}</view>
               <view class="dish-price">{{ui.moneySymbol}}{{dish.subtotalText}}</view>

@@ -490,6 +490,7 @@
 .log-time { max-width: 155rpx; text-align: right; }
 
 .empty-state { padding: 100rpx 20rpx; color: #a28a7d; text-align: center; font-size: 25rpx; }
+.load-more { margin: 20rpx 0 8rpx; padding: 18rpx; border: 1rpx solid #edc3a8; border-radius: 7rpx; color: #b34623; background: #fff5e8; font-size: 24rpx; font-weight: 800; text-align: center; }
 
 .modal-mask {
   position: fixed;
