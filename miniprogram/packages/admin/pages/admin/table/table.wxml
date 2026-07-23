@@ -28,7 +28,7 @@
     <scroll-view class="reservation-reminder-scroll" scroll-x enhanced show-scrollbar="{{false}}">
       <view class="reservation-reminder-list">
         <view
-          class="reservation-reminder-card {{selectedReservationReminderId === item._id ? 'selected' : ''}}"
+          class="reservation-reminder-card {{item.isSelected ? 'selected' : ''}} {{item.isPriority ? 'priority' : ''}}"
           wx:for="{{reservationReminders}}"
           wx:key="_id"
           bindtap="selectReservationReminder"

@@ -1,0 +1,8 @@
+{
+  "navigationBarTitleText": "意见收集",
+  "pageOrientation": "landscape",
+  "disableScroll": true,
+  "usingComponents": {
+    "admin-info-center": "/packages/admin/components/adminInfoCenter/adminInfoCenter"
+  }
+}

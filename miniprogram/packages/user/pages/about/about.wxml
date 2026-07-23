@@ -12,12 +12,26 @@
   </view>
 
   <view class="about-content">
-    <view class="shop-card">
-      <view class="shop-logo">
-        <image src="/images/campingshoppingcar-transparent.png" mode="aspectFit"></image>
+    <view class="policy-card">
+      <view class="policy-row" bindtap="goPrivacy">
+        <view class="policy-name">《隐私权政策》</view>
+        <view class="policy-actions">
+          <view class="revoke-action" catchtap="openRevokeModal">撤销授权</view>
+          <view class="policy-arrow">›</view>
+        </view>
       </view>
-      <view class="shop-name">餐厅点餐</view>
-      <view class="shop-desc">这里后续可以放店铺介绍、营业时间、联系方式、活动说明。</view>
+    </view>
+    <view class="logout-entry" hover-class="logout-entry-hover" bindtap="logout">退出登录</view>
+  </view>
+
+  <view class="revoke-mask" wx:if="{{showRevokeModal}}" catchtap="closeRevokeModal">
+    <view class="revoke-dialog" catchtap="stopPropagation">
+      <view class="revoke-title">是否撤销“同意隐私政策”授权？</view>
+      <view class="revoke-content">请您理解我们基于您的授权或同意收集和使用您的个人信息，您可以随时撤回您的授权同意。相关核心业务功能需要收集、保存和使用您的一些个人信息才能得以完成，当您撤回授权同意隐私政策后，我们可能将无法继续为您提供撤销授权对应的服务，我们也将不再处理您相应的个人信息。您确认撤销同意隐私政策吗？</view>
+      <view class="revoke-actions">
+        <view class="revoke-btn confirm" bindtap="confirmRevokeAuthorization">{{revoking ? '撤销中' : '确认撤销'}}</view>
+        <view class="revoke-btn cancel" bindtap="closeRevokeModal">放弃撤销</view>
+      </view>
     </view>
   </view>
 </view>

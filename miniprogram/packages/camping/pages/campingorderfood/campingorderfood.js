@@ -799,7 +799,7 @@ Page({
 
   showCampingFreeBucketTip() {
     wx.showToast({
-      title: '满188元免费提供桶和碳',
+      title: '菜品实付满188元免费提供炉和碳',
       icon: 'none'
     })
   },
@@ -917,7 +917,7 @@ Page({
     const thresholdBase = cartKeys.reduce((sum, cartKey) => {
       const item = cart[cartKey]
       if (!item || !item.info || !item.count) return sum
-      if (this.getFreeThreshold(item.info) > 0) return sum
+      if (!this.isCampingFoodCartItem(item)) return sum
       return sum + Number(item.info.price || 0) * Number(item.count || 0)
     }, 0)
     let totalCount = 0

@@ -7,8 +7,14 @@
         <image src="./image/close.png" mode="widthFix" bindtap="closeModalTap" style="position: absolute; top: 10rpx; right: 20rpx; height: 55rpx; width: 55rpx;"></image>
       </view>
 
-      <view class="auth-desc">
+      <view class="auth-desc" wx:if="{{descText}}">
         {{descText}}
+      </view>
+
+      <view class="super-nick-name-box flex-ac">
+        <view class="nickname-label">昵称</view>
+        <input class="nick-name-input" type="nickname" focus="{{nicknameInputFocus}}" value="{{nickName}}" maxlength="20" placeholder="请输入或选择微信昵称" bindinput="onNicknameInput" />
+        <view class="nickname-wechat-btn" hover-class="nickname-wechat-btn-hover" bindtap="useWechatNickname">使用微信昵称</view>
       </view>
 
       <view class="super-phone-box flex-jb-ac">

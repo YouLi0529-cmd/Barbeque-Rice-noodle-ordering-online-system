@@ -2,8 +2,12 @@
 const apiClient = require('../../utils/apiClient')
 
 // 开发阶段用于模拟手机号授权。正式发布前改为 false，并确认 phone.getNumber 可用。
-const USE_TEST_PHONE = true
+const USE_TEST_PHONE = false
 const TEST_PHONE_NUMBER = '13800000000'
+
+function isWechatNicknamePlaceholder(value) {
+  return String(value || '').trim() === '微信用户'
+}
 
 Component({
   properties: {
@@ -21,7 +25,7 @@ Component({
     },
     descText: {
       type: String,
-      value: '授权后将用会员卡号记录您的订单信息，无需单独设置昵称。'
+      value: ''
     },
     confirmText: {
       type: String,
@@ -35,16 +39,46 @@ Component({
     phoneNumber: null,
     phoneCode: null,
     realPhoneNumber: null,
-    saving: false
+    saving: false,
+    nicknameInputFocus: false
   },
 
   methods: {
     catchtouchmove() {},
 
-    bindblur(res) {
-      const value = res.detail.value
+    onNicknameInput(res) {
+      const value = String(res.detail.value || '').slice(0, 20)
       this.setData({
         nickName: value
+      })
+    },
+
+    useWechatNickname() {
+      const focusNicknameInput = () => {
+        this.setData({ nicknameInputFocus: false }, () => {
+          this.setData({ nicknameInputFocus: true })
+        })
+      }
+
+      if (typeof wx.getUserProfile !== 'function') {
+        focusNicknameInput()
+        return
+      }
+
+      wx.getUserProfile({
+        desc: '用于填写微信昵称',
+        success: res => {
+          const nickName = String(res && res.userInfo && res.userInfo.nickName || '').trim()
+          if (nickName && !isWechatNicknamePlaceholder(nickName)) {
+            this.setData({ nickName })
+            return
+          }
+          focusNicknameInput()
+        },
+        fail: err => {
+          console.warn('get wechat nickname unavailable', err)
+          focusNicknameInput()
+        }
       })
     },
 
@@ -64,8 +98,10 @@ Component({
       }
 
       if (!e.detail || !e.detail.code) {
+        const errMsg = String(e && e.detail && e.detail.errMsg || '')
+        console.error('getPhoneNumber did not return authorization code', e && e.detail)
         wx.showToast({
-          title: '获取手机号失败',
+          title: errMsg.includes('deny') ? '请允许授权手机号' : '微信未返回手机号',
           icon: 'none'
         })
         return
@@ -110,6 +146,7 @@ Component({
     async saveUserInfo() {
       const {
         avatarUrl,
+        nickName,
         phoneNumber,
         realPhoneNumber
       } = this.data
@@ -134,12 +171,14 @@ Component({
         const profileResult = apiClient.isEnabled()
           ? await apiClient.call('user.completeProfile', {
             avatarUrl: avatarUrlForSave,
+            nickName: String(nickName || '').trim(),
             phoneNumber: phone
           })
           : (await wx.cloud.callFunction({
             name: 'completeUserProfile',
             data: {
               avatarUrl: avatarUrlForSave,
+              nickName: String(nickName || '').trim(),
               phoneNumber: phone
             }
           })).result
@@ -188,7 +227,8 @@ Component({
         phoneNumber: null,
         phoneCode: null,
         realPhoneNumber: null,
-        saving: false
+        saving: false,
+        nicknameInputFocus: false
       })
       this.triggerEvent('closed')
     }

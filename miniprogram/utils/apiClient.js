@@ -100,10 +100,13 @@ function login() {
         if (!loginRes.code) {
           reject(new Error('wx.login failed'))
           return
-        }
-        call('auth.login', {
-          code: loginRes.code
-        }).then(result => {
+      }
+      call('auth.login', {
+        code: loginRes.code,
+        // The backend only resumes this token after confirming that the
+        // current WeChat OpenID is the same one that created the session.
+        resumeToken: getAuthToken()
+      }).then(result => {
           if (result.data) {
             setAuth(result.data)
           }

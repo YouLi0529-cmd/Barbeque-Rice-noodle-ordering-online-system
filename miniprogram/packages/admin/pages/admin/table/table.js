@@ -234,7 +234,7 @@ Page({
     selectedMergeTableCount: 0,
     merging: false,
     reservationReminders: [],
-    selectedReservationReminderId: '',
+    selectedReservationReminderIds: [],
     selectedTableMap: {},
     selectedTableCount: 0,
     clearingTable: false
@@ -372,13 +372,21 @@ Page({
         if (leftTime !== rightTime) return leftTime - rightTime
         return String(a.createTime || '').localeCompare(String(b.createTime || ''))
       })
-    const selectedReservationReminderId = reservationReminders.some(item => item._id === this.data.selectedReservationReminderId)
-      ? this.data.selectedReservationReminderId
-      : ''
+    const activeReminderIdMap = (this.data.selectedReservationReminderIds || []).reduce((map, id) => {
+      map[id] = true
+      return map
+    }, {})
+    const selectedReservationReminderIds = reservationReminders
+      .filter(item => activeReminderIdMap[item._id])
+      .map(item => item._id)
+    const nextReservationReminders = reservationReminders.map(item => ({
+      ...item,
+      isSelected: !!activeReminderIdMap[item._id]
+    }))
 
     this.setData({
-      reservationReminders,
-      selectedReservationReminderId
+      reservationReminders: nextReservationReminders,
+      selectedReservationReminderIds
     })
   },
 
@@ -431,17 +439,28 @@ Page({
   selectReservationReminder(e) {
     const id = e.currentTarget.dataset && e.currentTarget.dataset.id
     if (!id) return
+    const selectedReservationReminderIds = (this.data.selectedReservationReminderIds || []).slice()
+    const index = selectedReservationReminderIds.indexOf(id)
+    if (index >= 0) {
+      selectedReservationReminderIds.splice(index, 1)
+    } else {
+      selectedReservationReminderIds.push(id)
+    }
     this.setData({
-      selectedReservationReminderId: id
+      selectedReservationReminderIds,
+      reservationReminders: (this.data.reservationReminders || []).map(item => ({
+        ...item,
+        isSelected: selectedReservationReminderIds.indexOf(item._id) >= 0
+      }))
     })
   },
 
   async handleReservationAction(e) {
     const data = e.currentTarget.dataset || {}
     const status = data.status
-    const id = this.data.selectedReservationReminderId
+    const ids = (this.data.selectedReservationReminderIds || []).filter(Boolean)
     if (status !== 'arrived' && status !== 'cancelled') return
-    if (!id) {
+    if (ids.length === 0) {
       wx.showToast({
         title: UI.reservationSelectFirst,
         icon: 'none'
@@ -457,15 +476,15 @@ Page({
 
     this.updatingReservationStatus = true
     try {
-      await apiClient.call('admin.collection.update', {
+      await Promise.all(ids.map(id => apiClient.call('admin.collection.update', {
         collection: 'reservation',
         id,
         data: updateData
-      })
+      })))
 
       this.setData({
-        reservationReminders: (this.data.reservationReminders || []).filter(item => item._id !== id),
-        selectedReservationReminderId: ''
+        reservationReminders: (this.data.reservationReminders || []).filter(item => ids.indexOf(item._id) < 0),
+        selectedReservationReminderIds: []
       })
       wx.showToast({
         title: status === 'arrived' ? UI.reservationArrivedSuccess : UI.reservationCancelSuccess,

@@ -182,6 +182,9 @@ Component({
       const dismissedMap = getDismissedMap()
       const now = Date.now()
       const reservationDeadline = now + 30 * 60 * 1000
+      const pendingReservationCount = (data.reservations || []).filter(item => (
+        String(item && item.status || '') === 'pending'
+      )).length
       const messages = []
 
       ;(data.orders || []).forEach(order => {
@@ -236,6 +239,7 @@ Component({
           ? this.data.selectedMessageId
           : ''
       })
+      this.triggerEvent('notificationschange', { pendingReservationCount })
     },
 
     selectMessage(event) {

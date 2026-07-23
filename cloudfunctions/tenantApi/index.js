@@ -16,6 +16,7 @@ const DEFAULT_TENANT_ID = 'zhangnan'
 const ACTIVE_STATUS = 'active'
 const SESSION_EXPIRE_DAYS = 7
 const DRAFT_EXPIRE_MS = 24 * 60 * 60 * 1000
+const RESERVATION_COOLDOWN_MS = 4 * 60 * 60 * 1000
 const SHARED_CART_ACCESS_TOKEN_TTL_MS = 4 * 60 * 60 * 1000
 const SHARED_CART_ACTIVE_WINDOW_MS = 2 * 60 * 1000
 const ADMIN_TABLE_BOARD_STATE_ID = '__admin_table_board__'
@@ -526,6 +527,34 @@ async function createUserSession(tenantId, openid) {
   }
 }
 
+async function getActiveUserById(userId) {
+  const normalizedUserId = String(userId || '').trim()
+  if (!normalizedUserId) return null
+
+  const userRes = await db.collection('user').doc(normalizedUserId).get()
+  const user = userRes.data
+  return user && user.status !== 0 ? user : null
+}
+
+async function getResumableUserSession(tenantId, token, openid) {
+  const resumeToken = String(token || '').trim()
+  if (!resumeToken) return null
+
+  const sessionRes = await db.collection('tenantSession')
+    .where({
+      tenantId,
+      tokenHash: hashToken(resumeToken),
+      openid
+    })
+    .limit(1)
+    .get()
+  const session = sessionRes.data && sessionRes.data[0]
+  if (!session || isAuthSessionExpired(session)) return null
+
+  cacheAuthSession(tenantId, resumeToken, session)
+  return session
+}
+
 async function loginByWechatCode(payload) {
   const code = String(payload.code || '').trim()
   if (!code) {
@@ -541,14 +570,25 @@ async function loginByWechatCode(payload) {
   if (!wxSession.success) return wxSession
 
   const openid = wxSession.data.openid
+  const resumedSession = await getResumableUserSession(
+    tenantId,
+    payload.resumeToken || payload.authToken,
+    openid
+  )
+
+  if (resumedSession) {
+    return {
+      success: true,
+      data: {
+        token: String(payload.resumeToken || payload.authToken),
+        expiresAt: resumedSession.expiresAt,
+        openid,
+        user: await getActiveUserById(resumedSession.userId)
+      }
+    }
+  }
+
   const session = await createUserSession(tenantId, openid)
-  const userRes = await db.collection('user')
-    .where({
-      _openid: openid,
-      status: _.neq(0)
-    })
-    .limit(1)
-    .get()
 
   return {
     success: true,
@@ -556,7 +596,9 @@ async function loginByWechatCode(payload) {
       token: session.token,
       expiresAt: session.expiresAt,
       openid,
-      user: userRes.data && userRes.data[0] ? userRes.data[0] : null
+      // OpenID only identifies this WeChat session. Membership is bound later
+      // by a phone number verified through phone.getNumber.
+      user: null
     }
   }
 }
@@ -643,23 +685,73 @@ function normalizeTags(tags) {
   return [String(tags)]
 }
 
-async function getActiveUser(transaction, openid) {
-  const userRes = await transaction.collection('user')
-    .where({
-      _openid: openid,
-      status: _.neq(0)
-    })
-    .limit(1)
-    .get()
-
-  const user = userRes.data && userRes.data[0]
+async function getActiveUser(transaction, userId) {
+  const normalizedUserId = String(userId || '').trim()
+  const userRes = normalizedUserId
+    ? await transaction.collection('user').doc(normalizedUserId).get()
+    : { data: null }
+  const user = userRes.data
   if (!user) {
     throw new Error('profile required')
+  }
+  if (user.status === 0) {
+    throw new Error('member account unavailable')
   }
   if (!user.phoneNumber) {
     throw new Error('phone authorization required')
   }
   return user
+}
+
+async function updateAuthSession(payload, auth, data) {
+  const session = auth && auth.data
+  if (!session || !session._id) return null
+
+  const updateData = {
+    ...data,
+    updateTime: db.serverDate()
+  }
+  await db.collection('tenantSession').doc(session._id).update({ data: updateData })
+
+  const nextSession = {
+    ...session,
+    ...data,
+    updateTime: new Date()
+  }
+  cacheAuthSession(getTenantId(payload), getAuthToken(payload), nextSession)
+  return nextSession
+}
+
+async function getCurrentMember(auth) {
+  if (!auth || !auth.success) return null
+  return getActiveUserById(auth.data && auth.data.userId)
+}
+
+async function requireCurrentMember(payload) {
+  const auth = await getAuthSession(payload)
+  if (!auth.success) return auth
+
+  const user = await getCurrentMember(auth)
+  if (!user) {
+    return {
+      success: false,
+      code: 'PROFILE_REQUIRED',
+      message: 'phone authorization required'
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      auth: auth.data,
+      user
+    }
+  }
+}
+
+function isCampingAccessoryCategory(categoryName) {
+  const name = String(categoryName || '').trim()
+  return name === '\u70e4\u67b6' || name === '\u9732\u8425\u7528\u54c1'
 }
 
 async function buildServerOrderGoods(transaction, orderGoods) {
@@ -710,7 +802,7 @@ async function buildServerOrderGoods(transaction, orderGoods) {
       categoryName = categoryRes.data && categoryRes.data.name || ''
     }
 
-    if (!freeThreshold) {
+    if (!isCampingAccessoryCategory(categoryName)) {
       thresholdBasePrice = roundMoney(thresholdBasePrice + originalSubtotal)
     }
 
@@ -813,7 +905,7 @@ async function createOrder(payload) {
     : {}
 
   const result = await db.runTransaction(async transaction => {
-    const user = await getActiveUser(transaction, openid)
+    const user = await getActiveUser(transaction, auth.data.userId)
     const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods)
     let rootOrderId = ''
     let inheritedTableGroup = linkedTableGroup
@@ -830,7 +922,7 @@ async function createOrder(payload) {
         String(sharedSession.activeOrderRootId || '') === parentOrderId &&
         Array.isArray(sharedSession.memberOpenids) &&
         sharedSession.memberOpenids.includes(openid)
-      if (parentOrder._openid !== openid && !canAppendFromSharedTable) {
+      if (parentOrder.userId !== user._id && !canAppendFromSharedTable) {
         throw new Error('cannot append to another user order')
       }
       if (parentOrder.orderScene !== orderScene) {
@@ -941,17 +1033,156 @@ async function getCurrentUser(payload) {
   const auth = await getAuthSession(payload)
   if (!auth.success) return auth
 
-  const res = await db.collection('user')
-    .where({
-      _openid: auth.data.openid,
-      status: _.neq(0)
-    })
-    .limit(1)
-    .get()
+  return {
+    success: true,
+    data: await getCurrentMember(auth)
+  }
+}
+
+function isValidBirthDate(value) {
+  const birthDate = String(value || '').trim()
+  if (!birthDate) return true
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) return false
+  const date = new Date(`${birthDate}T00:00:00+08:00`)
+  if (Number.isNaN(date.getTime())) return false
+  const currentDate = new Date()
+  return date.getTime() <= currentDate.getTime() && date.getFullYear() >= 1900
+}
+
+function normalizeUserNickname(value) {
+  const nickName = String(value || '').trim()
+  return nickName === '微信用户' ? '' : nickName
+}
+
+async function updateUserAccount(payload) {
+  const member = await requireCurrentMember(payload)
+  if (!member.success) return member
+
+  const nickName = normalizeUserNickname(payload.nickName)
+  const birthDate = String(payload.birthDate || '').trim()
+  if (!nickName || nickName.length > 20) {
+    return {
+      success: false,
+      code: 'INVALID_NICKNAME',
+      message: 'invalid nickname'
+    }
+  }
+  if (!isValidBirthDate(birthDate)) {
+    return {
+      success: false,
+      code: 'INVALID_BIRTH_DATE',
+      message: 'invalid birth date'
+    }
+  }
+
+  const user = member.data.user
+
+  const data = {
+    nickName,
+    birthDate,
+    updateTime: db.serverDate()
+  }
+  await db.collection('user').doc(user._id).update({ data })
 
   return {
     success: true,
-    data: res.data && res.data[0] ? res.data[0] : null
+    data: {
+      user: {
+        ...user,
+        ...data,
+        updateTime: new Date()
+      }
+    }
+  }
+}
+
+async function revokeUserAuthorization(payload) {
+  const auth = await getAuthSession(payload)
+  if (!auth.success) return auth
+
+  const user = await getCurrentMember(auth)
+  if (!user) {
+    return {
+      success: true,
+      data: { user: null }
+    }
+  }
+
+  const data = {
+    nickName: user.userCode ? `Member${user.userCode}` : '微信用户',
+    avatarUrl: '',
+    phoneNumber: '',
+    birthDate: '',
+    profileCompleted: false,
+    authorizationRevokedAt: db.serverDate(),
+    updateTime: db.serverDate()
+  }
+  await db.collection('user').doc(user._id).update({ data })
+  await updateAuthSession(payload, auth, {
+    userId: '',
+    userCode: '',
+    phoneNumber: '',
+    verifiedPhoneNumber: ''
+  })
+
+  return {
+    success: true,
+    data: {
+      user: {
+        ...user,
+        ...data,
+        authorizationRevokedAt: new Date(),
+        updateTime: new Date()
+      }
+    }
+  }
+}
+
+async function createFeedback(payload) {
+  const auth = await getAuthSession(payload)
+  if (!auth.success) return auth
+
+  await ensureCollection('feedback')
+
+  const content = String(payload.content || '').trim()
+  if (!content) {
+    return {
+      success: false,
+      code: 'FEEDBACK_REQUIRED',
+      message: 'feedback content required'
+    }
+  }
+  if (content.length > 200) {
+    return {
+      success: false,
+      code: 'FEEDBACK_TOO_LONG',
+      message: 'feedback content too long'
+    }
+  }
+
+  const user = await getCurrentMember(auth)
+  const now = new Date()
+  const feedback = {
+    type: 'feedback',
+    storeId: getTenantId(payload),
+    _openid: auth.data.openid,
+    userId: user && user._id || '',
+    userCode: user && user.userCode || '',
+    content,
+    status: 'pending',
+    createTime: db.serverDate(),
+    updateTime: db.serverDate()
+  }
+  const addRes = await db.collection('feedback').add({ data: feedback })
+
+  return {
+    success: true,
+    data: {
+      _id: addRes._id,
+      ...feedback,
+      createTime: now,
+      updateTime: now
+    }
   }
 }
 
@@ -986,33 +1217,46 @@ async function completeUserProfile(payload) {
   if (!auth.success) return auth
 
   const openid = auth.data.openid
-  const avatarUrl = payload.avatarUrl || ''
-  const phoneNumber = String(payload.phoneNumber || '').trim()
+  const verifiedPhoneNumber = String(auth.data.verifiedPhoneNumber || '').trim()
+  const requestedPhoneNumber = String(payload.phoneNumber || '').trim()
+  const phoneNumber = verifiedPhoneNumber
   if (!phoneNumber) {
     return {
       success: false,
-      code: 'PHONE_REQUIRED',
-      message: 'phone number required'
+      code: 'PHONE_VERIFICATION_REQUIRED',
+      message: 'please authorize phone number first'
+    }
+  }
+  if (requestedPhoneNumber && requestedPhoneNumber !== phoneNumber) {
+    return {
+      success: false,
+      code: 'PHONE_NUMBER_MISMATCH',
+      message: 'verified phone number mismatch'
     }
   }
 
   const user = await db.runTransaction(async transaction => {
     const userRes = await transaction.collection('user')
-      .where({ _openid: openid })
+      .where({ phoneNumber })
       .limit(1)
       .get()
     const oldUser = userRes.data && userRes.data[0]
 
     if (oldUser) {
+      if (oldUser.status === 0) {
+        throw new Error('member account unavailable')
+      }
       const userCode = oldUser.userCode || await getNextUserCode(transaction)
-      const nickName = String(payload.nickName || '').trim() || `Member${userCode}`
+      const nickName = normalizeUserNickname(payload.nickName) || oldUser.nickName || `Member${userCode}`
       const data = {
-        avatarUrl,
+        avatarUrl: payload.avatarUrl || oldUser.avatarUrl || '',
         nickName,
         phoneNumber,
         userCode,
         profileCompleted: true,
-        status: oldUser.status === 0 ? 1 : (oldUser.status || 1),
+        status: oldUser.status || 1,
+        lastAuthorizedOpenid: openid,
+        lastAuthorizedAt: db.serverDate(),
         updateTime: db.serverDate()
       }
 
@@ -1029,11 +1273,14 @@ async function completeUserProfile(payload) {
     }
 
     const userCode = await getNextUserCode(transaction)
-    const nickName = String(payload.nickName || '').trim() || `Member${userCode}`
+    const nickName = normalizeUserNickname(payload.nickName) || `Member${userCode}`
     const newUser = {
+      // Kept only as an audit value. It is never used as the membership key.
       _openid: openid,
+      lastAuthorizedOpenid: openid,
+      lastAuthorizedAt: db.serverDate(),
       userCode,
-      avatarUrl,
+      avatarUrl: payload.avatarUrl || '',
       nickName,
       phoneNumber,
       profileCompleted: true,
@@ -1057,6 +1304,14 @@ async function completeUserProfile(payload) {
     }
   })
 
+  await updateAuthSession(payload, auth, {
+    userId: user._id,
+    userCode: user.userCode || '',
+    phoneNumber,
+    verifiedPhoneNumber: phoneNumber,
+    profileAuthorizedAt: db.serverDate()
+  })
+
   return {
     success: true,
     data: {
@@ -1066,8 +1321,9 @@ async function completeUserProfile(payload) {
 }
 
 async function createReservation(payload) {
-  const auth = await getAuthSession(payload)
-  if (!auth.success) return auth
+  const member = await requireCurrentMember(payload)
+  if (!member.success) return member
+  const auth = { success: true, data: member.data.auth }
 
   const selectedDate = String(payload.selectedDate || payload.reservationDate || '').trim()
   const selectedDateText = String(payload.selectedDateText || payload.reservationDateText || '').trim()
@@ -1083,14 +1339,7 @@ async function createReservation(payload) {
     }
   }
 
-  const userRes = await db.collection('user')
-    .where({
-      _openid: auth.data.openid,
-      status: _.neq(0)
-    })
-    .limit(1)
-    .get()
-  const user = userRes.data && userRes.data[0]
+  const user = member.data.user
   const phone = user && (user.phoneNumber || user.phone || user.userPhone)
 
   if (!phone) {
@@ -1102,6 +1351,24 @@ async function createReservation(payload) {
   }
 
   const now = new Date()
+  const recentReservationRes = await db.collection('reservation')
+    .where({
+      userId: user._id
+    })
+    .orderBy('createTime', 'desc')
+    .limit(1)
+    .get()
+  const recentReservation = recentReservationRes.data && recentReservationRes.data[0]
+  const recentReservationTime = recentReservation && new Date(recentReservation.createTime).getTime()
+
+  if (Number.isFinite(recentReservationTime) && now.getTime() - recentReservationTime < RESERVATION_COOLDOWN_MS) {
+    return {
+      success: false,
+      code: 'RESERVATION_TOO_FREQUENT',
+      message: '\u6bcf4\u5c0f\u65f6\u4ec5\u53ef\u63d0\u4ea4\u4e00\u6b21\u9884\u7ea6'
+    }
+  }
+
   const reservationNo = `R${now.getFullYear()}${padNumber(now.getMonth() + 1)}${padNumber(now.getDate())}${padNumber(now.getHours())}${padNumber(now.getMinutes())}${padNumber(now.getSeconds())}`
   const reservation = {
     reservationNo,
@@ -1160,6 +1427,11 @@ async function getPhoneNumber(payload) {
       }
     }
 
+    await updateAuthSession(payload, auth, {
+      verifiedPhoneNumber: phoneNumber,
+      phoneAuthorizedAt: db.serverDate()
+    })
+
     return {
       success: true,
       phoneNumber
@@ -1216,14 +1488,14 @@ function getUserOrderHistoryStartTime() {
 }
 
 async function listUserOrders(payload) {
-  const auth = await getAuthSession(payload)
-  if (!auth.success) return auth
+  const member = await requireCurrentMember(payload)
+  if (!member.success) return member
 
   const orderScene = getOrderScene(payload.orderScene)
   const page = getPage(payload)
   const limit = getLimit(payload, 20, 100)
   const query = {
-    _openid: auth.data.openid,
+    userId: member.data.user._id,
     type: 'order',
     deleted: _.neq(true),
     createTime: _.gte(getUserOrderHistoryStartTime())
@@ -1256,8 +1528,8 @@ async function listUserOrders(payload) {
 }
 
 async function getUserOrderDetail(payload) {
-  const auth = await getAuthSession(payload)
-  if (!auth.success) return auth
+  const member = await requireCurrentMember(payload)
+  if (!member.success) return member
 
   const orderId = String(payload.orderId || '').trim()
   const rootOrderId = String(payload.rootOrderId || payload.orderId || '').trim()
@@ -1271,9 +1543,9 @@ async function getUserOrderDetail(payload) {
 
   const res = await db.collection('order')
     .where(_.or([
-      { _openid: auth.data.openid, _id: orderId, deleted: _.neq(true) },
-      { _openid: auth.data.openid, rootOrderId, deleted: _.neq(true) },
-      { _openid: auth.data.openid, parentOrderId: rootOrderId, deleted: _.neq(true) }
+      { userId: member.data.user._id, _id: orderId, deleted: _.neq(true) },
+      { userId: member.data.user._id, rootOrderId, deleted: _.neq(true) },
+      { userId: member.data.user._id, parentOrderId: rootOrderId, deleted: _.neq(true) }
     ]))
     .orderBy('createTime', 'asc')
     .limit(100)
@@ -1290,8 +1562,8 @@ async function getUserOrderDetail(payload) {
 }
 
 async function markUserOrdersDeleted(payload) {
-  const auth = await getAuthSession(payload)
-  if (!auth.success) return auth
+  const member = await requireCurrentMember(payload)
+  if (!member.success) return member
 
   const orderIds = Array.isArray(payload.orderIds)
     ? payload.orderIds.map(id => String(id || '').trim()).filter(Boolean)
@@ -1308,7 +1580,7 @@ async function markUserOrdersDeleted(payload) {
   await Promise.all(orderIds.map(async orderId => {
     const oldRes = await db.collection('order').doc(orderId).get()
     const order = oldRes.data
-    if (!order || order._openid !== auth.data.openid) {
+    if (!order || order.userId !== member.data.user._id) {
       throw new Error('order not found')
     }
 
@@ -1326,8 +1598,8 @@ async function markUserOrdersDeleted(payload) {
 }
 
 async function cancelUserOrder(payload) {
-  const auth = await getAuthSession(payload)
-  if (!auth.success) return auth
+  const member = await requireCurrentMember(payload)
+  if (!member.success) return member
 
   const orderId = String(payload.orderId || '').trim()
   if (!orderId) {
@@ -1340,7 +1612,7 @@ async function cancelUserOrder(payload) {
 
   const oldRes = await db.collection('order').doc(orderId).get()
   const order = oldRes.data
-  if (!order || order._openid !== auth.data.openid) {
+  if (!order || order.userId !== member.data.user._id) {
     return {
       success: false,
       code: 'ORDER_NOT_FOUND',
@@ -5904,6 +6176,11 @@ const ADMIN_COLLECTIONS = {
     order: 'desc',
     searchFields: ['name', 'phone', 'status']
   },
+  feedback: {
+    orderBy: 'createTime',
+    order: 'desc',
+    searchFields: ['content', 'userCode', 'status']
+  },
   printer: {
     orderBy: 'createTime',
     order: 'desc',
@@ -5965,6 +6242,7 @@ function getAdminListWhere(config, payload) {
 
 async function adminCollectionList(payload) {
   const config = getAdminCollectionConfig(payload.collection)
+  await ensureCollection(config.key)
   const limit = getLimit(payload, 50, 100)
   const page = getPage(payload)
   const orderBy = String(payload.orderBy || config.orderBy || 'createTime')
@@ -6411,7 +6689,10 @@ async function handleAction(action, payload) {
   if (action === 'auth.login') return loginByWechatCode(payload)
   if (action === 'user.me') return getCurrentUser(payload)
   if (action === 'user.completeProfile') return completeUserProfile(payload)
+  if (action === 'user.updateAccount') return updateUserAccount(payload)
+  if (action === 'user.revokeAuthorization') return revokeUserAuthorization(payload)
   if (action === 'phone.getNumber') return getPhoneNumber(payload)
+  if (action === 'feedback.create') return createFeedback(payload)
   if (action === 'reservation.create') return createReservation(payload)
   if (action === 'order.create') {
     const result = await createOrder(payload)

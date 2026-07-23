@@ -2,6 +2,31 @@
 const apiClient = require('../../../../utils/apiClient')
 
 const ADMIN_ROOT = '/packages/admin/pages/admin'
+const RESERVATION_TIME_OPTIONS = ['11:00', '11:30', '12:00', '18:00', '19:00']
+const RESERVATION_PEOPLE_OPTIONS = [2, 4, 8]
+const RESERVATION_ROOM_OPTIONS = ['大厅', '包间', '天楼']
+const WEEK_TEXT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+function padNumber(value) {
+  return value < 10 ? `0${value}` : `${value}`
+}
+
+function buildReservationWeekDates() {
+  const today = new Date()
+  return Array.from({ length: 7 }).map((item, index) => {
+    const date = new Date(today)
+    date.setDate(today.getDate() + index)
+    const month = date.getMonth() + 1
+    const day = date.getDate()
+    return {
+      value: `${date.getFullYear()}-${padNumber(month)}-${padNumber(day)}`,
+      week: index === 0 ? '\u4eca\u5929' : WEEK_TEXT[date.getDay()],
+      day: `${month}/${day}`,
+      text: `${month}\u6708${day}\u65e5`
+    }
+  })
+}
+
 const ADMIN_TEXT = {
   heroTitle: '\u5f20\u5357\u70e4\u8089\u540e\u53f0',
   coreSection: '\u6838\u5fc3\u4e1a\u52a1',
@@ -22,9 +47,22 @@ const ADMIN_TEXT = {
   tableCodeDesc: '\u5802\u98df\u684c\u7801\u751f\u6210',
   printerTitle: '\u6253\u5370\u673a\u7ba1\u7406',
   printerDesc: '\u5c0f\u7968\u6253\u5370\u914d\u7f6e',
+  feedbackTitle: '\u610f\u89c1\u6536\u96c6',
+  feedbackDesc: '\u67e5\u770b\u7528\u6237\u63d0\u4ea4\u7684\u53cd\u9988',
   reservationModalTitle: '\u65b0\u9884\u7ea6',
   reservationEmpty: '\u6682\u65e0\u65b0\u9884\u7ea6',
   reservationRefresh: '\u5237\u65b0',
+  addReservation: '\u6dfb\u52a0\u9884\u7ea6',
+  manualReservationTitle: '\u6dfb\u52a0\u9884\u7ea6',
+  reservationPhonePlaceholder: '\u8bf7\u8f93\u5165\u624b\u673a\u53f7',
+  reservationTime: '\u65f6\u6bb5',
+  reservationCustomTime: '\u81ea\u5b9a\u4e49\u65f6\u95f4',
+  reservationCustomPeople: '\u81ea\u5b9a\u4e49\u4eba\u6570',
+  reservationPriority: '\u91cd\u70b9\u5173\u6ce8',
+  reservationSave: '\u4fdd\u5b58\u9884\u7ea6',
+  reservationCreated: '\u9884\u7ea6\u5df2\u6dfb\u52a0',
+  reservationPhoneRequired: '\u8bf7\u586b\u5199\u624b\u673a\u53f7',
+  reservationInfoRequired: '\u8bf7\u5b8c\u5584\u9884\u7ea6\u4fe1\u606f',
   reservationPhone: '\u624b\u673a',
   reservationDate: '\u5230\u5e97\u65f6\u95f4',
   reservationPeople: '\u4eba\u6570',
@@ -32,6 +70,8 @@ const ADMIN_TEXT = {
   reservationDetailTitle: '\u9884\u7ea6\u8be6\u60c5',
   confirmReservation: '\u786e\u8ba4\u9884\u7ea6',
   reservationConfirmed: '\u5df2\u786e\u8ba4\u9884\u7ea6',
+  deleteReservation: '\u5220\u9664\u9884\u7ea6',
+  reservationDeleted: '\u9884\u7ea6\u5df2\u5220\u9664',
   changePassword: '\u4fee\u6539\u5bc6\u7801',
   close: '\u5173\u95ed',
   setupAdminPassword: '\u8bbe\u7f6e\u7ba1\u7406\u5458\u5bc6\u7801',
@@ -83,11 +123,31 @@ Page({
     newPassword: '',
     confirmPassword: '',
     reservationList: [],
+    reservationUnreadCount: 0,
+    reservationUnreadBadge: '',
     reservationLoading: false,
     showReservationModal: false,
     selectedReservation: null,
     showReservationDetailModal: false,
-    confirmingReservation: false
+    confirmingReservation: false,
+    deletingReservation: false,
+    showManualReservationModal: false,
+    savingManualReservation: false,
+    manualWeekDates: [],
+    manualTimeOptions: RESERVATION_TIME_OPTIONS,
+    manualPeopleOptions: RESERVATION_PEOPLE_OPTIONS,
+    manualRoomOptions: RESERVATION_ROOM_OPTIONS,
+    manualPhone: '',
+    manualDate: '',
+    manualDateText: '',
+    manualTime: '18:00',
+    manualCustomTime: '18:30',
+    manualIsCustomTime: false,
+    manualPeople: 2,
+    manualCustomPeople: '',
+    manualIsCustomPeople: false,
+    manualRoom: '大厅',
+    manualPriority: false
   },
 
   async onLoad(options = {}) {
@@ -219,6 +279,14 @@ Page({
     this.loadReservationList()
   },
 
+  onNotificationsChange(event) {
+    const count = Math.max(0, Number(event && event.detail && event.detail.pendingReservationCount || 0))
+    this.setData({
+      reservationUnreadCount: count,
+      reservationUnreadBadge: count > 99 ? '99+' : String(count)
+    })
+  },
+
   async loadReservationList(silent = false) {
     if (silent && silent.currentTarget) silent = false
     if (!this.data.isAuthorized) return
@@ -255,8 +323,152 @@ Page({
     this.setData({
       showReservationModal: false,
       showReservationDetailModal: false,
+      showManualReservationModal: false,
       selectedReservation: null
     })
+  },
+
+  openManualReservation() {
+    const manualWeekDates = buildReservationWeekDates()
+    const firstDate = manualWeekDates[0] || {}
+    this.setData({
+      showManualReservationModal: true,
+      manualWeekDates,
+      manualPhone: '',
+      manualDate: firstDate.value || '',
+      manualDateText: firstDate.text || '',
+      manualTime: '18:00',
+      manualCustomTime: '18:30',
+      manualIsCustomTime: false,
+      manualPeople: 2,
+      manualCustomPeople: '',
+      manualIsCustomPeople: false,
+      manualRoom: '大厅',
+      manualPriority: false
+    })
+  },
+
+  closeManualReservation() {
+    if (this.data.savingManualReservation) return
+    this.setData({ showManualReservationModal: false })
+  },
+
+  onManualPhoneInput(e) {
+    this.setData({ manualPhone: e.detail.value })
+  },
+
+  selectManualDate(e) {
+    const value = e.currentTarget.dataset.value
+    const date = (this.data.manualWeekDates || []).find(item => item.value === value)
+    if (!date) return
+    this.setData({
+      manualDate: date.value,
+      manualDateText: date.text
+    })
+  },
+
+  selectManualTime(e) {
+    const value = e.currentTarget.dataset.value
+    if (!value) return
+    this.setData({
+      manualTime: value,
+      manualIsCustomTime: false
+    })
+  },
+
+  onManualCustomTimeChange(e) {
+    const value = e.detail.value
+    this.setData({
+      manualCustomTime: value,
+      manualTime: value,
+      manualIsCustomTime: true
+    })
+  },
+
+  selectManualPeople(e) {
+    const value = Number(e.currentTarget.dataset.value)
+    if (!Number.isFinite(value) || value <= 0) return
+    this.setData({
+      manualPeople: value,
+      manualIsCustomPeople: false
+    })
+  },
+
+  focusManualCustomPeople() {
+    this.setData({ manualIsCustomPeople: true })
+  },
+
+  onManualCustomPeopleInput(e) {
+    const value = e.detail.value
+    const number = Number(value)
+    this.setData({
+      manualCustomPeople: value,
+      manualPeople: Number.isFinite(number) && number > 0 ? number : this.data.manualPeople,
+      manualIsCustomPeople: true
+    })
+  },
+
+  selectManualRoom(e) {
+    const value = e.currentTarget.dataset.value
+    if (!value) return
+    this.setData({ manualRoom: value })
+  },
+
+  toggleManualPriority() {
+    this.setData({ manualPriority: !this.data.manualPriority })
+  },
+
+  async saveManualReservation() {
+    if (this.data.savingManualReservation) return
+    const phone = String(this.data.manualPhone || '').replace(/\s/g, '')
+    const peopleCount = this.data.manualIsCustomPeople
+      ? Number(this.data.manualCustomPeople)
+      : Number(this.data.manualPeople)
+
+    if (!phone) {
+      wx.showToast({ title: ADMIN_TEXT.reservationPhoneRequired, icon: 'none' })
+      return
+    }
+    if (!this.data.manualDate || !this.data.manualTime || !this.data.manualRoom || !Number.isFinite(peopleCount) || peopleCount <= 0) {
+      wx.showToast({ title: ADMIN_TEXT.reservationInfoRequired, icon: 'none' })
+      return
+    }
+
+    this.setData({ savingManualReservation: true })
+    try {
+      await apiClient.call('admin.collection.save', {
+        collection: 'reservation',
+        item: {
+          reservationNo: `M${Date.now()}`,
+          phone,
+          phoneNumber: phone,
+          reservationDate: this.data.manualDate,
+          reservationDateText: this.data.manualDateText,
+          reservationTime: this.data.manualTime,
+          peopleCount,
+          roomType: this.data.manualRoom,
+          status: 'confirmed',
+          confirmedAt: new Date().toISOString(),
+          isPriority: this.data.manualPriority === true,
+          source: 'admin'
+        }
+      })
+      wx.showToast({ title: ADMIN_TEXT.reservationCreated, icon: 'success' })
+      this.setData({
+        savingManualReservation: false,
+        showManualReservationModal: false
+      })
+      this.loadReservationList(true)
+      const infoCenter = this.selectComponent('#admin-info-center')
+      if (infoCenter) infoCenter.activate(true)
+    } catch (err) {
+      console.error('save manual reservation failed', err)
+      this.setData({ savingManualReservation: false })
+      wx.showToast({
+        title: err.message || '\u6dfb\u52a0\u5931\u8d25',
+        icon: 'none'
+      })
+    }
   },
 
   openReservationDetail(e) {
@@ -301,6 +513,8 @@ Page({
         selectedReservation: null
       })
       this.loadReservationList(true)
+      const infoCenter = this.selectComponent('#admin-info-center')
+      if (infoCenter) infoCenter.activate(true)
     } catch (err) {
       console.error('confirm reservation failed', err)
       this.setData({ confirmingReservation: false })
@@ -309,6 +523,48 @@ Page({
         icon: 'none'
       })
     }
+  },
+
+  deleteReservation() {
+    const reservation = this.data.selectedReservation
+    if (!reservation || !reservation._id || this.data.deletingReservation) return
+
+    wx.showModal({
+      title: ADMIN_TEXT.deleteReservation,
+      content: '\u5220\u9664\u540e\u65e0\u6cd5\u6062\u590d\uff0c\u786e\u8ba4\u5220\u9664\u8be5\u9884\u7ea6\uff1f',
+      confirmText: '\u5220\u9664',
+      confirmColor: '#C9341C',
+      success: async (result) => {
+        if (!result.confirm) return
+
+        this.setData({ deletingReservation: true })
+        try {
+          await apiClient.call('admin.collection.delete', {
+            collection: 'reservation',
+            id: reservation._id
+          })
+          wx.showToast({
+            title: ADMIN_TEXT.reservationDeleted,
+            icon: 'success'
+          })
+          this.setData({
+            deletingReservation: false,
+            showReservationDetailModal: false,
+            selectedReservation: null
+          })
+          this.loadReservationList(true)
+          const infoCenter = this.selectComponent('#admin-info-center')
+          if (infoCenter) infoCenter.activate(true)
+        } catch (err) {
+          console.error('delete reservation failed', err)
+          this.setData({ deletingReservation: false })
+          wx.showToast({
+            title: err.message || '\u5220\u9664\u5931\u8d25',
+            icon: 'none'
+          })
+        }
+      }
+    })
   },
 
   goToOutdoor() {
@@ -325,6 +581,10 @@ Page({
 
   goToPrinter() {
     wx.navigateTo({ url: `${ADMIN_ROOT}/printer/printer` })
+  },
+
+  goToFeedback() {
+    wx.navigateTo({ url: `${ADMIN_ROOT}/feedback/feedback` })
   },
 
   showChangePassword() {

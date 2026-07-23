@@ -1,5 +1,6 @@
 ﻿// pages/covertest/covertest.js
 const { getCustomNavOptions } = require('../../utils/customNav')
+const { openPrivacyPolicyDocument } = require('../../utils/privacyPolicyDocument')
 
 Page({
   data: {
@@ -17,7 +18,10 @@ Page({
     orderTransitioning: false,
     showOrderPreview: false,
     showCampingPreview: false,
-    showContactModal: false
+    showContactModal: false,
+    showPrivacyConsent: false,
+    privacyConsentChecked: false,
+    privacyReady: false
   },
 
   refreshCustomNav() {
@@ -33,6 +37,7 @@ Page({
 
   onLoad() {
     this.refreshCustomNav()
+    this.refreshPrivacyConsent()
   },
 
   onShow() {
@@ -43,7 +48,49 @@ Page({
       orderTransitioning: false,
       showOrderPreview: false
     })
+    this.refreshPrivacyConsent()
   },
+
+  refreshPrivacyConsent() {
+    if (wx.getStorageSync('privacyPolicyConsentV1')) {
+      this.setData({
+        showPrivacyConsent: false,
+        privacyReady: true
+      })
+      return
+    }
+    this.setData({
+      showPrivacyConsent: true,
+      privacyReady: false
+    })
+  },
+
+  togglePrivacyConsent() {
+    this.setData({
+      privacyConsentChecked: !this.data.privacyConsentChecked
+    })
+  },
+
+  confirmPrivacyConsent() {
+    if (!this.data.privacyConsentChecked) {
+      wx.showToast({
+        title: '请先勾选并同意隐私政策',
+        icon: 'none'
+      })
+      return
+    }
+    wx.setStorageSync('privacyPolicyConsentV1', true)
+    this.setData({
+      showPrivacyConsent: false,
+      privacyReady: true
+    })
+  },
+
+  goPrivacyPolicy() {
+    openPrivacyPolicyDocument()
+  },
+
+  catchPrivacyConsentMove() {},
 
   startOrderLoadingAnimation() {
     // 使用原生 GIF，不再逐帧 setData。

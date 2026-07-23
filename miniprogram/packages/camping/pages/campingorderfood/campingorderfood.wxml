@@ -116,7 +116,7 @@
           </view>
           <view class="featured-bottom">
             <view class="featured-text">
-              <view class="featured-name">点单满188元免费提供桶和碳</view>
+              <view class="featured-name">菜品实付满188元免费提供炉和碳</view>
             </view>
             <view class="action-btn add featured-add-btn" bindtap="showCampingFreeBucketTip">
               <text class="plus-icon"></text>
@@ -197,7 +197,7 @@
       <text class="cart-title">购物车</text>
       <text class="cart-clear" bindtap="clearCart">清空</text>
     </view>
-    <scroll-view class="cart-content" scroll-y>
+    <scroll-view class="cart-content" scroll-y enable-flex>
       <view class="cart-goods-item" wx:for="{{cart}}" wx:for-item="item" wx:key="index">
         <view class="cart-goods-info">
           <image wx:if="{{item.info.hasImage}}" class="cart-goods-image" src="{{item.info.image}}" mode="aspectFill"></image>
@@ -208,7 +208,7 @@
               <view class="tag-text" wx:for="{{item.tagLabels}}" wx:key="index" wx:for-item="tagVal">{{tagVal}}</view>
             </view>
             <view class="cart-goods-price">
-              <text wx:if="{{item.freeByThreshold}}">满188免费</text>
+              <text wx:if="{{item.freeByThreshold}}">菜品实付满188免费</text>
               <text wx:else>¥{{item.displayPriceText || item.info.price}} × {{item.count}}</text>
             </view>
           </view>

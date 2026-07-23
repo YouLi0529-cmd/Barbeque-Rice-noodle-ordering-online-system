@@ -1,0 +1,29 @@
+<view class="feedback-admin-page">
+  <view class="top-bar">
+    <view class="page-title">意见收集</view>
+    <view class="top-actions">
+      <view class="search-box">
+        <input placeholder="搜索反馈内容或会员编号" value="{{keyword}}" bindinput="onKeywordInput" confirm-type="search" bindconfirm="searchFeedback" />
+      </view>
+      <view class="top-btn" bindtap="searchFeedback">搜索</view>
+      <view class="top-btn" bindtap="loadFeedback">刷新</view>
+      <view class="top-btn" bindtap="goBack">返回</view>
+    </view>
+  </view>
+
+  <scroll-view class="feedback-list" scroll-y>
+    <view class="state-text" wx:if="{{loading}}">加载中</view>
+    <view class="state-text" wx:elif="{{list.length === 0}}">暂时没有意见反馈</view>
+    <block wx:else>
+      <view class="feedback-item" wx:for="{{list}}" wx:key="_id">
+        <view class="feedback-item-head">
+          <view class="feedback-user">{{item.displayUser}}</view>
+          <view class="feedback-status">{{item.displayStatus}}</view>
+        </view>
+        <view class="feedback-text">{{item.content}}</view>
+        <view class="feedback-time">{{item.displayTime}}</view>
+      </view>
+    </block>
+  </scroll-view>
+</view>
+<admin-info-center />

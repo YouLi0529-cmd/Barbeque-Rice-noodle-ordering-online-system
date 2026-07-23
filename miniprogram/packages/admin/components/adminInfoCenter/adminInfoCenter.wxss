@@ -44,16 +44,20 @@
   position: absolute;
   top: -8rpx;
   right: -10rpx;
-  min-width: 22rpx;
-  height: 22rpx;
-  padding: 0 4rpx;
+  min-width: 26rpx;
+  height: 26rpx;
+  padding: 0 5rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: 2rpx solid #fff8ea;
   border-radius: 12rpx;
   background: #bd4b36;
   color: #fff;
-  font-size: 13rpx;
-  line-height: 22rpx;
+  font-size: 15rpx;
+  line-height: 1;
   text-align: center;
+  font-weight: 900;
   box-sizing: border-box;
 }
 

@@ -1,0 +1,41 @@
+<view class="account-page">
+  <view class="account-header" style="padding-top: {{statusBarHeight}}px;">
+    <view class="account-nav" style="height: {{navBarHeight}}px;">
+      <view class="account-nav-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">
+        <view class="back-btn" bindtap="goBack">
+          <view class="back-icon" style="width: {{navIconSize}}px; height: {{navIconSize}}px; border-width: {{navIconStroke}}px;"></view>
+        </view>
+        <view class="account-title" style="font-size: {{navTitleFontSize}}px; line-height: {{navTitleFontSize}}px;">账号信息</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="account-content">
+    <view class="account-list">
+      <view class="account-row">
+        <view class="account-label">会员编号</view>
+        <view class="account-value">{{userInfo && userInfo.userCode ? userInfo.userCode : '待生成'}}</view>
+      </view>
+      <view class="account-row account-name-row">
+        <view class="account-label">账号名称</view>
+        <view class="account-name-editor">
+          <input class="account-name-input" type="nickname" value="{{nickNameInput}}" maxlength="20" placeholder="请输入或选择微信昵称" bindinput="onNicknameInput" />
+          <view class="wechat-name-btn" hover-class="wechat-name-btn-hover" bindtap="chooseWechatNickname">使用微信昵称</view>
+        </view>
+      </view>
+      <view class="account-row">
+        <view class="account-label">微信手机号</view>
+        <view class="account-value">{{phoneDisplay}}</view>
+      </view>
+      <picker class="account-row birthday-row" mode="date" value="{{birthDate}}" start="1900-01-01" end="{{maxBirthDate}}" bindchange="onBirthDateChange">
+        <view class="account-label">生日</view>
+        <view class="account-value">{{birthDate || '请选择'}}</view>
+      </picker>
+      <view class="account-row">
+        <view class="account-label">账号状态</view>
+        <view class="account-value status-value">{{accountStatus}}</view>
+      </view>
+    </view>
+    <button class="account-save" loading="{{saving}}" disabled="{{saving}}" bindtap="saveAccount">保存账号信息</button>
+  </view>
+</view>

@@ -884,6 +884,7 @@ page {
   left: 0;
   right: 0;
   bottom: 0;
+  height: 70vh;
   max-height: 70vh;
   background: #fffaf1;
   border-radius: 20rpx 20rpx 0 0;
@@ -892,6 +893,8 @@ page {
   transition: transform 0.3s;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .cart-detail.show {
@@ -904,6 +907,7 @@ page {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .cart-title {
@@ -919,21 +923,28 @@ page {
 
 .cart-content {
   flex: 1;
+  height: 0;
+  min-height: 0;
   padding: 20rpx 30rpx;
+  box-sizing: border-box;
 }
 
 .cart-goods-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  min-width: 0;
+  gap: 16rpx;
   padding: 20rpx 0;
   border-bottom: 1rpx solid #ead6b8;
 }
 
 .cart-goods-info {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
+  overflow: hidden;
 }
 
 .cart-goods-image {
@@ -947,6 +958,8 @@ page {
 
 .cart-goods-detail {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .cart-goods-name {
@@ -955,6 +968,9 @@ page {
   margin-bottom: 5rpx;
   letter-spacing: 2rpx;
   line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cart-goods-tags {
@@ -987,8 +1003,9 @@ page {
 .cart-goods-actions {
   display: flex;
   align-items: center;
-  gap: 20rpx;
-  margin-left: 20rpx;
+  flex: 0 0 auto;
+  gap: 14rpx;
+  margin-left: 12rpx;
 }
 
 .cart-count {
@@ -1005,10 +1022,11 @@ page {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 25rpx 30rpx;
+  padding: 25rpx 30rpx calc(25rpx + env(safe-area-inset-bottom));
   background: #fffaf1;
   border-top: 2rpx solid #ead6b8;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .cart-footer-left {

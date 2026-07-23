@@ -294,22 +294,12 @@
   box-sizing: border-box;
 }
 
-.menu-icon {
-  width: 44rpx;
-  height: 44rpx;
-  border-radius: 22rpx;
-  background: #fff1f0;
-  color: #e54d42;
-  font-size: 28rpx;
-  font-weight: bold;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.profile-menu-item + .profile-menu-item {
+  border-top: 1rpx solid #f1ece6;
 }
 
 .menu-title {
   flex: 1;
-  margin-left: 20rpx;
   color: #333333;
   font-size: 30rpx;
 }

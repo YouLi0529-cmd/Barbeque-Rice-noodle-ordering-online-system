@@ -3,6 +3,7 @@ const app = getApp()
 const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()
 const { getCustomNavOptions } = require('../../../../utils/customNav')
+const { openPrivacyPolicyDocument } = require('../../../../utils/privacyPolicyDocument')
 
 Page({
   data: {
@@ -16,7 +17,8 @@ Page({
     version: '', // 版本号
     actionLoading: false,
     actionLoadingText: '',
-    actionLoadingGif: '/images/orderloadinggif-transparent.gif'
+    actionLoadingGif: '/images/orderloadinggif-transparent.gif',
+    isLoggedOut: false
   },
 
   showActionLoading(text = '加载中') {
@@ -42,8 +44,24 @@ Page({
   },
 
   onShow() {
+    const isLoggedOut = !!wx.getStorageSync('manualLoggedOut')
+    this.setData({ isLoggedOut })
+    if (isLoggedOut) {
+      this.setData({
+        userInfo: null,
+        showAuthModal: false
+      })
+      // "我的" is a member-only page. Logging out clears the local session,
+      // then entering this page starts a new phone authorization flow.
+      this.showAuthModal()
+      return
+    }
+
     this.loadUserInfo().then((user) => {
-      if (!this.isProfileCompleted(user)) {
+      if (wx.getStorageSync('profileAuthorizationRevoked')) {
+        return
+      }
+      if (!this.isProfileCompleted(user) || this.isLegacyTestProfile(user)) {
         this.setData({
           showAuthModal: true
         })
@@ -122,8 +140,44 @@ Page({
     )
   },
 
+  isLegacyTestProfile(userInfo) {
+    return !!(userInfo && userInfo.phoneNumber === '13800000000')
+  },
+
   // 显示授权弹窗
-  showAuthModal() {
+  async showAuthModal() {
+    if (wx.getStorageSync('manualLoggedOut')) {
+      try {
+        this.showActionLoading('正在登录')
+        const loginResult = await apiClient.login()
+        const loginData = loginResult.data || {}
+        app.globalData.openid = loginData.openid || ''
+        app.globalData.openidReady = !!loginData.openid
+        app.globalData.openidPromise = Promise.resolve(loginData.openid || '')
+        app.globalData.userInfo = loginData.user || null
+        app.globalData.userInfoReady = true
+        wx.setStorageSync('openid', loginData.openid || '')
+        wx.removeStorageSync('manualLoggedOut')
+
+        const user = await this.loadUserInfo()
+        this.setData({ isLoggedOut: false })
+        if (this.isProfileCompleted(user) && !this.isLegacyTestProfile(user)) {
+          wx.showToast({ title: '登录成功', icon: 'success' })
+          return
+        }
+      } catch (err) {
+        console.error('manual login failed', err)
+        wx.showToast({
+          title: err.message || '登录失败，请重试',
+          icon: 'none'
+        })
+        return
+      } finally {
+        this.hideActionLoading()
+      }
+    }
+
+    wx.removeStorageSync('profileAuthorizationRevoked')
     this.setData({
       showAuthModal: true
     })
@@ -131,6 +185,7 @@ Page({
 
   // 用户信息保存成功回调
   onUserInfoSaved(e) {
+    wx.removeStorageSync('profileAuthorizationRevoked')
     if (e.detail && e.detail.user) {
       app.globalData.userInfo = e.detail.user
       this.setData({
@@ -143,6 +198,13 @@ Page({
   },
 
   onAuthModalClosed() {
+    if (!this.data.userInfo) {
+      wx.reLaunch({
+        url: '/pages/covertest/covertest'
+      })
+      return
+    }
+
     this.setData({
       showAuthModal: false
     })
@@ -159,6 +221,22 @@ Page({
   goAbout() {
     wx.navigateTo({
       url: '/packages/user/pages/about/about'
+    })
+  },
+
+  goPrivacy() {
+    openPrivacyPolicyDocument()
+  },
+
+  goFeedback() {
+    wx.navigateTo({
+      url: '/packages/user/pages/feedback/feedback'
+    })
+  },
+
+  goAccount() {
+    wx.navigateTo({
+      url: '/packages/user/pages/account/account'
     })
   },
 

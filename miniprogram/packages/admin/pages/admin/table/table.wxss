@@ -158,6 +158,27 @@ page {
     0 5rpx 12rpx rgba(58, 36, 24, 0.1);
 }
 
+.reservation-reminder-card.priority {
+  background: #FFF2EF;
+  border-color: rgba(201, 52, 28, 0.6);
+  box-shadow: 0 5rpx 12rpx rgba(201, 52, 28, 0.16);
+}
+
+.reservation-reminder-card.priority.selected {
+  background: #FFE2DA;
+  border-color: #C9341C;
+  box-shadow:
+    0 0 0 2rpx rgba(201, 52, 28, 0.18),
+    0 5rpx 12rpx rgba(201, 52, 28, 0.2);
+}
+
+.reservation-reminder-card.priority .reservation-room,
+.reservation-reminder-card.priority .reservation-time,
+.reservation-reminder-card.priority .reservation-people,
+.reservation-reminder-card.priority .reservation-phone {
+  color: #B3261E;
+}
+
 .reservation-room {
   color: #8F3E17;
   font-size: 10rpx;

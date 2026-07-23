@@ -645,10 +645,9 @@ const CAMPING_DISH_SEEDS = {
       price: 50,
       sort: 1,
       needSpec: false,
-      description: '\u914d\u8db3\u91cf\u78b3\uff0c\u9700\u8981\u5f52\u8fd8',
+      description: '\u78b3\u9700\u5355\u72ec\u8d2d\u4e70\uff0c\u5b9e\u4ed8\u6ee1188\u914d\u8db3\u91cf\u78b3\uff0c\u67b6\u5b50\u9700\u8981\u5f52\u8fd8',
       quantityMode: 'single',
       maxOrderCount: 1,
-      freeThreshold: 188,
       exclusiveGroup: 'camping_grill',
       returnRequired: true
     },

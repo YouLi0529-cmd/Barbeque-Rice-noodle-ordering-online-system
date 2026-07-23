@@ -27,6 +27,7 @@
           <view class="card-desc">{{ui.queueDesc}}</view>
         </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToReservation">
+          <view class="reservation-badge" wx:if="{{reservationUnreadCount > 0}}">{{reservationUnreadBadge}}</view>
           <view class="card-title">{{ui.reservationTitle}}</view>
           <view class="card-desc">{{ui.reservationDesc}}</view>
         </view>
@@ -51,6 +52,10 @@
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToPrinter">
           <view class="card-title">{{ui.printerTitle}}</view>
           <view class="card-desc">{{ui.printerDesc}}</view>
+        </view>
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToFeedback">
+          <view class="card-title">{{ui.feedbackTitle}}</view>
+          <view class="card-desc">{{ui.feedbackDesc}}</view>
         </view>
       </view>
     </view>
@@ -99,14 +104,17 @@
     <view class="reservation-dialog" catchtap="stopPropagation">
       <view class="reservation-dialog-head">
         <view class="reservation-dialog-title">{{ui.reservationModalTitle}}</view>
-        <view class="reservation-dialog-refresh" bindtap="loadReservationList">{{ui.reservationRefresh}}</view>
+        <view class="reservation-dialog-actions">
+          <view class="reservation-dialog-add" bindtap="openManualReservation">{{ui.addReservation}}</view>
+          <view class="reservation-dialog-refresh" bindtap="loadReservationList">{{ui.reservationRefresh}}</view>
+        </view>
       </view>
 
       <scroll-view class="reservation-list" scroll-y>
         <view class="reservation-loading" wx:if="{{reservationLoading}}">{{ui.loading}}</view>
         <view class="reservation-empty" wx:elif="{{reservationList.length === 0}}">{{ui.reservationEmpty}}</view>
         <block wx:else>
-          <view class="reservation-item" wx:for="{{reservationList}}" wx:key="_id" data-index="{{index}}" bindtap="openReservationDetail">
+          <view class="reservation-item {{item.isPriority ? 'priority' : ''}}" wx:for="{{reservationList}}" wx:key="_id" data-index="{{index}}" bindtap="openReservationDetail">
             <view class="reservation-item-head">
               <view class="reservation-phone">{{item.displayPhone}}</view>
             </view>
@@ -132,9 +140,68 @@
     </view>
   </view>
 
+  <view class="manual-reservation-mask" wx:if="{{showManualReservationModal}}" catchtap="closeManualReservation">
+    <view class="manual-reservation-dialog" catchtap="stopPropagation">
+      <view class="manual-reservation-head">
+        <view class="manual-reservation-title">{{ui.manualReservationTitle}}</view>
+        <view class="manual-priority {{manualPriority ? 'active' : ''}}" bindtap="toggleManualPriority">{{ui.reservationPriority}}</view>
+      </view>
+      <scroll-view class="manual-reservation-content" scroll-y enable-flex>
+        <view class="manual-form-section phone-section">
+          <view class="manual-section-label">{{ui.reservationPhone}}</view>
+          <input class="manual-phone-input" type="number" maxlength="11" placeholder="{{ui.reservationPhonePlaceholder}}" value="{{manualPhone}}" bindinput="onManualPhoneInput" />
+        </view>
+        <view class="manual-form-section">
+          <view class="manual-section-label">{{ui.reservationDate}}</view>
+          <scroll-view class="manual-date-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+            <view class="manual-date-row">
+              <view class="manual-date-chip {{manualDate === item.value ? 'active' : ''}}" wx:for="{{manualWeekDates}}" wx:key="value" data-value="{{item.value}}" bindtap="selectManualDate">
+                <view>{{item.week}}</view>
+                <view>{{item.day}}</view>
+              </view>
+            </view>
+          </scroll-view>
+        </view>
+        <view class="manual-form-section">
+          <view class="manual-section-label">{{ui.reservationTime}}</view>
+          <view class="manual-option-grid">
+            <view class="manual-option-chip {{!manualIsCustomTime && manualTime === item ? 'active' : ''}}" wx:for="{{manualTimeOptions}}" wx:key="*this" data-value="{{item}}" bindtap="selectManualTime">{{item}}</view>
+            <picker mode="time" value="{{manualCustomTime}}" bindchange="onManualCustomTimeChange">
+              <view class="manual-option-chip {{manualIsCustomTime ? 'active' : ''}}">{{manualIsCustomTime ? manualCustomTime : ui.reservationCustomTime}}</view>
+            </picker>
+          </view>
+        </view>
+        <view class="manual-form-section">
+          <view class="manual-section-label">{{ui.reservationPeople}}</view>
+          <view class="manual-option-grid">
+            <view class="manual-option-chip {{!manualIsCustomPeople && manualPeople === item ? 'active' : ''}}" wx:for="{{manualPeopleOptions}}" wx:key="*this" data-value="{{item}}" bindtap="selectManualPeople">{{item}}人</view>
+            <view class="manual-custom-people {{manualIsCustomPeople ? 'active' : ''}}">
+              <input type="number" maxlength="2" value="{{manualCustomPeople}}" placeholder="{{ui.reservationCustomPeople}}" bindfocus="focusManualCustomPeople" bindinput="onManualCustomPeopleInput" />
+            </view>
+          </view>
+        </view>
+        <view class="manual-form-section">
+          <view class="manual-section-label">{{ui.reservationRoom}}</view>
+          <view class="manual-option-grid room-grid">
+            <view class="manual-option-chip {{manualRoom === item ? 'active' : ''}}" wx:for="{{manualRoomOptions}}" wx:key="*this" data-value="{{item}}" bindtap="selectManualRoom">{{item}}</view>
+          </view>
+        </view>
+      </scroll-view>
+      <view class="manual-reservation-footer">
+        <view class="manual-footer-btn cancel" bindtap="closeManualReservation">{{ui.cancel}}</view>
+        <view class="manual-footer-btn confirm" bindtap="saveManualReservation">{{savingManualReservation ? ui.loading : ui.reservationSave}}</view>
+      </view>
+    </view>
+  </view>
+
   <view class="reservation-detail-mask" wx:if="{{showReservationDetailModal}}" catchtap="closeReservationDetailModal">
     <view class="reservation-detail-dialog" catchtap="stopPropagation">
-      <view class="reservation-detail-title">{{ui.reservationDetailTitle}}</view>
+      <view class="reservation-detail-head">
+        <view class="reservation-detail-title">{{ui.reservationDetailTitle}}</view>
+        <view class="reservation-detail-delete" bindtap="deleteReservation">
+          {{deletingReservation ? ui.loading : ui.deleteReservation}}
+        </view>
+      </view>
       <view class="reservation-detail-content">
         <view class="reservation-detail-row">
           <text>{{ui.reservationPhone}}</text>
@@ -162,4 +229,4 @@
     </view>
   </view>
 </view>
-<admin-info-center id="admin-info-center" enabled="{{isAuthorized}}" />
+<admin-info-center id="admin-info-center" enabled="{{isAuthorized}}" bindnotificationschange="onNotificationsChange" />

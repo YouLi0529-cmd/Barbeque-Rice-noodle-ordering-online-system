@@ -94,6 +94,7 @@
     </view>
 
     <view class="reservation-submit" bindtap="submitReservation">提交预约</view>
+    <view class="reservation-hint">座位仅保留十五分钟，请及时来享用美食哦</view>
   </view>
 
   <avatar-nickname-modal

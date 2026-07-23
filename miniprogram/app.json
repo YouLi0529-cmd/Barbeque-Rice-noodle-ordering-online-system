@@ -23,6 +23,8 @@
         "pages/orderdetail/orderdetail",
         "pages/myhome/myhome",
         "pages/about/about",
+        "pages/feedback/feedback",
+        "pages/account/account",
         "pages/reservation/reservation"
       ]
     },
@@ -38,6 +40,7 @@
         "pages/admin/outdoorDetail/outdoorDetail",
         "pages/admin/dish/dish",
         "pages/admin/notice/notice",
+        "pages/admin/feedback/feedback",
         "pages/admin/tableCode/tableCode",
         "pages/admin/printer/printer"
       ]

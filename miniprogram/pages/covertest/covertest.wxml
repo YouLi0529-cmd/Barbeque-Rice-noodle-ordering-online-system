@@ -5,7 +5,7 @@
 
   <view class="status-bar" style="height: {{statusBarHeight}}px;"></view>
 
-  <view class="cover-content">
+  <view class="cover-content" wx:if="{{privacyReady}}">
     <view class="actions action-grid">
       <view class="action-card" hover-class="btn-hover" bindtap="goOrder">
         <text>预点单</text>
@@ -20,7 +20,7 @@
     </view>
   </view>
 
-  <view class="floating-contact-btn" hover-class="btn-hover" bindtap="goContact">
+  <view class="floating-contact-btn" wx:if="{{privacyReady}}" hover-class="btn-hover" bindtap="goContact">
     <image
       class="contact-icon-image"
       src="/callme.png"
@@ -28,7 +28,7 @@
     />
   </view>
 
-  <view class="cover-tabbar">
+  <view class="cover-tabbar" wx:if="{{privacyReady}}">
     <view class="cover-tab active" hover-class="btn-hover" bindtap="goCover">
       <text>首页</text>
     </view>
@@ -192,6 +192,21 @@
         <text class="phone-label">电话</text>
         <text class="phone-value">待添加</text>
       </view>
+    </view>
+  </view>
+
+  <view class="privacy-consent-mask" wx:if="{{showPrivacyConsent}}" catchtouchmove="catchPrivacyConsentMove">
+    <view class="privacy-consent-dialog">
+      <view class="privacy-consent-title">隐私权政策提示</view>
+      <view class="privacy-consent-text">请您在进小程序前点击<text class="privacy-consent-link" bindtap="goPrivacyPolicy">《隐私权政策》</text>并仔细阅读。如果您同意<text class="privacy-consent-link" bindtap="goPrivacyPolicy">《隐私权政策》</text>的全部内容，请点击“同意并继续”开始使用我们的服务。</view>
+      <view class="privacy-consent-check-row" bindtap="togglePrivacyConsent">
+        <view class="privacy-consent-check {{privacyConsentChecked ? 'checked' : ''}}">
+          <view class="privacy-consent-check-mark" wx:if="{{privacyConsentChecked}}">✓</view>
+        </view>
+        <view class="privacy-consent-check-text">我已了解以下规则并同意所有政策</view>
+      </view>
+      <view class="privacy-consent-policy-link" bindtap="goPrivacyPolicy">《隐私权政策》</view>
+      <view class="privacy-consent-confirm" bindtap="confirmPrivacyConsent">同意并继续</view>
     </view>
   </view>
 </view>

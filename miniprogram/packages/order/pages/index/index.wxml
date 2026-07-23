@@ -199,7 +199,7 @@
       <text class="cart-title">购物车</text>
       <text class="cart-clear" bindtap="clearCart">清空</text>
     </view>
-    <scroll-view class="cart-content" scroll-y>
+    <scroll-view class="cart-content" scroll-y enable-flex>
       <view class="cart-goods-item" wx:for="{{cart}}" wx:for-item="item" wx:key="index">
         <view class="cart-goods-info">
           <image wx:if="{{item.info.hasImage}}" class="cart-goods-image" src="{{item.info.image}}" mode="aspectFill"></image>

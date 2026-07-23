@@ -1,0 +1,151 @@
+.account-page {
+  min-height: 100vh;
+  background: #f7f4ef;
+}
+
+.account-header {
+  position: relative;
+  background: #f5e7d5;
+  padding-left: 30rpx;
+  padding-right: 30rpx;
+  box-sizing: content-box;
+}
+
+.account-nav {
+  position: relative;
+}
+
+.account-nav-content {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.back-btn {
+  position: absolute;
+  left: 24rpx;
+  top: 0;
+  width: 64rpx;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.back-icon {
+  border-left-style: solid;
+  border-bottom-style: solid;
+  border-color: #5f3d20;
+  transform: rotate(45deg);
+  box-sizing: border-box;
+  margin-top: 4rpx;
+}
+
+.account-title {
+  color: #5f3d20;
+  font-weight: 700;
+  text-align: center;
+}
+
+.account-content {
+  padding: 38rpx 30rpx;
+}
+
+.account-list {
+  background: #ffffff;
+  border-radius: 16rpx;
+  box-shadow: 0 6rpx 20rpx rgba(82, 57, 35, 0.08);
+}
+
+.account-row {
+  min-height: 104rpx;
+  padding: 0 30rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1rpx solid #f1ece6;
+  box-sizing: border-box;
+}
+
+.account-row:last-child {
+  border-bottom: 0;
+}
+
+.account-label {
+  color: #8c7d6c;
+  font-size: 27rpx;
+}
+
+.account-value {
+  max-width: 420rpx;
+  color: #3f3021;
+  font-size: 29rpx;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-name-row {
+  min-height: 112rpx;
+}
+
+.account-name-editor {
+  width: 440rpx;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14rpx;
+}
+
+.account-name-input {
+  min-width: 0;
+  flex: 1;
+  color: #3f3021;
+  font-size: 29rpx;
+  text-align: right;
+}
+
+.wechat-name-btn {
+  flex: 0 0 auto;
+  padding: 10rpx 14rpx;
+  border: 1rpx solid #d7bd98;
+  border-radius: 8rpx;
+  color: #9a682b;
+  font-size: 22rpx;
+  line-height: 1;
+}
+
+.wechat-name-btn-hover {
+  background: #fbf3e6;
+}
+
+.birthday-row {
+  width: 100%;
+}
+
+.status-value {
+  color: #a86d24;
+}
+
+.account-save {
+  height: 88rpx;
+  margin-top: 28rpx;
+  border: 0;
+  border-radius: 44rpx;
+  background: #c99142;
+  color: #ffffff;
+  font-size: 30rpx;
+  line-height: 1.2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.account-save::after {
+  border: 0;
+}

@@ -98,6 +98,16 @@ App({
   
   // 将获取openid封装为Promise，方便页面等待openid加载完成
   getOpenidPromise: function() {
+    if (wx.getStorageSync('manualLoggedOut')) {
+      this.globalData.openid = ''
+      this.globalData.openidReady = true
+      this.globalData.openidPromise = null
+      this.globalData.userInfo = null
+      this.globalData.userInfoReady = true
+      this.globalData.userInfoPromise = null
+      return Promise.resolve('')
+    }
+
     // 如果已经获取过openid，直接返回
     if (this.globalData.openidReady && this.globalData.openid) {
       return Promise.resolve(this.globalData.openid);

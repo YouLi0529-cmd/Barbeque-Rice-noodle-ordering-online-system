@@ -1,0 +1,20 @@
+<view class="feedback-page">
+  <view class="feedback-header" style="padding-top: {{statusBarHeight}}px;">
+    <view class="feedback-nav" style="height: {{navBarHeight}}px;">
+      <view class="feedback-nav-content" style="top: {{navContentTop}}px; height: {{navContentHeight}}px;">
+        <view class="back-btn" bindtap="goBack">
+          <view class="back-icon" style="width: {{navIconSize}}px; height: {{navIconSize}}px; border-width: {{navIconStroke}}px;"></view>
+        </view>
+        <view class="feedback-title" style="font-size: {{navTitleFontSize}}px; line-height: {{navTitleFontSize}}px;">意见反馈</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="feedback-content">
+    <view class="feedback-card">
+      <textarea class="feedback-textarea" value="{{content}}" maxlength="200" placeholder="请告诉我们你的建议或遇到的问题" placeholder-class="feedback-placeholder" bindinput="onContentInput" />
+      <view class="feedback-count">{{content.length}}/200</view>
+    </view>
+    <button class="feedback-submit" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submitFeedback">提交反馈</button>
+  </view>
+</view>

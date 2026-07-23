@@ -16,13 +16,13 @@
       <view class="card-top">
         <view class="user-detail">
           <view class="user-name">
-              {{userInfo && userInfo.nickName ? userInfo.nickName : '会员'}}
+              {{isLoggedOut ? '未登录' : (userInfo && userInfo.nickName ? userInfo.nickName : '会员')}}
           </view>
           <view class="user-phone" wx:if="{{userInfo && userInfo.phoneNumber}}">
             {{userInfo.phoneNumber}}
           </view>
           <view class="user-phone login-prompt-text" wx:else bindtap="showAuthModal">
-            请先完善个人信息
+            {{isLoggedOut ? '点击登录' : '请先完善个人信息'}}
           </view>
         </view>
       </view>
@@ -53,8 +53,19 @@
 
   <view class="profile-menu">
     <view class="profile-menu-item" hover-class="menu-hover" bindtap="goAbout">
-      <view class="menu-icon">›</view>
       <view class="menu-title">关于</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="profile-menu-item" hover-class="menu-hover" bindtap="goPrivacy">
+      <view class="menu-title">隐私政策</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="profile-menu-item" hover-class="menu-hover" bindtap="goFeedback">
+      <view class="menu-title">意见反馈</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="profile-menu-item" hover-class="menu-hover" bindtap="goAccount">
+      <view class="menu-title">账号信息</view>
       <view class="menu-arrow">›</view>
     </view>
   </view>
