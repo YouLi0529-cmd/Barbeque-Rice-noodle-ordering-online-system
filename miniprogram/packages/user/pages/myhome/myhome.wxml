@@ -70,6 +70,8 @@
     </view>
   </view>
 
+  <view class="login-lock-layer" wx:if="{{loginLocked && !showAuthModal}}" catchtap="showAuthModal" catchtouchmove="catchActionLoadingMove"></view>
+
   <!-- 用户信息授权组件 -->
   <avatar-nickname-modal 
     showAvaModal="{{showAuthModal}}" 

@@ -55,6 +55,7 @@
     "navigationBarTextStyle": "white"
   },
   "sitemapLocation": "sitemap.json",
+  "resizable": true,
   "lazyCodeLoading": "requiredComponents",
   "style": "v2"
 }

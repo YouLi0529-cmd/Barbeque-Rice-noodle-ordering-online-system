@@ -8,7 +8,8 @@
   "backgroundColorBottom": "#f5e7d5",
   "usingComponents": {
     "van-empty": "/vant/empty/index",
-    "avatar-nickname-modal": "/components/avatarNicknameModal/avatarNicknameModal"
+    "avatar-nickname-modal": "/components/avatarNicknameModal/avatarNicknameModal",
+    "privacy-consent-modal": "/components/privacyConsentModal/privacyConsentModal"
   }
 }
 

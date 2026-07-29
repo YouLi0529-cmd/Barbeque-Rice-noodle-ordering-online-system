@@ -408,6 +408,7 @@ Page({
       return
     }
 
+    let submissionCompleted = false
     this.setData({ submitting: true })
 
     try {
@@ -497,8 +498,10 @@ Page({
         orderSubmitted: true,
         submittedOrderId: orderId,
         previousOrderCards: orderCards,
+        submitting: false,
         ...this.getOrderCardsData(orderCards)
       })
+      submissionCompleted = true
       this.saveActiveOrderSession(orderCards, orderId)
 
       wx.showToast({
@@ -512,7 +515,9 @@ Page({
         icon: 'none'
       })
     } finally {
-      this.setData({ submitting: false })
+      if (!submissionCompleted) {
+        this.setData({ submitting: false })
+      }
     }
   },
 

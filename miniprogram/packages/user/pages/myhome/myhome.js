@@ -18,7 +18,8 @@ Page({
     actionLoading: false,
     actionLoadingText: '',
     actionLoadingGif: '/images/orderloadinggif-transparent.gif',
-    isLoggedOut: false
+    isLoggedOut: false,
+    loginLocked: false
   },
 
   showActionLoading(text = '加载中') {
@@ -49,7 +50,8 @@ Page({
     if (isLoggedOut) {
       this.setData({
         userInfo: null,
-        showAuthModal: false
+        showAuthModal: false,
+        loginLocked: true
       })
       // "我的" is a member-only page. Logging out clears the local session,
       // then entering this page starts a new phone authorization flow.
@@ -58,14 +60,19 @@ Page({
     }
 
     this.loadUserInfo().then((user) => {
+      const loginLocked = !this.isProfileCompleted(user)
       if (wx.getStorageSync('profileAuthorizationRevoked')) {
+        this.setData({ loginLocked: true })
         return
       }
-      if (!this.isProfileCompleted(user) || this.isLegacyTestProfile(user)) {
+      if (loginLocked) {
         this.setData({
-          showAuthModal: true
+          showAuthModal: true,
+          loginLocked: true
         })
+        return
       }
+      this.setData({ loginLocked: false })
     })
   },
 
@@ -140,10 +147,6 @@ Page({
     )
   },
 
-  isLegacyTestProfile(userInfo) {
-    return !!(userInfo && userInfo.phoneNumber === '13800000000')
-  },
-
   // 显示授权弹窗
   async showAuthModal() {
     if (wx.getStorageSync('manualLoggedOut')) {
@@ -159,9 +162,21 @@ Page({
         wx.setStorageSync('openid', loginData.openid || '')
         wx.removeStorageSync('manualLoggedOut')
 
-        const user = await this.loadUserInfo()
-        this.setData({ isLoggedOut: false })
-        if (this.isProfileCompleted(user) && !this.isLegacyTestProfile(user)) {
+        // Prefer the user returned by auth.login. The legacy test account is
+        // restored in the same request, so this avoids a second request racing
+        // the freshly-created session.
+        const user = this.isProfileCompleted(loginData.user)
+          ? loginData.user
+          : await this.loadUserInfo()
+        if (user === loginData.user) {
+          this.setData({ userInfo: user })
+          app.globalData.userInfo = user
+        }
+        this.setData({
+          isLoggedOut: false,
+          loginLocked: !this.isProfileCompleted(user)
+        })
+        if (this.isProfileCompleted(user)) {
           wx.showToast({ title: '登录成功', icon: 'success' })
           return
         }
@@ -179,7 +194,8 @@ Page({
 
     wx.removeStorageSync('profileAuthorizationRevoked')
     this.setData({
-      showAuthModal: true
+      showAuthModal: true,
+      loginLocked: true
     })
   },
 
@@ -190,7 +206,8 @@ Page({
       app.globalData.userInfo = e.detail.user
       this.setData({
         userInfo: e.detail.user,
-        showAuthModal: false
+        showAuthModal: false,
+        loginLocked: false
       })
     }
     // 刷新用户信息

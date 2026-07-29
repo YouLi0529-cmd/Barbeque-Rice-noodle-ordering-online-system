@@ -22,7 +22,7 @@
       <view class="order-card-title">{{card.title}}</view>
     </view>
     <view class="goods-list">
-      <view class="goods-item" wx:for="{{card.goods}}" wx:for-item="goods" wx:key="dishId">
+      <view class="goods-item" wx:for="{{card.goods}}" wx:for-item="goods" wx:for-index="goodsIndex" wx:key="goodsIndex">
         <image class="goods-image" src="{{goods.dishImage}}" mode="aspectFill"></image>
         <view class="goods-info">
           <view class="goods-name">{{goods.dishName}}</view>

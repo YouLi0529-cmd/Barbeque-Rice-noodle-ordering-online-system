@@ -167,7 +167,7 @@
   </view>
 
   <!-- 悬浮购物车 -->
-  <view class="float-cart-wrapper">
+  <view class="float-cart-wrapper" wx:if="{{!showTagModal}}">
     <view class="float-cart-card">
       <view class="cart-left" bindtap="toggleCart">
         <view class="cart-icon-wrapper">
@@ -332,4 +332,9 @@
     loadingGif="{{actionLoadingGif}}"
     bind:saved="onUserInfoSaved">
   </avatar-nickname-modal>
+
+  <privacy-consent-modal
+    show="{{showPrivacyConsent}}"
+    bind:confirmed="onPrivacyConsentConfirmed">
+  </privacy-consent-modal>
 </view>

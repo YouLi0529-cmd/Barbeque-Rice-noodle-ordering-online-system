@@ -1,0 +1,16 @@
+<view wx:if="{{show}}" class="privacy-consent-mask" catchtouchmove="catchMove">
+  <view class="privacy-consent-dialog" catchtap="stopPropagation">
+    <view class="privacy-consent-title">隐私权政策提示</view>
+    <view class="privacy-consent-text">
+      请您在进小程序前点击<text class="privacy-consent-link" bindtap="openPolicy">《隐私权政策》</text>并仔细阅读。如果您同意<text class="privacy-consent-link" bindtap="openPolicy">《隐私权政策》</text>的全部内容，请点击“同意并继续”开始使用我们的服务。
+    </view>
+    <view class="privacy-consent-check-row" bindtap="toggleChecked">
+      <view class="privacy-consent-check {{checked ? 'checked' : ''}}">
+        <view class="privacy-consent-check-mark" wx:if="{{checked}}">✓</view>
+      </view>
+      <view class="privacy-consent-check-text">我已了解以下规则并同意所有政策</view>
+    </view>
+    <view class="privacy-consent-policy-link" bindtap="openPolicy">《隐私权政策》</view>
+    <view class="privacy-consent-confirm" bindtap="confirm">同意并继续</view>
+  </view>
+</view>

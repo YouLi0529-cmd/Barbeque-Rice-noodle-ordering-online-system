@@ -84,6 +84,15 @@ Page({
       showPrivacyConsent: false,
       privacyReady: true
     })
+
+    // Normal entry remains on the cover. Start the app session only after
+    // consent.
+    const app = getApp()
+    if (app.getOpenidPromise) {
+      app.getOpenidPromise().catch(err => {
+        console.error('privacy-approved login failed', err)
+      })
+    }
   },
 
   goPrivacyPolicy() {

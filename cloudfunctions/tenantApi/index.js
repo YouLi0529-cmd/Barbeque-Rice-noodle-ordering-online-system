@@ -15,6 +15,7 @@ const _ = db.command
 const DEFAULT_TENANT_ID = 'zhangnan'
 const ACTIVE_STATUS = 'active'
 const SESSION_EXPIRE_DAYS = 7
+const LEGACY_TEST_PHONE_NUMBER = '13800000000'
 const DRAFT_EXPIRE_MS = 24 * 60 * 60 * 1000
 const RESERVATION_COOLDOWN_MS = 4 * 60 * 60 * 1000
 const SHARED_CART_ACCESS_TOKEN_TTL_MS = 4 * 60 * 60 * 1000
@@ -248,7 +249,8 @@ async function createWechatMiniProgramCode(scene, page) {
     {
       scene,
       page,
-      env_version: 'release',
+      env_version: 'trial',
+      // Trial builds can include subpackage pages that are not indexed in the release version yet.
       check_path: false,
       width: 430,
       auto_color: false,
@@ -509,21 +511,24 @@ async function createUserSession(tenantId, openid) {
 
   const token = createToken()
   const expiresAt = new Date(Date.now() + SESSION_EXPIRE_DAYS * 24 * 60 * 60 * 1000)
+  const sessionData = {
+    tenantId,
+    openid,
+    tokenHash: hashToken(token),
+    expiresAt,
+    createTime: db.serverDate(),
+    updateTime: db.serverDate()
+  }
 
-  await db.collection('tenantSession').add({
-    data: {
-      tenantId,
-      openid,
-      tokenHash: hashToken(token),
-      expiresAt,
-      createTime: db.serverDate(),
-      updateTime: db.serverDate()
-    }
-  })
+  const addRes = await db.collection('tenantSession').add({ data: sessionData })
 
   return {
     token,
-    expiresAt
+    expiresAt,
+    data: {
+      ...sessionData,
+      _id: addRes._id
+    }
   }
 }
 
@@ -553,6 +558,21 @@ async function getResumableUserSession(tenantId, token, openid) {
 
   cacheAuthSession(tenantId, resumeToken, session)
   return session
+}
+
+async function getLegacyTestUserForOpenid(openid) {
+  const userRes = await db.collection('user')
+    .where({
+      _openid: openid
+    })
+    .limit(5)
+    .get()
+  const candidates = userRes.data || []
+  return candidates.find(user => (
+    String(user.phoneNumber || '').trim() === LEGACY_TEST_PHONE_NUMBER &&
+    user.status !== 0 &&
+    user.status !== '0'
+  )) || null
 }
 
 async function loginByWechatCode(payload) {
@@ -589,6 +609,37 @@ async function loginByWechatCode(payload) {
   }
 
   const session = await createUserSession(tenantId, openid)
+  // Temporary compatibility for the original local test account. It cannot
+  // restore any real member account and still requires the same WeChat OpenID.
+  const legacyTestUser = await getLegacyTestUserForOpenid(openid)
+  if (legacyTestUser) {
+    const memberData = {
+      userId: legacyTestUser._id,
+      userCode: legacyTestUser.userCode || '',
+      phoneNumber: LEGACY_TEST_PHONE_NUMBER,
+      verifiedPhoneNumber: LEGACY_TEST_PHONE_NUMBER,
+      profileAuthorizedAt: db.serverDate(),
+      updateTime: db.serverDate()
+    }
+    await db.collection('tenantSession').doc(session.data._id).update({ data: memberData })
+    // The original local test member predates profileCompleted. Treat this one
+    // fixed virtual account as complete after confirming the same WeChat OpenID.
+    if (legacyTestUser.profileCompleted !== true) {
+      await db.collection('user').doc(legacyTestUser._id).update({
+        data: {
+          profileCompleted: true,
+          updateTime: db.serverDate()
+        }
+      })
+      legacyTestUser.profileCompleted = true
+    }
+    cacheAuthSession(tenantId, session.token, {
+      ...session.data,
+      ...memberData,
+      profileAuthorizedAt: new Date(),
+      updateTime: new Date()
+    })
+  }
 
   return {
     success: true,
@@ -598,7 +649,7 @@ async function loginByWechatCode(payload) {
       openid,
       // OpenID only identifies this WeChat session. Membership is bound later
       // by a phone number verified through phone.getNumber.
-      user: null
+      user: legacyTestUser
     }
   }
 }
@@ -5454,6 +5505,9 @@ async function adminUploadDishFile(payload) {
 }
 
 const TABLE_CODE_PAGE = 'packages/order/pages/index/index'
+const MERCHANT_CODE_PAGE = 'packages/admin/pages/admin/admin'
+const MERCHANT_CODE_KEY = 'merchant-entry'
+const MERCHANT_CODE_SCENE = 'merchant'
 
 function getTableCodeScene(ref) {
   if (!ref) return ''
@@ -5592,6 +5646,81 @@ async function adminGenerateTableCode(payload) {
     qrCodeUrl: fileID,
     status: existing ? existing.status !== false : true,
     sort: getTableCodeSort(ref),
+    generatedAt: db.serverDate(),
+    updateTime: db.serverDate()
+  }
+
+  let id = existing && existing._id
+  if (id) {
+    await db.collection('tableCode').doc(id).update({ data: codeData })
+  } else {
+    const addRes = await db.collection('tableCode').add({
+      data: {
+        ...codeData,
+        createTime: db.serverDate()
+      }
+    })
+    id = addRes._id
+  }
+
+  const records = await resolveTableCodeUrls([{
+    ...codeData,
+    _id: id
+  }])
+  return {
+    success: true,
+    data: records[0] || null
+  }
+}
+
+async function adminGetMerchantCode() {
+  const res = await db.collection('tableCode')
+    .where({ tableKey: MERCHANT_CODE_KEY })
+    .limit(1)
+    .get()
+  const record = res.data && res.data[0]
+
+  if (!record) {
+    return {
+      success: true,
+      data: null
+    }
+  }
+
+  const records = await resolveTableCodeUrls([record])
+  return {
+    success: true,
+    data: records[0] || null
+  }
+}
+
+async function adminGenerateMerchantCode(payload) {
+  const imageBuffer = await createWechatMiniProgramCode(MERCHANT_CODE_SCENE, MERCHANT_CODE_PAGE)
+  const tenantId = sanitizeCloudPathName(getTenantId(payload), DEFAULT_TENANT_ID)
+  const cloudPath = `tenant/${tenantId}/merchant-code/merchant-entry.png`
+  const uploadRes = await cloud.uploadFile({
+    cloudPath,
+    fileContent: imageBuffer
+  })
+  const fileID = String(uploadRes.fileID || '').trim()
+  if (!fileID) {
+    throw new Error('failed to upload merchant code image')
+  }
+
+  const existingRes = await db.collection('tableCode')
+    .where({ tableKey: MERCHANT_CODE_KEY })
+    .limit(1)
+    .get()
+  const existing = existingRes.data && existingRes.data[0]
+  const codeData = {
+    tableKey: MERCHANT_CODE_KEY,
+    codeType: 'merchant',
+    name: '商户端入口码',
+    scene: MERCHANT_CODE_SCENE,
+    page: MERCHANT_CODE_PAGE,
+    qrCodeFileID: fileID,
+    qrCodeUrl: fileID,
+    status: true,
     generatedAt: db.serverDate(),
     updateTime: db.serverDate()
   }
@@ -6631,6 +6760,7 @@ async function handleAction(action, payload) {
     action.indexOf('admin.dish.') === 0 ||
     action.indexOf('admin.table.') === 0 ||
     action.indexOf('admin.tableCode.') === 0 ||
+    action.indexOf('admin.merchantCode.') === 0 ||
     action.indexOf('admin.order.') === 0 ||
     action.indexOf('admin.notification.') === 0 ||
     action.indexOf('admin.collection.') === 0 ||
@@ -6666,6 +6796,8 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.urgeKitchenItems') return completeAdminTableMutation(adminUrgeKitchenItems(payload))
   if (action === 'admin.tableCode.list') return adminListTableCodes(payload)
   if (action === 'admin.tableCode.generate') return adminGenerateTableCode(payload)
+  if (action === 'admin.merchantCode.get') return adminGetMerchantCode(payload)
+  if (action === 'admin.merchantCode.generate') return adminGenerateMerchantCode(payload)
   if (action === 'admin.order.sendKitchenItems') return completeAdminTableMutation(adminSendKitchenItems(payload))
   if (action === 'admin.order.retryFailedKitchenItems') return completeAdminTableMutation(adminRetryFailedKitchenItems(payload))
   if (action === 'admin.order.urgeKitchenItems') return completeAdminTableMutation(adminUrgeKitchenItems(payload))

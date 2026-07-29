@@ -131,7 +131,7 @@
 }
 
 .notice-item {
-  margin-bottom: 9rpx;
+  margin-bottom: 16rpx;
   padding: 10rpx;
   border-radius: 10rpx;
   background: #FFFFFF;

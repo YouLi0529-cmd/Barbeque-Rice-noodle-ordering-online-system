@@ -2,6 +2,7 @@
 const apiClient = require('../../../../utils/apiClient')
 const { getCustomNavOptions } = require('../../../../utils/customNav')
 const { openPrivacyPolicyDocument } = require('../../../../utils/privacyPolicyDocument')
+const { openPrivacyProtectionGuideDocument } = require('../../../../utils/privacyProtectionGuideDocument')
 
 Page({
   data: {
@@ -22,6 +23,10 @@ Page({
 
   goPrivacy() {
     openPrivacyPolicyDocument()
+  },
+
+  goPrivacyProtectionGuide() {
+    openPrivacyProtectionGuideDocument()
   },
 
   openRevokeModal() {

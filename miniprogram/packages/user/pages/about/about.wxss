@@ -77,6 +77,10 @@
   justify-content: space-between;
 }
 
+.policy-row + .policy-row {
+  border-top: 1rpx solid #f0e6da;
+}
+
 .policy-name {
   color: #3f3021;
   font-size: 30rpx;

@@ -41,6 +41,7 @@ Page({
     modalTotalPrice: 0, // 弹窗中商品小计
     specAddOriginPoint: null, // 打开规格弹窗时的菜单加号位置
     showAuthModal: false, // 显示授权弹窗
+    showPrivacyConsent: false,
     statusBarHeight: 0,
     navBarHeight: 44,
     navContentTop: 0,
@@ -99,6 +100,15 @@ Page({
 
   onLoad(options) {
     this.refreshCustomNav()
+    if (options.__privacyConsentPending || !wx.getStorageSync('privacyPolicyConsentV1')) {
+      this.privacyPendingOptions = options
+      this.setData({ showPrivacyConsent: true })
+      return
+    }
+    this.initializeCampingOrderPage(options)
+  },
+
+  initializeCampingOrderPage(options = {}) {
     
     // 检查是否从扫码进入，获取桌码号
     // 小程序码扫码进入时，scene参数会在options.scene中
@@ -122,6 +132,26 @@ Page({
     this.loadNotices()
   },
 
+  async onPrivacyConsentConfirmed() {
+    const options = { ...(this.privacyPendingOptions || {}) }
+    delete options.__privacyConsentPending
+    this.privacyPendingOptions = null
+    this.setData({ showPrivacyConsent: false })
+
+    try {
+      await app.getOpenidPromise()
+    } catch (err) {
+      console.error('privacy-approved camping login failed', err)
+      wx.showToast({
+        title: '登录初始化失败，请重试',
+        icon: 'none'
+      })
+      return
+    }
+
+    this.initializeCampingOrderPage(options)
+  },
+
   onReady() {
     this.refreshCustomNav()
     setTimeout(() => this.refreshCustomNav(), 120)
@@ -129,6 +159,9 @@ Page({
 
   onShow() {
     this.refreshCustomNav()
+    if (this.data.showPrivacyConsent || !wx.getStorageSync('privacyPolicyConsentV1')) {
+      return
+    }
     this.loadUserInfo()
   },
 
@@ -335,7 +368,7 @@ Page({
         const noticeList = result.data || []
         this.setData({
           noticeList,
-          noticeText: noticeList.map(item => item.content).join('    ')
+          noticeText: noticeList.map(item => item.content).join('       ')
         })
         return
       }
@@ -355,7 +388,7 @@ Page({
             : (!item.target || item.target === 'camping' || item.target === 'all')
         })
         .slice(0, 10)
-      const noticeText = noticeList.map(item => item.content).join('    ')
+      const noticeText = noticeList.map(item => item.content).join('       ')
       
       this.setData({
         noticeList,
@@ -845,6 +878,7 @@ Page({
     
     // 总是显示弹窗，让用户选择数量
     this.setData({
+      showCart: false,
       showTagModal: true,
       currentDish: {
         ...goods,

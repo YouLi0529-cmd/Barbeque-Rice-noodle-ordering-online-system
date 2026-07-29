@@ -1,6 +1,13 @@
 //app.js
 const apiClient = require('./utils/apiClient')
 
+const PRIVACY_CONSENT_KEY = 'privacyPolicyConsentV1'
+const COVER_ROUTE = 'pages/covertest/covertest'
+const PRIVACY_SCAN_ROUTES = [
+  'packages/order/pages/index/index',
+  'packages/camping/pages/campingorderfood/campingorderfood'
+]
+
 App({
   onLaunch: async function () {
     if (apiClient.isEnabled()) {
@@ -13,7 +20,6 @@ App({
         userInfoPromise: null
       }
 
-      this.getOpenidPromise()
       this.overridePage()
       this.checkForUpdate()
       return
@@ -74,6 +80,32 @@ App({
       
       // 重写onLoad方法
       pageConfig.onLoad = async function(options) {
+        const route = String(this.route || '').replace(/^\//, '')
+        const privacyAccepted = !!wx.getStorageSync(PRIVACY_CONSENT_KEY)
+
+        // QR codes enter an ordering subpackage directly. Let that page render
+        // its own privacy dialog before it starts a WeChat login session.
+        if (!privacyAccepted) {
+          if (that.shouldRequirePrivacyConsent(route)) {
+            if (originalOnLoad) {
+              originalOnLoad.call(this, {
+                ...(options || {}),
+                __privacyConsentPending: true
+              })
+            }
+            return
+          }
+
+          // The cover page owns the consent dialog. Avoid creating a WeChat
+          // login session before the visitor agrees to the policy.
+          if (route === COVER_ROUTE) {
+            if (originalOnLoad) {
+              originalOnLoad.call(this, options)
+            }
+            return
+          }
+        }
+
         try {
           // 等待openid获取完成
           await that.checkOpenid();
@@ -94,6 +126,11 @@ App({
       // 调用原始的Page构造函数
       return originalPage(pageConfig);
     };
+  },
+
+  shouldRequirePrivacyConsent: function(route) {
+    const normalizedRoute = String(route || '').replace(/^\//, '')
+    return PRIVACY_SCAN_ROUTES.includes(normalizedRoute)
   },
   
   // 将获取openid封装为Promise，方便页面等待openid加载完成

@@ -1,0 +1,93 @@
+.privacy-consent-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 42rpx;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.privacy-consent-dialog {
+  width: 100%;
+  padding: 42rpx 34rpx 34rpx;
+  border-radius: 16rpx;
+  box-sizing: border-box;
+  background: #fffaf3;
+  box-shadow: 0 24rpx 70rpx rgba(0, 0, 0, 0.24);
+}
+
+.privacy-consent-title {
+  color: #3f3021;
+  font-size: 34rpx;
+  font-weight: 700;
+  text-align: center;
+}
+
+.privacy-consent-text {
+  margin-top: 26rpx;
+  color: #6d5c4c;
+  font-size: 27rpx;
+  line-height: 1.75;
+}
+
+.privacy-consent-link,
+.privacy-consent-policy-link {
+  color: #3c7fcc;
+}
+
+.privacy-consent-check-row {
+  display: flex;
+  align-items: center;
+  margin-top: 30rpx;
+}
+
+.privacy-consent-check {
+  width: 34rpx;
+  height: 34rpx;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 2rpx solid #ad9d8b;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.privacy-consent-check.checked {
+  border-color: #c99142;
+  background: #c99142;
+}
+
+.privacy-consent-check-mark {
+  color: #ffffff;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.privacy-consent-check-text {
+  margin-left: 14rpx;
+  color: #5f4e3f;
+  font-size: 25rpx;
+}
+
+.privacy-consent-policy-link {
+  margin-top: 22rpx;
+  font-size: 26rpx;
+  text-align: center;
+}
+
+.privacy-consent-confirm {
+  height: 86rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 30rpx;
+  border-radius: 43rpx;
+  color: #ffffff;
+  font-size: 29rpx;
+  background: #e8bd63;
+}

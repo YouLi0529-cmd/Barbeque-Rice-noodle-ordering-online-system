@@ -298,6 +298,13 @@
   border-top: 1rpx solid #f1ece6;
 }
 
+.login-lock-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 102;
+  background: transparent;
+}
+
 .menu-title {
   flex: 1;
   color: #333333;

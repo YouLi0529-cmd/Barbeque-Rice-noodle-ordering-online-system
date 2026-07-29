@@ -14,6 +14,10 @@ const UI = {
   generated: '\u5df2\u751f\u6210',
   loadFailed: '\u684c\u7801\u52a0\u8f7d\u5931\u8d25',
   generateFailed: '\u751f\u6210\u5931\u8d25',
+  merchantTitle: '\u5546\u6237\u7aef\u5165\u53e3\u7801',
+  merchantSubtitle: '\u626b\u7801\u6253\u5f00\u540e\u53f0\u767b\u5f55\u9875\uff0c\u4ecd\u9700\u5bc6\u7801\u9a8c\u8bc1',
+  merchantNotGenerated: '\u672a\u751f\u6210\u5546\u6237\u7aef\u5165\u53e3\u7801',
+  merchantGenerated: '\u5546\u6237\u7aef\u5165\u53e3\u7801\u5df2\u751f\u6210',
   saveFailed: '\u4fdd\u5b58\u5931\u8d25',
   saved: '\u5df2\u4fdd\u5b58\u5230\u76f8\u518c',
   allReady: '\u684c\u7801\u5df2\u5168\u90e8\u751f\u6210',
@@ -67,16 +71,28 @@ Page({
     sections: buildSections(),
     loading: false,
     generatingKey: '',
+    merchantCode: null,
+    generatingMerchantCode: false,
     batchGenerating: false,
     batchProgress: ''
   },
 
   onLoad() {
+    this.requestLandscape()
     this.loadList()
   },
 
   onShow() {
+    this.requestLandscape()
     this.loadList()
+  },
+
+  requestLandscape() {
+    if (typeof wx.setDeviceOrientation !== 'function') return
+    wx.setDeviceOrientation({
+      value: 'landscape',
+      fail: err => console.warn('set table code landscape failed', err)
+    })
   },
 
   async loadList() {
@@ -84,9 +100,13 @@ Page({
     this.setData({ loading: true })
 
     try {
-      const res = await apiClient.call('admin.tableCode.list')
+      const [res, merchantRes] = await Promise.all([
+        apiClient.call('admin.tableCode.list'),
+        apiClient.call('admin.merchantCode.get')
+      ])
       this.setData({
         sections: buildSections(res.data || []),
+        merchantCode: merchantRes.data || null,
         loading: false
       })
     } catch (err) {
@@ -121,6 +141,21 @@ Page({
     })
     this.applyGeneratedCode(res.data || {})
     return res.data || {}
+  },
+
+  async generateMerchantCode() {
+    if (this.data.generatingMerchantCode || this.data.batchGenerating || this.data.generatingKey) return
+    this.setData({ generatingMerchantCode: true })
+    try {
+      const res = await apiClient.call('admin.merchantCode.generate')
+      this.setData({ merchantCode: res.data || null })
+      wx.showToast({ title: UI.merchantGenerated, icon: 'success' })
+    } catch (err) {
+      console.error('generate merchant code failed', err)
+      wx.showToast({ title: err.message || UI.generateFailed, icon: 'none' })
+    } finally {
+      this.setData({ generatingMerchantCode: false })
+    }
   },
 
   async generateCode(e) {

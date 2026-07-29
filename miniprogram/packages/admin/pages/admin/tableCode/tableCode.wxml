@@ -14,6 +14,22 @@
 
   <view class="progress-tip" wx:if="{{batchGenerating}}">{{ui.generating}} {{batchProgress}}</view>
 
+  <view class="merchant-code-card">
+    <view class="merchant-code-copy">
+      <view class="merchant-code-title">{{ui.merchantTitle}}</view>
+      <view class="merchant-code-subtitle">{{ui.merchantSubtitle}}</view>
+    </view>
+    <image class="merchant-code-image" wx:if="{{merchantCode && merchantCode.qrCodeUrl}}" src="{{merchantCode.qrCodeUrl}}" mode="aspectFit" />
+    <view class="merchant-code-placeholder" wx:else>{{ui.merchantNotGenerated}}</view>
+    <view class="merchant-code-actions">
+      <view class="table-action primary {{generatingMerchantCode ? 'disabled' : ''}}" bindtap="generateMerchantCode">
+        {{generatingMerchantCode ? ui.generating : (merchantCode && merchantCode.qrCodeUrl ? ui.regenerate : ui.generate)}}
+      </view>
+      <view class="table-action" wx:if="{{merchantCode && merchantCode.qrCodeUrl}}" bindtap="previewCode" data-url="{{merchantCode.qrCodeUrl}}">{{ui.preview}}</view>
+      <view class="table-action" wx:if="{{merchantCode && merchantCode.qrCodeUrl}}" bindtap="saveCode" data-url="{{merchantCode.qrCodeUrl}}">{{ui.save}}</view>
+    </view>
+  </view>
+
   <scroll-view class="table-code-scroll" scroll-y>
     <view class="table-code-section" wx:for="{{sections}}" wx:for-item="section" wx:key="areaKey">
       <view class="section-title">{{section.name}}</view>
