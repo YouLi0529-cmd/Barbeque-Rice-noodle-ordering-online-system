@@ -36,14 +36,6 @@
         <view class="metric-card"><text class="metric-num">{{dashboard.metrics.unassigned}}</text><text class="metric-label">未配置菜品</text></view>
       </view>
 
-      <view class="section-title">功能管理</view>
-      <view class="feature-grid">
-        <view wx:for="{{features}}" wx:key="key" class="feature-card" bindtap="goFeature" data-key="{{item.key}}">
-          <view class="feature-title">{{item.title}}</view>
-          <view class="feature-desc">{{item.desc}}</view>
-        </view>
-      </view>
-
       <view class="section-title">实体打印机状态</view>
       <view wx:for="{{dashboard.printers}}" wx:key="_id" class="compact-row">
         <view><view class="row-title">{{item.name}}</view><view class="row-sub">{{item.connectionType === 'usb' ? 'USB' : item.ip + ':' + item.port}} · {{item.paperWidth}}mm</view></view>
@@ -100,7 +92,7 @@
       <view class="filter-row"><input class="search-input" value="{{dishKeyword}}" placeholder="搜索菜名或助记码" bindinput="onDishKeyword" confirm-type="search" bindconfirm="searchDishes" /><view class="search-btn" bindtap="searchDishes">搜索</view></view>
       <view class="filter-row"><picker range="{{categoryOptions}}" range-key="name" bindchange="onDishCategory"><view class="filter-picker">{{dishCategoryId ? '已选分类' : '所有分类'}} ›</view></picker><view class="filter-toggle {{dishUnassignedOnly ? 'on' : ''}}" bindtap="toggleUnassigned">只看未配置</view><view class="primary-small" bindtap="openRouteForm">批量配置({{selectedDishIds.length}})</view></view>
       <view wx:for="{{dishes}}" wx:key="dishId" class="data-card dish-card {{item.selected ? 'selected' : ''}}" bindtap="toggleDishSelect" data-id="{{item.dishId}}">
-        <view class="card-top"><view><view class="card-title">{{item.dishName}}</view><view class="card-sub">{{item.categoryName || '未分类'}} · {{item.mnemonic || '无编码'}}</view></view><view class="status-pill {{item.configStatus === 'configured' ? 'online' : 'unassigned'}}">{{item.configStatus === 'configured' ? item.stationName : '未配置'}}</view></view>
+        <view class="card-top"><view><view class="card-title">{{item.dishName}}</view><view class="card-sub">{{item.categoryName || '未分类'}} · {{item.mnemonic || '无编码'}}</view></view><view class="status-pill {{(item.configStatus === 'configured' || item.configStatus === 'rule-default') ? 'online' : 'unassigned'}}">{{(item.configStatus === 'configured' || item.configStatus === 'rule-default') ? item.stationName : '未配置'}}</view></view>
         <view class="dish-bottom"><text>{{item.printEnabled ? '已开启后厨打印' : '不生成后厨任务'}}</text><view class="text-link" catchtap="openRouteForm" data-id="{{item.dishId}}">配置</view></view>
       </view>
       <view wx:if="{{!dishes.length}}" class="empty-state">没有符合筛选条件的菜品</view>

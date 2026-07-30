@@ -146,7 +146,6 @@
 .top-tip,
 .card-sub,
 .row-sub,
-.feature-desc,
 .agent-sub,
 .modal-note,
 .log-time {
@@ -201,8 +200,7 @@
   font-size: 22rpx;
 }
 
-.metric-grid,
-.feature-grid {
+.metric-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16rpx;
@@ -210,7 +208,6 @@
 }
 
 .metric-card,
-.feature-card,
 .data-card,
 .compact-row,
 .alert-box,
@@ -242,14 +239,6 @@
   font-size: 22rpx;
 }
 
-.feature-card {
-  min-height: 116rpx;
-  padding: 22rpx;
-  border-radius: 8rpx;
-  box-sizing: border-box;
-}
-
-.feature-title,
 .card-title,
 .row-title {
   color: #2f1d15;
@@ -257,8 +246,6 @@
   font-weight: 900;
   line-height: 1.25;
 }
-
-.feature-desc { margin-top: 10rpx; }
 
 .compact-row,
 .data-card,
@@ -573,9 +560,7 @@
 
 @media (orientation: landscape) {
   .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .feature-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .metric-card { min-height: 92rpx; }
-  .feature-card { min-height: 92rpx; }
 }
 
 @media (max-width: 540px) {
@@ -584,10 +569,8 @@
   .tab-panel { padding-left: 18rpx; padding-right: 18rpx; }
   .form-grid,
   .capability-list { grid-template-columns: 1fr; }
-  .metric-grid,
-  .feature-grid { gap: 12rpx; }
-  .metric-card,
-  .feature-card { padding: 17rpx; }
+  .metric-grid { gap: 12rpx; }
+  .metric-card { padding: 17rpx; }
   .filter-row { flex-wrap: wrap; }
   .search-input { min-width: 300rpx; }
   .three-column-editor { grid-template-columns: 180rpx 300rpx 250rpx; }

@@ -36,8 +36,8 @@ const PRINTER_IDS = {
 }
 const PRINTER_NAMES = {
   qian1: '前台打印机',
-  sheng2: '生菜打印机',
-  shu3: '熟食打印机',
+  sheng2: '后厨打印机',
+  shu3: '热菜打印机',
   tian4: '甜品打印机'
 }
 
@@ -6527,6 +6527,40 @@ async function adminCollectionDelete(payload) {
   }
 }
 
+async function adminCollectionBatchDelete(payload) {
+  const config = getAdminCollectionConfig(payload.collection)
+  if (!['order', 'feedback'].includes(config.key)) {
+    return {
+      success: false,
+      code: 'ADMIN_BATCH_DELETE_NOT_ALLOWED',
+      message: 'batch delete not allowed for this collection'
+    }
+  }
+
+  const ids = Array.from(new Set((Array.isArray(payload.ids) ? payload.ids : [])
+    .map(item => String(item || '').trim())
+    .filter(Boolean)))
+    .slice(0, 100)
+
+  if (!ids.length) {
+    return {
+      success: false,
+      code: 'ADMIN_BATCH_DELETE_IDS_REQUIRED',
+      message: 'document ids required'
+    }
+  }
+
+  const deleteRes = await db.collection(config.key)
+    .where({ _id: _.in(ids) })
+    .remove()
+  return {
+    success: true,
+    data: {
+      removed: Number(deleteRes && deleteRes.stats && deleteRes.stats.removed || 0)
+    }
+  }
+}
+
 function buildAdminAuthToken(admin) {
   const secret = process.env.ADMIN_TOKEN_SECRET || process.env.WECHAT_SECRET || 'tenant-admin-token'
   return hashToken(`${admin && admin._id || ''}:${admin && admin.password || ''}:${secret}`)
@@ -6810,6 +6844,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.collection.save') return completeReservationMutation(adminCollectionSave(payload), payload)
   if (action === 'admin.collection.update') return completeReservationMutation(adminCollectionUpdate(payload), payload)
   if (action === 'admin.collection.delete') return completeReservationMutation(adminCollectionDelete(payload), payload)
+  if (action === 'admin.collection.batchDelete') return adminCollectionBatchDelete(payload)
   if (action.indexOf('admin.print.') === 0) {
     const printResult = await printService.handleAdminAction(action, payload)
     if (printResult) return printResult

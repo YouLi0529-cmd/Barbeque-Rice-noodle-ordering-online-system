@@ -1326,7 +1326,7 @@ page {
 .option-row {
   margin-top: 6rpx;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5rpx;
 }
 
@@ -1681,4 +1681,64 @@ page {
 .tool-btn.refresh-btn,
 .tool-btn.clear-btn {
   color: rgba(58, 36, 24, 0.68);
+}
+
+.tool-btn.batch-manage-btn {
+  color: #9a642a;
+  background: #fff1dc;
+}
+
+.tool-btn.batch-cancel-btn,
+.tool-btn.batch-delete-btn {
+  grid-column: span 2;
+}
+
+.tool-btn.batch-cancel-btn {
+  color: rgba(58, 36, 24, 0.7);
+  background: #ffffff;
+}
+
+.tool-btn.batch-delete-btn {
+  color: #9a3c25;
+  background: #fbe5dc;
+  border-color: rgba(181, 91, 24, 0.24);
+}
+
+.order-card.batch-selected {
+  border-color: rgba(177, 91, 24, 0.68);
+  background: #fff1dc;
+  box-shadow: 0 6rpx 16rpx rgba(177, 91, 24, 0.16);
+}
+
+.order-card-head-right {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+}
+
+.order-select-mark {
+  width: 15rpx;
+  height: 15rpx;
+  flex: none;
+  border: 1rpx solid rgba(58, 36, 24, 0.28);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.order-select-mark.selected {
+  position: relative;
+  border-color: #b15b18;
+  background: #b15b18;
+}
+
+.order-select-mark.selected::after {
+  content: '';
+  position: absolute;
+  left: 4rpx;
+  top: 2rpx;
+  width: 4rpx;
+  height: 7rpx;
+  border-right: 1rpx solid #ffffff;
+  border-bottom: 1rpx solid #ffffff;
+  transform: rotate(42deg);
 }

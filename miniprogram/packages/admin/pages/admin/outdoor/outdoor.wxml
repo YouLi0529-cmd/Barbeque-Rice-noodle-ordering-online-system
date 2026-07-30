@@ -4,15 +4,22 @@
     <view class="outdoor-tools">
       <input class="search-input" placeholder="{{ui.searchPlaceholder}}" value="{{keyword}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="doSearch" />
       <view class="tool-actions">
-        <view class="tool-btn refresh-btn" bindtap="loadList">{{ui.refresh}}</view>
-        <view class="tool-btn clear-btn" bindtap="clearSearch">{{ui.clear}}</view>
-        <view class="tool-btn search-btn" bindtap="doSearch">{{ui.search}}</view>
+        <block wx:if="{{!batchSelecting}}">
+          <view class="tool-btn refresh-btn" bindtap="loadList">{{ui.refresh}}</view>
+          <view class="tool-btn clear-btn" bindtap="clearSearch">{{ui.clear}}</view>
+          <view class="tool-btn search-btn" bindtap="doSearch">{{ui.search}}</view>
+          <view class="tool-btn batch-manage-btn" bindtap="toggleBatchMode">{{ui.batchManage}}</view>
+        </block>
+        <block wx:else>
+          <view class="tool-btn batch-cancel-btn" bindtap="toggleBatchMode">{{ui.batchCancel}}</view>
+          <view class="tool-btn batch-delete-btn" bindtap="deleteSelectedOrders">{{ui.batchDelete}}({{selectedOrderCount}})</view>
+        </block>
       </view>
     </view>
 
     <scroll-view class="order-list" scroll-y>
       <view
-        class="order-card {{selectedOrderId === item._id ? 'active' : ''}}"
+        class="order-card {{!batchSelecting && selectedOrderId === item._id ? 'active' : ''}} {{batchSelecting && selectedOrderMap[item._id] ? 'batch-selected' : ''}}"
         wx:for="{{list}}"
         wx:key="_id"
         bindtap="selectOrder"
@@ -20,7 +27,10 @@
       >
         <view class="order-card-head">
           <view class="order-no">{{item._displayTitle}}</view>
-          <view class="order-status status-{{item._statusClass}}">{{item._displayStatus}}</view>
+          <view class="order-card-head-right">
+            <view class="order-status status-{{item._statusClass}}">{{item._displayStatus}}</view>
+            <view class="order-select-mark {{selectedOrderMap[item._id] ? 'selected' : ''}}" wx:if="{{batchSelecting}}"></view>
+          </view>
         </view>
         <view class="order-card-meta">
           <text>{{item._outdoorPointText}}</text>

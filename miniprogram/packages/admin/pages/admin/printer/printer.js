@@ -11,16 +11,6 @@ const TAB_ITEMS = [
   { key: 'logs', label: '操作日志' }
 ]
 
-const FEATURE_ITEMS = [
-  { key: 'printers', title: '打印机管理', desc: '网口、USB、测试单和连接状态' },
-  { key: 'cashier', title: '收银打印配置', desc: '客单、预结、结账、退单' },
-  { key: 'stations', title: '后厨出品档口', desc: '逻辑档口与物理打印机绑定' },
-  { key: 'dishes', title: '菜品打印配置', desc: '按菜品配置出品档口' },
-  { key: 'templates', title: '票据样式设置', desc: '模板、预览、版本记录和测试' },
-  { key: 'jobs', title: '打印任务', desc: '查看、补打、取消与票据预览' },
-  { key: 'logs', title: '打印机操作日志', desc: '连接、断开、USB和错误事件' }
-]
-
 const BRAND_OPTIONS = ['美团', '芯烨', '佳博', '新北洋', '爱普生', '思普瑞特', '通用']
 const PAPER_OPTIONS = ['58', '76', '80']
 const RESOLUTION_OPTIONS = ['180', '203']
@@ -105,7 +95,6 @@ function makePreviewFields(fields) {
 Page({
   data: {
     tabs: TAB_ITEMS,
-    features: FEATURE_ITEMS,
     activeTab: 'dashboard',
     loading: false,
     backendError: '',

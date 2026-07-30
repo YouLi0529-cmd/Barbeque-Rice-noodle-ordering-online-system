@@ -121,6 +121,13 @@
           <view class="form-label">{{ui.dishName}}</view>
           <input class="form-input" placeholder="{{ui.inputDishName}}" value="{{currentDish.name}}" data-field="name" bindinput="onDishInput" />
         </view>
+        <view class="form-item">
+          <view class="form-label">{{ui.dishCategory}}</view>
+          <view class="printer-picker category-picker {{showCategoryDropdown ? 'open' : ''}}" bindtap="toggleDishCategoryDropdown">
+            <text>{{currentDish.categoryName || ui.selectCategory}}</text>
+            <text class="printer-arrow {{showCategoryDropdown ? 'open' : ''}}">∨</text>
+          </view>
+        </view>
         <view class="form-row">
           <view class="form-item half">
             <view class="form-label">{{ui.price}}</view>
@@ -210,31 +217,47 @@
           </view>
         </view>
         <view class="form-item printer-form-item">
-          <view class="form-label">{{ui.printer}}</view>
+          <view class="form-label">{{ui.station}}</view>
           <view class="printer-select">
-            <view class="printer-picker {{showPrinterDropdown ? 'open' : ''}}" bindtap="togglePrinterDropdown">
-              <text>{{currentDish.printerLabel}}</text>
-              <text class="printer-arrow {{showPrinterDropdown ? 'open' : ''}}">∨</text>
+            <view class="printer-picker {{showStationDropdown ? 'open' : ''}}" bindtap="toggleStationDropdown">
+              <text>{{currentDish.stationLabel}}</text>
+              <text class="printer-arrow {{showStationDropdown ? 'open' : ''}}">∨</text>
             </view>
-            <view class="printer-dropdown" wx:if="{{showPrinterDropdown}}">
+            <view class="printer-dropdown" wx:if="{{showStationDropdown}}">
               <view
-                class="printer-option {{currentDish.printerIndex === index ? 'active' : ''}}"
-                wx:for="{{printerOptions}}"
+                class="printer-option {{currentDish.stationIndex === index ? 'active' : ''}}"
+                wx:for="{{stationOptions}}"
                 wx:key="value"
                 data-index="{{index}}"
-                catchtap="selectPrinterOption"
+                catchtap="selectStationOption"
               >
                 <text>{{item.label}}</text>
               </view>
             </view>
           </view>
-          <view class="form-tip">{{ui.printerTip}}</view>
+          <view class="form-tip">{{ui.stationTip}}</view>
         </view>
       </scroll-view>
       <view class="modal-footer">
         <view class="modal-btn cancel" bindtap="closeDishModal">{{ui.cancel}}</view>
         <view class="modal-btn confirm" bindtap="saveDish">{{ui.save}}</view>
       </view>
+    </view>
+  </view>
+
+  <view class="category-select-mask" wx:if="{{showDishModal && showCategoryDropdown}}" catchtap="closeDishCategoryDropdown">
+    <view class="category-select-popover" catchtap="stopPropagation">
+      <view class="category-select-title">{{ui.dishCategory}}</view>
+      <scroll-view class="category-select-list" scroll-y>
+        <view
+          class="category-select-option {{currentDish.categoryIndex === index ? 'active' : ''}}"
+          wx:for="{{categories}}"
+          wx:key="_id"
+          data-index="{{index}}"
+          catchtap="selectDishCategory">
+          <text>{{item.name}}</text>
+        </view>
+      </scroll-view>
     </view>
   </view>
 </view>

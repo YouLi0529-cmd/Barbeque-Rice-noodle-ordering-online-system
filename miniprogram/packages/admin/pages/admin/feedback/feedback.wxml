@@ -7,6 +7,8 @@
       </view>
       <view class="top-btn" bindtap="searchFeedback">搜索</view>
       <view class="top-btn" bindtap="loadFeedback">刷新</view>
+      <view class="top-btn" bindtap="toggleBatchMode">{{batchSelecting ? ui.batchCancel : ui.batchManage}}</view>
+      <view class="top-btn danger" wx:if="{{batchSelecting}}" bindtap="deleteSelectedFeedback">{{ui.batchDelete}}({{selectedFeedbackCount}})</view>
       <view class="top-btn" bindtap="goBack">返回</view>
     </view>
   </view>
@@ -15,10 +17,13 @@
     <view class="state-text" wx:if="{{loading}}">加载中</view>
     <view class="state-text" wx:elif="{{list.length === 0}}">暂时没有意见反馈</view>
     <block wx:else>
-      <view class="feedback-item" wx:for="{{list}}" wx:key="_id">
+      <view class="feedback-item {{batchSelecting && selectedFeedbackMap[item._id] ? 'selected' : ''}}" wx:for="{{list}}" wx:key="_id" bindtap="toggleFeedbackSelection" data-id="{{item._id}}">
         <view class="feedback-item-head">
           <view class="feedback-user">{{item.displayUser}}</view>
-          <view class="feedback-status">{{item.displayStatus}}</view>
+          <view class="feedback-item-right">
+            <view class="feedback-status">{{item.displayStatus}}</view>
+            <view class="feedback-select-mark {{selectedFeedbackMap[item._id] ? 'selected' : ''}}" wx:if="{{batchSelecting}}"></view>
+          </view>
         </view>
         <view class="feedback-text">{{item.content}}</view>
         <view class="feedback-time">{{item.displayTime}}</view>

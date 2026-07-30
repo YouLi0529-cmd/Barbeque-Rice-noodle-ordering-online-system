@@ -64,7 +64,14 @@ const UI = {
   refundConfirmTitle: '\u786e\u8ba4\u9000\u83dc',
   refundConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u4ece\u8ba2\u5355\u4e2d\u79fb\u9664\u5417',
   giftConfirmTitle: '\u786e\u8ba4\u8d60\u83dc',
-  giftConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u6309 0 \u5143\u7ed3\u7b97\u5417'
+  giftConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u6309 0 \u5143\u7ed3\u7b97\u5417',
+  batchManage: '\u6279\u91cf\u5220\u9664',
+  batchCancel: '\u53d6\u6d88',
+  batchDelete: '\u5220\u9664\u5df2\u9009',
+  noSelectedOrders: '\u8bf7\u5148\u9009\u62e9\u8ba2\u5355',
+  batchDeleteTitle: '\u5220\u9664\u6237\u5916\u8ba2\u5355',
+  batchDeleteContent: '\u786e\u5b9a\u5220\u9664\u9009\u4e2d\u8ba2\u5355\u5417\uff1f\u8be5\u8ba2\u5355\u7684\u52a0\u83dc\u5355\u4e5f\u4f1a\u4e00\u5e76\u5220\u9664\uff0c\u5220\u9664\u540e\u4e0d\u53ef\u6062\u590d',
+  batchDeleteSuccess: '\u5df2\u5220\u9664\u9009\u4e2d\u8ba2\u5355'
 }
 
 const STATUS_TEXT = {
@@ -462,6 +469,10 @@ Page({
     saving: false,
     sendingKitchen: false,
     retryingKitchen: false,
+    batchSelecting: false,
+    selectedOrderMap: {},
+    selectedOrderCount: 0,
+    deletingOrders: false,
     selectedOrderId: '',
     selectedOrder: null,
     orderTitle: '',
@@ -511,8 +522,17 @@ Page({
       const selectedId = options.selectedId || this.data.selectedOrderId
       const selectedOrder = list.find(item => item._id === selectedId) || list[0] || null
 
+      const selectedOrderMap = this.data.batchSelecting
+        ? list.reduce((result, item) => {
+          if (this.data.selectedOrderMap && this.data.selectedOrderMap[item._id]) result[item._id] = true
+          return result
+        }, {})
+        : {}
+
       this.setData({
         list,
+        selectedOrderMap,
+        selectedOrderCount: Object.keys(selectedOrderMap).length,
         loading: false
       }, () => this.applyOrder(selectedOrder, {
         resetSelection: options.resetSelection !== false,
@@ -540,11 +560,88 @@ Page({
   selectOrder(e) {
     const id = e.currentTarget.dataset.id
     if (!id) return
+    if (this.data.batchSelecting) {
+      this.toggleBatchOrder(id)
+      return
+    }
     const order = this.data.list.find(item => item._id === id)
     this.applyOrder(order || null, {
       resetSelection: true,
       resetPay: true
     })
+  },
+
+  toggleBatchMode() {
+    if (this.data.deletingOrders) return
+    this.setData({
+      batchSelecting: !this.data.batchSelecting,
+      selectedOrderMap: {},
+      selectedOrderCount: 0
+    })
+  },
+
+  toggleBatchOrder(id) {
+    const selectedOrderMap = {
+      ...(this.data.selectedOrderMap || {})
+    }
+    if (selectedOrderMap[id]) delete selectedOrderMap[id]
+    else selectedOrderMap[id] = true
+    this.setData({
+      selectedOrderMap,
+      selectedOrderCount: Object.keys(selectedOrderMap).length
+    })
+  },
+
+  getSelectedOutdoorOrderIds() {
+    const selectedOrderMap = this.data.selectedOrderMap || {}
+    const ids = (this.data.list || []).reduce((result, order) => {
+      if (!selectedOrderMap[order._id]) return result
+      const orderIds = Array.isArray(order._orderIds) && order._orderIds.length
+        ? order._orderIds
+        : getSelectedOrderDocs(order).map(item => item._id)
+      return result.concat(orderIds)
+    }, [])
+    return Array.from(new Set(ids.filter(Boolean)))
+  },
+
+  async deleteSelectedOrders() {
+    if (this.data.deletingOrders) return
+    const ids = this.getSelectedOutdoorOrderIds()
+    if (!ids.length) {
+      wx.showToast({ title: UI.noSelectedOrders, icon: 'none' })
+      return
+    }
+
+    const confirmed = await new Promise(resolve => {
+      wx.showModal({
+        title: UI.batchDeleteTitle,
+        content: UI.batchDeleteContent,
+        confirmColor: '#b15b18',
+        success: res => resolve(res.confirm === true),
+        fail: () => resolve(false)
+      })
+    })
+    if (!confirmed) return
+
+    try {
+      this.setData({ deletingOrders: true })
+      await apiClient.call('admin.collection.batchDelete', {
+        collection: 'order',
+        ids
+      })
+      wx.showToast({ title: UI.batchDeleteSuccess, icon: 'success' })
+      this.setData({
+        batchSelecting: false,
+        selectedOrderMap: {},
+        selectedOrderCount: 0
+      })
+      this.loadList({ selectedId: '', resetSelection: true, resetPay: true })
+    } catch (err) {
+      console.error('batch delete outdoor orders failed', err)
+      wx.showToast({ title: err.message || UI.actionFailed, icon: 'none' })
+    } finally {
+      this.setData({ deletingOrders: false })
+    }
   },
 
   applyOrder(order, options = {}) {

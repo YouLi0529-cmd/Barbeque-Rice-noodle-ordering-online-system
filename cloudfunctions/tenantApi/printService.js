@@ -175,11 +175,63 @@ const DEFAULT_PRINTERS = [
 ]
 
 const DEFAULT_STATIONS = [
-  { code: 'kitchen', name: '\u540e\u53a8', printerCode: 'kitchen', isDefault: false },
+  { code: 'kitchen', name: '\u540e\u53a8', printerCode: 'kitchen', isDefault: true },
   { code: 'hot-dishes', name: '\u70ed\u83dc', printerCode: 'hot-dishes', isDefault: false },
-  { code: 'dessert', name: '\u751c\u54c1', printerCode: 'dessert', isDefault: false },
-  { code: 'cold-dishes', name: '\u51c9\u83dc', printerCode: 'kitchen', isDefault: true }
+  { code: 'dessert', name: '\u751c\u54c1', printerCode: 'dessert', isDefault: false }
 ]
+
+const LEGACY_PRINTER_ROUTE_CODES = {
+  sheng2: 'kitchen',
+  shu3: 'hot-dishes',
+  tian4: 'dessert'
+}
+
+const DINE_IN_KITCHEN_CATEGORIES = new Set([
+  '\u660e\u661f\u70e4\u8089',
+  '\u852c\u83dc',
+  '\u7d20\u83dc',
+  '\u5f20\u5357\u539f\u5207'
+])
+const DINE_IN_DESSERT_CATEGORIES = new Set([
+  '\u751c\u54c1\u996e\u6599',
+  '\u8d35\u5dde\u51b0\u6d46',
+  '\u96ea\u51b0'
+])
+const DINE_IN_KITCHEN_DISHES = new Set([
+  '\u751f\u83dc',
+  '\u83e0\u841d\u7247',
+  '\u7edd\u5473\u82b1\u751f\u7c73',
+  '\u8471\u5fc3\u8c46\u5e72',
+  '\u82a5\u672b\u9ec4\u74dc\u6761',
+  '\u82a5\u672b\u9ec4\u74dc',
+  '\u867e\u7247'
+])
+const DINE_IN_HOT_DISHES = new Set([
+  '\u5c0f\u8584\u997c'
+])
+const DINE_IN_DESSERT_DISHES = new Set([
+  '\u7cd6\u5fc3\u82f9\u679c\u7247',
+  '\u6cf0\u5f0f\u51ac\u9634\u529f',
+  '\u70e4\u69b4\u83b2'
+])
+const CAMPING_KITCHEN_CATEGORIES = new Set([
+  '\u5f20\u5357\u62db\u724c',
+  '\u725b\u8089',
+  '\u732a\u8089',
+  '\u660e\u661f\u70e4\u8089',
+  '\u7d20\u83dc',
+  '\u852c\u83dc',
+  '\u5c0f\u6599\u533a',
+  '\u5305\u8089\u642d\u5b50'
+])
+const CAMPING_NO_PRINT_CATEGORIES = new Set([
+  '\u70e4\u67b6',
+  '\u9732\u8425\u7528\u54c1'
+])
+const CAMPING_HOT_DISHES = new Set([
+  '\u5c0f\u8584\u997c',
+  '\u70e4\u69b4\u83b2'
+])
 
 const CASHIER_TICKETS = [
   { ticketType: 'customer_order', name: '\u5ba2\u5355' },
@@ -234,6 +286,51 @@ function createPrintService({ db, _, defaultTenantId }) {
     return result
   }
 
+  function getDefaultDishRoutePlan(dish = {}) {
+    const menuType = text(dish.menuType || dish.orderScene || dish.orderType).toLowerCase()
+    const categoryName = text(dish.categoryName)
+    const dishName = text(dish.name || dish.dishName)
+
+    if (menuType === 'camping') {
+      if (CAMPING_NO_PRINT_CATEGORIES.has(categoryName)) {
+        return { matched: true, stationCode: '' }
+      }
+      if (categoryName === '\u9521\u7eb8\u7c7b' || CAMPING_HOT_DISHES.has(dishName)) {
+        return { matched: true, stationCode: 'hot-dishes' }
+      }
+      if (CAMPING_KITCHEN_CATEGORIES.has(categoryName)) {
+        return { matched: true, stationCode: 'kitchen' }
+      }
+      return { matched: false, stationCode: '' }
+    }
+
+    if (DINE_IN_DESSERT_DISHES.has(dishName) || DINE_IN_DESSERT_CATEGORIES.has(categoryName)) {
+      return { matched: true, stationCode: 'dessert' }
+    }
+    if (DINE_IN_HOT_DISHES.has(dishName) || categoryName === '\u4e3b\u98df') {
+      return { matched: true, stationCode: 'hot-dishes' }
+    }
+    if (DINE_IN_KITCHEN_DISHES.has(dishName) || DINE_IN_KITCHEN_CATEGORIES.has(categoryName)) {
+      return { matched: true, stationCode: 'kitchen' }
+    }
+    if (categoryName === '\u5f20\u5357\u62db\u724c') {
+      return { matched: true, stationCode: 'kitchen' }
+    }
+    if (categoryName === '\u719f\u98df') {
+      return { matched: true, stationCode: 'hot-dishes' }
+    }
+    if (categoryName === '\u5305\u8089\u642d\u5b50') {
+      return { matched: true, stationCode: 'kitchen' }
+    }
+    return { matched: false, stationCode: '' }
+  }
+
+  function getStationByCode(stationMap, id, stationCode) {
+    if (!stationCode) return null
+    const station = stationMap[stableId('station', `${id}:${stationCode}`)]
+    return station && station.status !== false ? station : null
+  }
+
   function documentData(data = {}) {
     const { _id, ...fields } = data
     return fields
@@ -247,6 +344,19 @@ function createPrintService({ db, _, defaultTenantId }) {
   async function listDocs(collection, where = {}, limit = 500) {
     const result = await db.collection(collection).where(where).limit(limit).get()
     return result && result.data ? result.data : []
+  }
+
+  async function listDishesByIds(dishIds = []) {
+    const ids = Array.from(new Set(dishIds.map(value => text(value)).filter(Boolean))).slice(0, 100)
+    if (!ids.length) return []
+
+    if (_ && typeof _.in === 'function') {
+      const result = await db.collection('dish').where({ _id: _.in(ids) }).limit(ids.length).get()
+      return result && result.data ? result.data : []
+    }
+
+    const dishes = await Promise.all(ids.map(id => getDoc('dish', id)))
+    return dishes.filter(Boolean)
   }
 
   async function countDocs(collection, where = {}) {
@@ -402,6 +512,75 @@ function createPrintService({ db, _, defaultTenantId }) {
     }
   }
 
+  async function migrateLegacyPrintRouting(id) {
+    const coldStationId = stableId('station', `${id}:cold-dishes`)
+    const coldStation = await getDoc('printStations', coldStationId)
+    if (!coldStation || coldStation.storeId !== id) return
+
+    const kitchenStationId = stableId('station', `${id}:kitchen`)
+    const kitchenStation = await getDoc('printStations', kitchenStationId)
+    if (!kitchenStation || kitchenStation.storeId !== id) return
+
+    const timestamp = now()
+    const [routes, templates, dishes, stations] = await Promise.all([
+      listDocs('dishPrintRoutes', { storeId: id }, 1200),
+      listDocs('receiptTemplates', { storeId: id }, 300),
+      listDocs('dish', {}, 1000),
+      listDocs('printStations', { storeId: id }, 100)
+    ])
+    const routeMap = routes.reduce((map, route) => ({ ...map, [route.dishId]: route }), {})
+
+    for (const route of routes) {
+      if (route.stationId !== coldStationId) continue
+      await db.collection('dishPrintRoutes').doc(route._id).update({
+        data: { stationId: kitchenStationId, updateTime: timestamp }
+      })
+      routeMap[route.dishId] = { ...route, stationId: kitchenStationId }
+    }
+
+    for (const template of templates) {
+      if (template.bindScope !== 'station' || template.stationId !== coldStationId) continue
+      await db.collection('receiptTemplates').doc(template._id).update({
+        data: { stationId: kitchenStationId, updateTime: timestamp }
+      })
+    }
+
+    for (const dish of dishes) {
+      if (routeMap[dish._id]) continue
+      const legacyPrinterId = text(dish.printerId || dish.kitchenPrinterId)
+      const stationCode = LEGACY_PRINTER_ROUTE_CODES[legacyPrinterId]
+      if (!stationCode) continue
+
+      const stationId = stableId('station', `${id}:${stationCode}`)
+      const routeId = stableId('dishroute', `${id}:${dish._id}`)
+      await db.collection('dishPrintRoutes').doc(routeId).set({
+        data: documentData({
+          _id: routeId,
+          storeId: id,
+          dishId: dish._id,
+          printEnabled: true,
+          stationId,
+          createTime: timestamp,
+          updateTime: timestamp,
+          operatorId: 'system',
+          operatorName: 'system-migration'
+        })
+      })
+    }
+
+    await Promise.all(stations
+      .filter(station => station._id !== kitchenStationId && station.isDefault)
+      .map(station => db.collection('printStations').doc(station._id).update({
+        data: { isDefault: false, updateTime: timestamp }
+      })))
+    if (kitchenStation.isDefault !== true) {
+      await db.collection('printStations').doc(kitchenStationId).update({
+        data: { isDefault: true, updateTime: timestamp }
+      })
+    }
+    await db.collection('printStations').doc(coldStationId).remove()
+  }
+
   async function ensureDefaults(id) {
     const timestamp = now()
     for (const printer of DEFAULT_PRINTERS) {
@@ -440,6 +619,8 @@ function createPrintService({ db, _, defaultTenantId }) {
         await db.collection('printStations').doc(stationId).update({ data: legacyPatch })
       }
     }
+
+    await migrateLegacyPrintRouting(id)
 
     const frontPrinterId = stableId('printer', `${id}:front-counter`)
     for (const config of CASHIER_TICKETS) {
@@ -743,14 +924,17 @@ function createPrintService({ db, _, defaultTenantId }) {
 
   async function queueKitchenJobs({ id, order, dishEntries = [], kind = 'kitchen_order', eventKey = '', reason = '' }) {
     await ensureDefaults(id)
-    const [stations, printers, routes] = await Promise.all([
+    const dishIds = dishEntries.map(entry => getDishId(entry))
+    const [stations, printers, routes, dishes] = await Promise.all([
       listDocs('printStations', { storeId: id }),
       listDocs('printers', { storeId: id }),
-      listDocs('dishPrintRoutes', { storeId: id })
+      listDocs('dishPrintRoutes', { storeId: id }),
+      listDishesByIds(dishIds)
     ])
     const routeMap = routes.reduce((map, route) => ({ ...map, [route.dishId]: route }), {})
     const stationMap = stations.reduce((map, station) => ({ ...map, [station._id]: station }), {})
     const printerMap = printers.reduce((map, printer) => ({ ...map, [printer._id]: printer }), {})
+    const dishMap = dishes.reduce((map, dish) => ({ ...map, [dish._id]: dish }), {})
     const fallback = stations.find(station => station.isDefault && station.status !== false)
     if (!fallback) throw new Error('default print station not configured')
 
@@ -765,12 +949,22 @@ function createPrintService({ db, _, defaultTenantId }) {
         skipped.push(entry.index)
         return
       }
-      const station = route && stationMap[route.stationId] && stationMap[route.stationId].status !== false
+      const plan = getDefaultDishRoutePlan(dishMap[dishId] || item)
+      if (!route && plan.matched && !plan.stationCode) {
+        skipped.push(entry.index)
+        return
+      }
+      const configuredStation = route && route.stationId && stationMap[route.stationId] && stationMap[route.stationId].status !== false
         ? stationMap[route.stationId]
-        : fallback
+        : null
+      if (!configuredStation && plan.matched && !plan.stationCode) {
+        skipped.push(entry.index)
+        return
+      }
+      const station = configuredStation || getStationByCode(stationMap, id, plan.stationCode) || fallback
       if (!groups[station._id]) groups[station._id] = []
       groups[station._id].push(entry)
-      if (!route || !route.stationId) {
+      if (!configuredStation && !plan.stationCode) {
         alertWrites.push({ entry, station })
       }
     })
@@ -1137,18 +1331,26 @@ function createPrintService({ db, _, defaultTenantId }) {
     const unassignedOnly = bool(payload.unassignedOnly)
     const list = dishes.filter(dish => dish.status !== 0 && dish.status !== false).map(dish => {
       const route = routeMap[dish._id]
-      const printEnabled = !route || route.printEnabled !== false
-      const station = route && stationMap[route.stationId]
+      const categoryName = dish.categoryName || categoryMap[dish.categoryId] || ''
+      const plan = getDefaultDishRoutePlan({ ...dish, categoryName })
+      const ruleStation = getStationByCode(stationMap, id, plan.stationCode)
+      const configuredStation = route && route.printEnabled !== false && route.stationId
+        ? stationMap[route.stationId]
+        : null
+      const printEnabled = route && route.printEnabled === false
+        ? false
+        : (configuredStation ? true : (plan.matched ? !!plan.stationCode : true))
+      const station = configuredStation || ruleStation
       return {
         dishId: dish._id,
         dishName: dish.name || '',
         mnemonic: dish.mnemonic || dish.code || '',
         categoryId: dish.categoryId || '',
-        categoryName: dish.categoryName || categoryMap[dish.categoryId] || '',
+        categoryName,
         printEnabled,
-        stationId: route && route.stationId || '',
+        stationId: printEnabled && station ? station._id : '',
         stationName: station && station.name || '',
-        configStatus: station ? 'configured' : 'unassigned',
+        configStatus: configuredStation ? 'configured' : (ruleStation ? 'rule-default' : (plan.matched ? 'not-printed' : 'unassigned')),
         routeId: route && route._id || ''
       }
     }).filter(item => {
@@ -1160,6 +1362,45 @@ function createPrintService({ db, _, defaultTenantId }) {
       return true
     })
     return { success: true, data: { list, stations, categories } }
+  }
+
+  async function getDishRoute(payload) {
+    const id = storeId(payload)
+    await ensureDefaults(id)
+    const dishId = text(payload.dishId)
+    if (!dishId) return { success: false, code: 'DISH_REQUIRED', message: 'dish required' }
+
+    const [route, dish, stations] = await Promise.all([
+      getDoc('dishPrintRoutes', stableId('dishroute', `${id}:${dishId}`)),
+      getDoc('dish', dishId),
+      listDocs('printStations', { storeId: id })
+    ])
+    if (route && route.storeId !== id) {
+      return { success: false, code: 'DISH_ROUTE_NOT_FOUND', message: 'dish route not found' }
+    }
+
+    const stationMap = stations.reduce((map, station) => ({ ...map, [station._id]: station }), {})
+    const plan = getDefaultDishRoutePlan(dish || {})
+    const ruleStation = getStationByCode(stationMap, id, plan.stationCode)
+    const configuredStation = route && route.printEnabled !== false && route.stationId
+      ? stationMap[route.stationId]
+      : null
+    const station = configuredStation || ruleStation
+    const printEnabled = route && route.printEnabled === false
+      ? false
+      : (configuredStation ? true : (plan.matched ? !!plan.stationCode : false))
+
+    return {
+      success: true,
+      data: {
+        dishId,
+        configured: !!route,
+        printEnabled,
+        stationId: printEnabled && station ? station._id : '',
+        stationName: printEnabled && station && station.storeId === id ? station.name || '' : '',
+        ruleApplied: !configuredStation && (!route || route.printEnabled !== false) && plan.matched
+      }
+    }
   }
 
   async function saveDishRoutes(payload) {
@@ -1844,6 +2085,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     if (action === 'admin.print.stations.list') return listStations(payload)
     if (action === 'admin.print.stations.save') return saveStation(payload)
     if (action === 'admin.print.dishes.list') return listDishRoutes(payload)
+    if (action === 'admin.print.dishes.get') return getDishRoute(payload)
     if (action === 'admin.print.dishes.save') return saveDishRoutes(payload)
     if (action === 'admin.print.cashier.list') return listCashierConfigs(payload)
     if (action === 'admin.print.cashier.save') return saveCashierConfig(payload)

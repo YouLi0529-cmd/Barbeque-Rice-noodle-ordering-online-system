@@ -22,15 +22,16 @@ const UI = {
   save: '\u4fdd\u5b58',
   confirm: '\u786e\u8ba4',
   categoryName: '\u5206\u7c7b\u540d\u79f0',
+  dishCategory: '\u6240\u5c5e\u5206\u7c7b',
   dishName: '\u83dc\u54c1\u540d\u79f0',
   price: '\u552e\u4ef7',
   originalPrice: '\u539f\u4ef7',
   unit: '\u5355\u4f4d',
   description: '\u63cf\u8ff0',
   image: '\u83dc\u54c1\u56fe\u7247',
-  printer: '\u6253\u5370\u673a',
-  printerNone: '\u4e0d\u6253\u5370',
-  printerTip: '\u4e0d\u9009\u6253\u5370\u673a\u5219\u4e0d\u53d1\u9001\u540e\u53a8\u6253\u5370',
+  station: '\u51fa\u54c1\u6863\u53e3',
+  stationNone: '\u4e0d\u6253\u5370',
+  stationTip: '\u4e0d\u9009\u51fa\u54c1\u6863\u53e3\u5219\u4e0d\u5411\u540e\u53a8\u53d1\u9001\u8fd9\u9053\u83dc',
   sort: '\u6392\u5e8f',
   status: '\u4e0a\u67b6\u72b6\u6001',
   needPopup: '\u89c4\u683c\u5f39\u7a97',
@@ -80,7 +81,7 @@ const UI = {
   searchResult: '\u641c\u7d22\u7ed3\u679c',
   emptySearch: '\u672a\u627e\u5230\u83dc\u54c1',
   clearSearch: '\u6e05\u7a7a',
-  imageTip: '\u4ec5\u652f\u6301 jpg/png/webp\uff0c\u9009\u56fe\u540e\u53ef\u88c1\u526a\u4e3a\u65b9\u56fe\uff0c\u7cfb\u7edf\u4f1a\u81ea\u52a8\u538b\u7f29\u3002'
+  imageTip: '\u4ec5\u652f\u6301 jpg/png/webp\uff0c\u9009\u56fe\u540e\u53ef\u88c1\u526a\u4e3a\u65b9\u56fe\uff0c\u7cfb\u7edf\u4f1a\u81ea\u52a8\u538b\u7f29\u3002',
 }
 
 const DEFAULT_CATEGORY = {
@@ -98,13 +99,15 @@ const DEFAULT_DISH = {
   description: '',
   categoryId: '',
   categoryName: '',
+  categoryIndex: 0,
   image: '',
   imagePreview: '',
   imageFileID: '',
-  printerId: '',
-  printerName: '',
-  printerLabel: '\u4e0d\u6253\u5370',
-  printerIndex: 0,
+  stationId: '',
+  stationName: '',
+  stationLabel: '\u4e0d\u6253\u5370',
+  stationIndex: 0,
+  printEnabled: false,
   unit: '\u4efd',
   status: 1,
   sort: 0,
@@ -124,12 +127,6 @@ const DEFAULT_DISH = {
 
 const MAX_IMAGE_SIZE = 1024 * 1024
 const ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp']
-const PRINTER_OPTIONS = [
-  { label: UI.printerNone, value: '', name: '' },
-  { label: '\u751f\u83dc\u6253\u5370\u673a', value: 'sheng2', name: '\u751f\u83dc\u6253\u5370\u673a' },
-  { label: '\u719f\u98df\u6253\u5370\u673a', value: 'shu3', name: '\u719f\u98df\u6253\u5370\u673a' },
-  { label: '\u751c\u54c1\u6253\u5370\u673a', value: 'tian4', name: '\u751c\u54c1\u6253\u5370\u673a' }
-]
 const DEFAULT_SPEC_OPTIONS = ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3']
 const SPEC_TEMPLATES = [
   {
@@ -137,6 +134,27 @@ const SPEC_TEMPLATES = [
     value: 'spicy',
     title: '\u53e3\u5473',
     options: DEFAULT_SPEC_OPTIONS,
+    note: ''
+  },
+  {
+    label: '\u5fae\u8fa3/\u6b63\u5e38/\u52a0\u8fa3',
+    value: 'spicyPlus',
+    title: '\u53e3\u5473',
+    options: ['\u5fae\u8fa3', '\u6b63\u5e38', '\u52a0\u8fa3'],
+    note: ''
+  },
+  {
+    label: '\u82a5\u672b',
+    value: 'mustard',
+    title: '\u53e3\u5473',
+    options: ['\u5c11\u82a5\u672b', '\u6b63\u5e38\u82a5\u672b'],
+    note: ''
+  },
+  {
+    label: '\u6728\u59dc\u5b50',
+    value: 'mujiangzi',
+    title: '\u53e3\u5473',
+    options: ['\u5c11\u6728\u59dc\u5b50', '\u6b63\u5e38\u6728\u59dc\u5b50', '\u591a\u6728\u59dc\u5b50'],
     note: ''
   },
   {
@@ -169,6 +187,21 @@ const SPEC_TEMPLATES = [
     ]
   },
   {
+    label: '\u7cd6\u5ea6+\u4ec5\u70ed',
+    value: 'sugarHotOnly',
+    title: '\u7cd6\u5ea6',
+    options: ['\u65e0\u7cd6', '\u5fae\u7cd6', '\u6b63\u5e38\u7cd6'],
+    note: '\u65e0\u7cd6\u6307\u7684\u662f\u4e0d\u989d\u5916\u52a0\u7cd6',
+    optionGroups: [
+      {
+        id: 'temperature',
+        title: '\u70ed\u5ea6',
+        options: ['\u70ed'],
+        note: '\u53ea\u6709\u70ed'
+      }
+    ]
+  },
+  {
     label: '\u81ea\u5b9a\u4e49',
     value: 'custom'
   }
@@ -178,22 +211,47 @@ function showToast(title, icon = 'none') {
   wx.showToast({ title, icon })
 }
 
-function getPrinterOption(value) {
-  const explicit = PRINTER_OPTIONS.find(item => item.value === value)
-  if (explicit) return explicit
-  return PRINTER_OPTIONS[0]
+function buildStationOptions(stations = []) {
+  return [
+    { label: UI.stationNone, value: '', name: '' },
+    ...(Array.isArray(stations) ? stations : []).map(station => ({
+      label: station.name || UI.stationNone,
+      value: String(station._id || '').trim(),
+      name: station.name || ''
+    })).filter(option => option.value)
+  ]
 }
 
-function normalizeDishPrinterFields(dish = {}) {
-  const printerId = String(dish.printerId || dish.kitchenPrinterId || '').trim()
-  const option = getPrinterOption(printerId)
-  const printerIndex = PRINTER_OPTIONS.findIndex(item => item.value === option.value)
+function getStationOption(value, stationOptions = []) {
+  const explicit = stationOptions.find(item => item.value === value)
+  if (explicit) return explicit
+  return stationOptions[0] || { label: UI.stationNone, value: '', name: '' }
+}
+
+function normalizeDishStationFields(dish = {}, stationOptions = []) {
+  const stationId = String(dish.stationId || '').trim()
+  const option = getStationOption(stationId, stationOptions)
+  const stationIndex = stationOptions.findIndex(item => item.value === option.value)
   return {
     ...dish,
-    printerId: option.value,
-    printerName: option.name,
-    printerLabel: option.label,
-    printerIndex: printerIndex >= 0 ? printerIndex : 0
+    stationId: option.value,
+    stationName: option.name,
+    stationLabel: option.label,
+    stationIndex: stationIndex >= 0 ? stationIndex : 0,
+    printEnabled: !!option.value
+  }
+}
+
+function normalizeDishCategoryFields(dish = {}, categories = []) {
+  const categoryId = String(dish.categoryId || '').trim()
+  const categoryIndex = (Array.isArray(categories) ? categories : [])
+    .findIndex(category => category._id === categoryId)
+  const category = categoryIndex >= 0 ? categories[categoryIndex] : null
+  return {
+    ...dish,
+    categoryId: category ? category._id : categoryId,
+    categoryName: category ? category.name || '' : String(dish.categoryName || '').trim(),
+    categoryIndex: categoryIndex >= 0 ? categoryIndex : 0
   }
 }
 
@@ -252,35 +310,60 @@ function guessSpecTemplateByCategory(categoryName = '') {
   return 'spicy'
 }
 
-function getDishSpecTemplate(dish = {}, categoryName = '') {
-  if (dish.specTemplate) return dish.specTemplate
+function isSameOptionList(left, right) {
+  const leftOptions = normalizeOptionList(left)
+  const rightOptions = normalizeOptionList(right)
+  return leftOptions.length === rightOptions.length && leftOptions.every((item, index) => item === rightOptions[index])
+}
 
-  const title = String(dish.flavorTitle || '').trim()
+function getOptionGroupsSignature(optionGroups) {
+  return (Array.isArray(optionGroups) ? optionGroups : [])
+    .map(group => {
+      const options = normalizeOptionList(group.options)
+      if (!options.length) return ''
+      const title = String(group.title || group.name || '').trim()
+      const note = String(group.note || '').trim()
+      return `${title}\u0001${options.join('\u0001')}\u0001${note}`
+    })
+    .filter(Boolean)
+    .join('\u0002')
+}
+
+function isDishMatchingSpecTemplate(dish = {}, template = {}) {
+  const title = String(dish.flavorTitle || UI.defaultSpecTitle).trim() || UI.defaultSpecTitle
+  const templateTitle = String(template.title || UI.defaultSpecTitle).trim() || UI.defaultSpecTitle
+  return title === templateTitle &&
+    isSameOptionList(dish.flavorOptions, template.options) &&
+    String(dish.flavorNote || '').trim() === String(template.note || '').trim() &&
+    getOptionGroupsSignature(dish.optionGroups) === getOptionGroupsSignature(template.optionGroups)
+}
+
+function getDishSpecTemplate(dish = {}, categoryName = '') {
   const options = normalizeOptionList(dish.flavorOptions)
   const optionGroups = Array.isArray(dish.optionGroups) ? dish.optionGroups : []
-  const hasHeatGroup = optionGroups.some(group => {
-    const groupTitle = String(group.title || group.name || '').trim()
-    return groupTitle.indexOf('\u70ed\u5ea6') >= 0
-  })
+  const hasStoredSpecContent = options.length > 0 || optionGroups.some(group => normalizeOptionList(group.options).length > 0)
 
-  if (title.indexOf('\u7cd6') >= 0 && hasHeatGroup) return 'sugarHeat'
-  if (title.indexOf('\u7cd6') >= 0) return 'sugar'
-  if (title.indexOf('\u70ed') >= 0) return 'heat'
-  if (title && title !== UI.defaultSpecTitle) return 'custom'
-  if (options.length && formatSpecOptionsText(options) !== formatSpecOptionsText(DEFAULT_SPEC_OPTIONS)) {
-    return 'custom'
+  // The customer-facing fields are the source of truth. A stale template label must not overwrite them.
+  if (hasStoredSpecContent) {
+    const matchingTemplate = SPEC_TEMPLATES.find(template => {
+      return template.value !== 'custom' && isDishMatchingSpecTemplate(dish, template)
+    })
+    return matchingTemplate ? matchingTemplate.value : 'custom'
   }
 
+  const storedTemplate = String(dish.specTemplate || '').trim()
+  if (SPEC_TEMPLATES.some(template => template.value === storedTemplate)) return storedTemplate
   return guessSpecTemplateByCategory(categoryName || dish.categoryName)
 }
 
 function getCustomSpecFields(dish = {}) {
   const options = normalizeOptionList(dish.flavorOptions)
-  const customOptions = options.length ? options : DEFAULT_SPEC_OPTIONS
   return {
-    customSpecTitle: String(dish.customSpecTitle || dish.flavorTitle || UI.defaultSpecTitle).trim() || UI.defaultSpecTitle,
-    customSpecOptionsText: String(dish.customSpecOptionsText || formatSpecOptionsText(customOptions)).trim(),
-    customSpecNote: String(dish.customSpecNote || dish.flavorNote || '').trim()
+    customSpecTitle: String(dish.flavorTitle || dish.customSpecTitle || UI.defaultSpecTitle).trim() || UI.defaultSpecTitle,
+    customSpecOptionsText: options.length
+      ? formatSpecOptionsText(options)
+      : String(dish.customSpecOptionsText || '').trim(),
+    customSpecNote: String(dish.flavorNote || dish.customSpecNote || '').trim()
   }
 }
 
@@ -326,11 +409,27 @@ function applySpecTemplateToDish(dish = {}, templateValue = 'spicy') {
 }
 
 function prepareDishSpecForEditor(dish = {}, categoryName = '') {
-  const templateValue = getDishSpecTemplate(dish, categoryName)
-  return applySpecTemplateToDish({
+  const next = {
     ...dish,
     ...getCustomSpecFields(dish)
-  }, templateValue)
+  }
+  const templateValue = getDishSpecTemplate(dish, categoryName)
+  const flavorOptions = normalizeOptionList(next.flavorOptions)
+  const optionGroups = cloneOptionGroups(next.optionGroups)
+
+  // Only a new/incomplete popup needs a preset filled in. Existing dish options stay untouched.
+  if (getDishNeedPopup(next) && !flavorOptions.length && !optionGroups.length) {
+    return applySpecTemplateToDish(next, templateValue)
+  }
+
+  return {
+    ...next,
+    specTemplate: templateValue,
+    flavorTitle: String(next.flavorTitle || UI.defaultSpecTitle).trim() || UI.defaultSpecTitle,
+    flavorOptions,
+    flavorNote: String(next.flavorNote || '').trim(),
+    optionGroups
+  }
 }
 
 function buildSpecPreviewGroups(dish = {}) {
@@ -378,13 +477,15 @@ Page({
     showDishModal: false,
     editDishMode: false,
     currentDish: { ...DEFAULT_DISH },
-    showPrinterDropdown: false,
+    showCategoryDropdown: false,
+    showStationDropdown: false,
     specPreviewGroups: [],
-    printerOptions: PRINTER_OPTIONS,
+    stationOptions: buildStationOptions(),
     specTemplates: SPEC_TEMPLATES
   },
 
   onLoad() {
+    this.loadPrintStations()
     this.loadCategories()
   },
 
@@ -431,6 +532,41 @@ Page({
       console.error('load categories failed', err)
       this.setData({ loadingCategories: false })
       showToast(err.message || UI.failed)
+    }
+  },
+
+  async loadPrintStations() {
+    try {
+      const res = await apiClient.call('admin.print.stations.list')
+      const stationOptions = buildStationOptions(res.data || [])
+      const currentDish = this.data.showDishModal
+        ? normalizeDishStationFields(this.data.currentDish || {}, stationOptions)
+        : this.data.currentDish
+      this.setData({ stationOptions, currentDish })
+      return stationOptions
+    } catch (err) {
+      console.error('load print stations failed', err)
+      return this.data.stationOptions
+    }
+  },
+
+  async loadDishPrintRoute(dishId) {
+    if (!dishId) return
+    try {
+      const res = await apiClient.call('admin.print.dishes.get', { dishId })
+      const currentDish = this.data.currentDish || {}
+      if (!this.data.showDishModal || currentDish._id !== dishId) return
+
+      const route = res.data || {}
+      const nextDish = normalizeDishStationFields({
+        ...currentDish,
+        stationId: route.printEnabled ? route.stationId || '' : '',
+        stationName: route.printEnabled ? route.stationName || '' : '',
+        printEnabled: route.printEnabled === true
+      }, this.data.stationOptions)
+      this.setData({ currentDish: nextDish })
+    } catch (err) {
+      console.error('load dish print route failed', err)
     }
   },
 
@@ -634,33 +770,36 @@ Page({
     })
   },
 
-  showAddDishModal() {
+  async showAddDishModal() {
     const currentCategory = this.data.categories.find(item => item._id === this.data.currentCategoryId)
     if (!currentCategory) {
       showToast(UI.selectCategory)
       return
     }
 
-    const currentDish = normalizeDishPrinterFields(prepareDishSpecForEditor({
+    if (this.data.stationOptions.length <= 1) await this.loadPrintStations()
+    const currentDish = normalizeDishCategoryFields(normalizeDishStationFields(prepareDishSpecForEditor({
       ...DEFAULT_DISH,
       categoryId: currentCategory._id,
       categoryName: currentCategory.name,
       menuType: this.data.currentMenuType,
       sort: this.data.dishes.length
-    }, currentCategory.name))
+    }, currentCategory.name), this.data.stationOptions), this.data.categories)
 
     this.setData({
       showDishModal: true,
       editDishMode: false,
-      showPrinterDropdown: false,
+      showCategoryDropdown: false,
+      showStationDropdown: false,
       currentDish,
       specPreviewGroups: buildSpecPreviewGroups(currentDish)
     })
   },
 
-  showEditDishModal(e) {
+  async showEditDishModal(e) {
     const dish = e.currentTarget.dataset.dish
-    const currentDish = normalizeDishPrinterFields(prepareDishSpecForEditor({
+    if (this.data.stationOptions.length <= 1) await this.loadPrintStations()
+    const currentDish = normalizeDishCategoryFields(normalizeDishStationFields(prepareDishSpecForEditor({
       ...DEFAULT_DISH,
       ...dish,
       image: dish.imageFileID || dish.image || '',
@@ -668,21 +807,25 @@ Page({
       imageFileID: dish.imageFileID || '',
       needPopup: getDishNeedPopup(dish),
       needSpec: getDishNeedPopup(dish)
-    }, dish.categoryName))
+    }, dish.categoryName), this.data.stationOptions), this.data.categories)
 
     this.setData({
       showDishModal: true,
       editDishMode: true,
-      showPrinterDropdown: false,
+      showCategoryDropdown: false,
+      showStationDropdown: false,
       currentDish,
       specPreviewGroups: buildSpecPreviewGroups(currentDish)
+    }, () => {
+      this.loadDishPrintRoute(dish._id)
     })
   },
 
   closeDishModal() {
     this.setData({
       showDishModal: false,
-      showPrinterDropdown: false
+      showCategoryDropdown: false,
+      showStationDropdown: false
     })
   },
 
@@ -690,6 +833,29 @@ Page({
     const field = e.currentTarget.dataset.field
     if (!field) return
     this.setData({ [`currentDish.${field}`]: e.detail.value })
+  },
+
+  toggleDishCategoryDropdown() {
+    this.setData({
+      showCategoryDropdown: !this.data.showCategoryDropdown,
+      showStationDropdown: false
+    })
+  },
+
+  closeDishCategoryDropdown() {
+    this.setData({ showCategoryDropdown: false })
+  },
+
+  selectDishCategory(e) {
+    const categoryIndex = Number(e.currentTarget.dataset.index)
+    const category = this.data.categories[categoryIndex]
+    if (!category) return
+    this.setData({
+      'currentDish.categoryId': category._id,
+      'currentDish.categoryName': category.name || '',
+      'currentDish.categoryIndex': categoryIndex,
+      showCategoryDropdown: false
+    })
   },
 
   onDishStatusChange(e) {
@@ -712,21 +878,23 @@ Page({
     })
   },
 
-  togglePrinterDropdown() {
+  toggleStationDropdown() {
     this.setData({
-      showPrinterDropdown: !this.data.showPrinterDropdown
+      showStationDropdown: !this.data.showStationDropdown,
+      showCategoryDropdown: false
     })
   },
 
-  selectPrinterOption(e) {
+  selectStationOption(e) {
     const index = Number(e.currentTarget.dataset.index || 0)
-    const option = this.data.printerOptions[index] || this.data.printerOptions[0]
+    const option = this.data.stationOptions[index] || this.data.stationOptions[0]
     this.setData({
-      'currentDish.printerId': option.value,
-      'currentDish.printerName': option.name,
-      'currentDish.printerLabel': option.label,
-      'currentDish.printerIndex': index,
-      showPrinterDropdown: false
+      'currentDish.stationId': option.value,
+      'currentDish.stationName': option.name,
+      'currentDish.stationLabel': option.label,
+      'currentDish.stationIndex': index,
+      'currentDish.printEnabled': !!option.value,
+      showStationDropdown: false
     })
   },
 
@@ -793,7 +961,6 @@ Page({
       success: async res => {
         const file = res.tempFiles && res.tempFiles[0]
         if (!file || !file.tempFilePath) return
-
         try {
           const croppedPath = await this.cropDishImage(file.tempFilePath)
           if (!croppedPath) return
@@ -931,8 +1098,8 @@ Page({
       image: currentDish.imageFileID || currentDish.image || '',
       needPopup: currentDish.needPopup === true,
       needSpec: currentDish.needPopup === true,
-      printerId: currentDish.printerId || '',
-      printerName: currentDish.printerName || '',
+      printerId: '',
+      printerName: '',
       menuType: this.data.currentMenuType,
       categoryId: currentDish.categoryId || this.data.currentCategoryId,
       categoryName: currentDish.categoryName || this.getCurrentCategoryName(),
@@ -953,11 +1120,20 @@ Page({
 
     try {
       wx.showLoading({ title: UI.saving })
-      await apiClient.call('admin.dish.save', { dish })
+      const saveRes = await apiClient.call('admin.dish.save', { dish })
+      const dishId = saveRes && saveRes.data && saveRes.data._id
+      if (!dishId) throw new Error(UI.failed)
+
+      await apiClient.call('admin.print.dishes.save', {
+        dishIds: [dishId],
+        stationId: currentDish.stationId || '',
+        printEnabled: currentDish.printEnabled === true && !!currentDish.stationId
+      })
       wx.hideLoading()
       this.setData({
         showDishModal: false,
-        showPrinterDropdown: false
+        showCategoryDropdown: false,
+        showStationDropdown: false
       })
       showToast(UI.saved, 'success')
       if (this.data.isSearching && this.data.searchKeyword.trim()) {
