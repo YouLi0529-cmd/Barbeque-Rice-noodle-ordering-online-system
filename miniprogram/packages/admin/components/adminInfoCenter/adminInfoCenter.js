@@ -94,7 +94,8 @@ Component({
       empty: '\u6682\u65E0\u672A\u8BFB\u4FE1\u606F',
       dineInType: '\u5802\u98DF\u8BA2\u5355',
       outdoorType: '\u6237\u5916\u8BA2\u5355',
-      reservationType: '\u4E34\u8FD1\u9884\u7EA6'
+      reservationType: '\u4E34\u8FD1\u9884\u7EA6',
+      printFailureType: '\u6253\u5370\u5F02\u5E38'
     }
   },
 
@@ -226,6 +227,26 @@ Component({
           detail: String(reservation.roomType || '\u672A\u9009\u533A\u57DF') + ' \u00B7 ' + Number(reservation.peopleCount || 0) + '\u4EBA' + (lastFour ? ' \u00B7 \u5C3E\u53F7' + lastFour : ''),
           time: '',
           timeValue: reservationTime
+        })
+      })
+
+      ;(data.printFailures || []).forEach(job => {
+        const id = 'print-failure:' + job._id
+        const version = String(job.updateTime || job.failedAt || 'failed')
+        if (dismissedMap[id] === version) return
+
+        const printerName = String(job.printerName || '\u6253\u5370\u673A')
+        const ticketName = String(job.ticketName || '\u6253\u5370\u4EFB\u52A1')
+        const tableText = String(job.tableNumber || '').trim()
+        messages.push({
+          id,
+          version,
+          type: 'printFailure',
+          typeText: this.data.ui.printFailureType,
+          title: printerName + '\u6709\u4E00\u5F20\u4EFB\u52A1\u6253\u5370\u5931\u8D25',
+          detail: ticketName + (tableText ? ' \u00B7 ' + tableText + '\u684C' : '') + '\uFF0C\u8BF7\u5230\u6253\u5370\u7BA1\u7406\u67E5\u770B',
+          time: formatMessageTime(job.failedAt || job.updateTime),
+          timeValue: getDateTimeValue(job.failedAt || job.updateTime)
         })
       })
 

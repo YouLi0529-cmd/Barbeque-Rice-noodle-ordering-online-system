@@ -3,11 +3,14 @@ const apiClient = require('../../../../../utils/apiClient')
 const TAB_ITEMS = [
   { key: 'dashboard', label: '打印中心' },
   { key: 'printers', label: '打印机' },
-  { key: 'cashier', label: '收银配置' },
-  { key: 'stations', label: '出品档口' },
-  { key: 'dishes', label: '菜品路由' },
-  { key: 'templates', label: '票据样式' },
   { key: 'jobs', label: '打印任务' },
+  { key: 'settings', label: '设置' }
+]
+
+const SETTINGS_TAB_ITEMS = [
+  { key: 'cashier', label: '收银打印' },
+  { key: 'stations', label: '出品档口' },
+  { key: 'templates', label: '票据样式' },
   { key: 'logs', label: '操作日志' }
 ]
 
@@ -26,26 +29,51 @@ const TICKET_TYPE_OPTIONS = [
   { key: 'kitchen_refund', label: '退菜通知' },
   { key: 'kitchen_split', label: '制作分单' }
 ]
+
+const JOB_STATUS_OPTIONS = [
+  { key: '', label: '全部状态' },
+  { key: 'queued', label: '等待打印' },
+  { key: 'claimed', label: '已领取' },
+  { key: 'sending', label: '发送中' },
+  { key: 'printed', label: '已打印' },
+  { key: 'failed', label: '打印失败' },
+  { key: 'cancelled', label: '已取消' }
+]
 const FIELD_LIBRARY = [
   { key: 'title', label: '票据名称', sample: '结账单' },
   { key: 'shopName', label: '店铺名称', sample: '张南火盆烧烤' },
   { key: 'banquetName', label: '宴会名称', sample: '生日宴' },
-  { key: 'tableNumber', label: '桌号', sample: 'A01' },
+  { key: 'tableNumber', label: '桌号', sample: '桌号：A01' },
   { key: 'tableInfo', label: '桌台信息', sample: '一楼大厅' },
   { key: 'orderNumber', label: '订单号', sample: 'ORD-20260713-001' },
   { key: 'customData', label: '自定义数据', sample: '会员到店' },
-  { key: 'peopleCount', label: '人数', sample: '4人' },
+  { key: 'peopleCount', label: '人数', sample: '人数：4人' },
   { key: 'seatCount', label: '席数', sample: '1席' },
-  { key: 'orderType', label: '订单类型', sample: '堂食' },
+  { key: 'orderType', label: '订单类型', sample: '类型：堂食' },
   { key: 'openingRemark', label: '开台备注', sample: '靠窗' },
   { key: 'dishes', label: '菜品明细', sample: '五花肉 x2\n金针菇 x1' },
-  { key: 'orderRemark', label: '整单备注', sample: '少辣' },
   { key: 'totalCount', label: '数量合计', sample: '共3份' },
-  { key: 'totalPrice', label: '订单价格', sample: '¥88.00' },
-  { key: 'orderTime', label: '下单时间', sample: '2026-07-13 12:30' },
-  { key: 'customImage', label: '自定义图片', sample: '[图片]' },
+  { key: 'orderAmount', label: '订单金额', sample: '订单金额：88\n打折（8.8折）：-10\n直减：-5' },
+  { key: 'receivableAmount', label: '应付金额', sample: '应付金额：73' },
+  { key: 'orderTime', label: '下单时间', sample: '下单时间：2026-07-13 12:30' },
+  { key: 'printTime', label: '打印时间', sample: '打印时间：2026-08-02 10:30' },
   { key: 'customText', label: '自定义文字', sample: '欢迎光临' }
 ]
+
+const CASHIER_DISH_PREVIEW_ROWS = [
+  { dish: '菜品', count: '数量', subtotal: '小计', header: true },
+  { dish: '鲜虾', count: '2', subtotal: '60' },
+  { dish: '薄切五花肉', count: '1', subtotal: '25' }
+]
+
+const CASHIER_SUMMARY_PREVIEW_ROWS = {
+  orderAmount: [
+    { label: '订单金额', amount: '88' },
+    { label: '打折（8.8折）', amount: '-10' },
+    { label: '直减', amount: '-5' }
+  ],
+  receivableAmount: [{ label: '应付金额', amount: '73' }]
+}
 
 function toast(title, icon) {
   wx.showToast({ title, icon: icon || 'none', duration: 1800 })
@@ -85,17 +113,43 @@ function setNested(target, path, value) {
   return result
 }
 
-function makePreviewFields(fields) {
+function makePreviewFields(fields, template = {}) {
   return (fields || []).map((field, index) => {
     const source = FIELD_LIBRARY.find(item => item.key === field.key) || {}
-    return { ...field, index, label: field.label || source.label || field.key, text: source.sample || field.key }
+    const isCashierDishTable = field.key === 'dishes' && ['checkout', 'prebill'].includes(template.ticketType)
+    const isCashierSummary = ['orderAmount', 'receivableAmount'].includes(field.key) && ['checkout', 'prebill'].includes(template.ticketType)
+    const text = field.key === 'title'
+      ? (template.name || source.sample || field.key)
+      : (isCashierDishTable
+        ? '菜品                  数量  小计\n鲜虾                    2    60\n薄切五花肉              1    25'
+        : (source.sample || field.key))
+    return {
+      ...field,
+      index,
+      label: field.label || source.label || field.key,
+      text,
+      isCashierDishTable,
+      isCashierSummary,
+      previewRows: isCashierDishTable ? CASHIER_DISH_PREVIEW_ROWS : [],
+      summaryRows: isCashierSummary ? (CASHIER_SUMMARY_PREVIEW_ROWS[field.key] || []) : []
+    }
   })
+}
+
+function getTemplateFieldName(fields, index) {
+  const field = (fields || [])[Number(index)]
+  if (!field) return ''
+  const source = FIELD_LIBRARY.find(item => item.key === field.key)
+  return (source && source.label) || field.key || ''
 }
 
 Page({
   data: {
     tabs: TAB_ITEMS,
+    settingsTabs: SETTINGS_TAB_ITEMS,
     activeTab: 'dashboard',
+    activeSettingsTab: '',
+    settingsDetailMode: false,
     loading: false,
     backendError: '',
     dashboard: { agentOnline: false, agents: [], printers: [], metrics: { queued: 0, failed: 0, unassigned: 0 }, alerts: [] },
@@ -105,9 +159,6 @@ Page({
     usbDevices: [],
     cashierConfigs: [],
     stations: [],
-    dishes: [],
-    categories: [],
-    categoryOptions: [{ _id: '', name: '所有分类' }],
     templates: [],
     templateBindingScopes: ['global', 'station', 'printer'],
     templateBindingScopeLabels: ['全店默认', '按后厨档口', '按具体打印机'],
@@ -124,36 +175,58 @@ Page({
     paperOptions: PAPER_OPTIONS,
     resolutionOptions: RESOLUTION_OPTIONS,
     ticketTypeOptions: TICKET_TYPE_OPTIONS,
-    sizeOptions: ['normal', 'medium', 'large', 'xlarge'],
-    sizeLabels: ['正常', '中号', '大号', '加大号'],
+    jobStatusOptions: JOB_STATUS_OPTIONS,
+    jobPrinterOptions: [{ _id: '', name: '全部打印机' }],
+    jobPrinterLabel: '全部打印机',
+    jobStatusLabel: '全部状态',
+    jobTicketLabel: '全部票据',
+    sizeOptions: ['small', 'normal', 'medium', 'large', 'xlarge'],
+    sizeLabels: ['小号', '正常', '中号', '大号', '加大号'],
     alignOptions: ['left', 'center', 'right'],
     alignLabels: ['左对齐', '居中', '右对齐'],
     colorOptions: ['black', 'red'],
     colorLabels: ['黑色', '红色'],
     fieldLibrary: FIELD_LIBRARY,
-    dishKeyword: '',
-    dishCategoryId: '',
-    dishUnassignedOnly: false,
-    selectedDishIds: [],
     selectedTemplateId: '',
     editTemplate: null,
     previewFields: [],
     selectedTemplateFieldIndex: -1,
-    jobFilter: { printerId: '', ticketType: '', deviceName: '', orderTail: '' },
-    logFilter: { printerId: '', range: 'today' },
+    selectedTemplateFieldName: '',
+    showTemplateDropdown: false,
+    showTemplateHistory: false,
+    templateHistory: [],
+    selectedTemplateHistoryIds: [],
+    jobFilter: { printerId: '', ticketType: '', status: '', orderTail: '' },
+    showJobPrinterDropdown: false,
+    showJobStatusDropdown: false,
+    showJobTicketDropdown: false,
+    logFilter: { printerId: '', agentId: '', range: 'today' },
+    logDeviceOptions: [{ _id: '', name: '全部设备' }],
+    logDeviceLabel: '全部设备',
+    showLogDeviceDropdown: false,
     showPrinterForm: false,
     printerForm: emptyPrinter(),
+    showPrinterMore: false,
+    printerMore: null,
     showStationForm: false,
     stationForm: { name: '', code: '', printerId: '', status: true, isDefault: false },
-    showRouteForm: false,
-    routeForm: { printEnabled: true, stationId: '' },
     showJobDetail: false,
     jobDetail: null,
     registration: null,
     showRegistration: false
   },
 
-  onLoad() {
+  onLoad(options = {}) {
+    const settingsTab = SETTINGS_TAB_ITEMS.find(item => item.key === String(options.settings || ''))
+    if (settingsTab) {
+      this.setData({
+        activeTab: 'settings',
+        activeSettingsTab: settingsTab.key,
+        settingsDetailMode: true
+      })
+      this.loadActiveTab()
+      return
+    }
     this.loadAll()
   },
 
@@ -191,10 +264,14 @@ Page({
   async loadPrinters() {
     const res = await this.call('admin.print.printers.list')
     const printers = res.data || []
+    const jobPrinterOptions = [{ _id: '', name: '全部打印机' }].concat(printers)
+    const selectedPrinter = jobPrinterOptions.find(item => item._id === this.data.jobFilter.printerId)
     this.setData({
       printers,
       kitchenPrinters: printers.filter(item => item.usage === 'kitchen' || item.usage === 'both'),
-      usbPrinterNames: printers.filter(item => item.connectionType === 'usb').map(item => item.name)
+      usbPrinterNames: printers.filter(item => item.connectionType === 'usb').map(item => item.name),
+      jobPrinterOptions,
+      jobPrinterLabel: selectedPrinter ? selectedPrinter.name : '全部打印机'
     })
   },
 
@@ -224,27 +301,11 @@ Page({
     this.setData({ stations: this.normalizeStations(res.data) })
   },
 
-  async loadDishes() {
-    const res = await this.call('admin.print.dishes.list', {
-      keyword: this.data.dishKeyword,
-      categoryId: this.data.dishCategoryId,
-      unassignedOnly: this.data.dishUnassignedOnly
-    })
-    const data = res.data || {}
-    const selected = this.data.selectedDishIds
-    const categories = data.categories || []
-    this.setData({
-      dishes: (data.list || []).map(item => ({ ...item, selected: selected.indexOf(item.dishId) >= 0 })),
-      categories,
-      categoryOptions: [{ _id: '', name: '所有分类' }].concat(categories)
-    })
-  },
-
   selectTemplate(templateId, templates) {
     const list = templates || this.data.templates
     const selected = list.find(item => item._id === templateId) || list[0]
     if (!selected) {
-      this.setData({ selectedTemplateId: '', editTemplate: null, previewFields: [] })
+      this.setData({ selectedTemplateId: '', editTemplate: null, previewFields: [], selectedTemplateFieldName: '' })
       return
     }
     const editTemplate = clone(selected)
@@ -254,11 +315,13 @@ Page({
     this.setData({
       selectedTemplateId: selected._id,
       editTemplate,
-      previewFields: makePreviewFields(editTemplate.fields),
+      previewFields: makePreviewFields(editTemplate.fields, editTemplate),
       selectedTemplateFieldIndex: editTemplate.fields && editTemplate.fields.length ? 0 : -1,
+      selectedTemplateFieldName: getTemplateFieldName(editTemplate.fields, 0),
       templateTestPrinters,
       templateTestPrinterId: selectedTestPrinter ? selectedTestPrinter._id : '',
-      templateTestPrinterName: selectedTestPrinter ? selectedTestPrinter.name : '请选择要测试的打印机'
+      templateTestPrinterName: selectedTestPrinter ? selectedTestPrinter.name : '请选择要测试的打印机',
+      showTemplateDropdown: false
     })
   },
 
@@ -292,41 +355,86 @@ Page({
       cursor: append ? this.data.logsNextCursor : ''
     })
     const page = Array.isArray(res.data) ? { list: res.data, hasMore: false, nextCursor: '' } : (res.data || {})
+    const deviceOptions = [{ _id: '', name: '全部设备' }].concat(
+      (page.devices || []).filter(item => item && item._id && item.name)
+    )
+    const selectedDevice = deviceOptions.find(item => item._id === this.data.logFilter.agentId)
     const rows = (page.list || []).map(item => ({ ...item, displayTime: formatTime(item.createTime) }))
     this.setData({
       logs: append ? this.data.logs.concat(rows) : rows,
       logsHasMore: !!page.hasMore,
-      logsNextCursor: page.nextCursor || ''
+      logsNextCursor: page.nextCursor || '',
+      logDeviceOptions: deviceOptions,
+      logDeviceLabel: selectedDevice ? selectedDevice.name : '全部设备'
     })
   },
 
-  async refreshCurrent() {
-    this.setData({ loading: true })
+  async loadSettingsTab() {
+    const tab = this.data.activeSettingsTab
+    if (!tab) return
+    if (tab === 'cashier') await Promise.all([this.loadPrinters(), this.loadCashier()])
+    if (tab === 'stations') await this.loadStations()
+    if (tab === 'templates') await Promise.all([this.loadPrinters(), this.loadStations(), this.loadTemplates()])
+    if (tab === 'logs') await Promise.all([this.loadPrinters(), this.loadLogs()])
+  },
+
+  async loadActiveTab() {
+    const tab = this.data.activeTab
+    if (tab === 'dashboard') await this.loadDashboard()
+    if (tab === 'printers') await this.loadPrinters()
+    if (tab === 'jobs') await Promise.all([this.loadPrinters(), this.loadJobs()])
+    if (tab === 'settings') await this.loadSettingsTab()
+  },
+
+  async switchTab(e) {
+    const key = e.currentTarget.dataset.key
+    this.setData(key === 'settings'
+      ? { activeTab: key, activeSettingsTab: '' }
+      : { activeTab: key })
     try {
-      const tab = this.data.activeTab
-      if (tab === 'dashboard') await this.loadDashboard()
-      if (tab === 'printers') await this.loadPrinters()
-      if (tab === 'cashier') await this.loadCashier()
-      if (tab === 'stations') await this.loadStations()
-      if (tab === 'dishes') await this.loadDishes()
-      if (tab === 'templates') await this.loadTemplates()
-      if (tab === 'jobs') await this.loadJobs()
-      if (tab === 'logs') await this.loadLogs()
-      toast('已刷新', 'success')
+      await this.loadActiveTab()
     } catch (err) {
-      toast(err.message || '刷新失败')
-    } finally {
-      this.setData({ loading: false })
+      toast(err.message || '加载失败')
     }
   },
 
-  switchTab(e) {
+  async switchSettingsTab(e) {
     const key = e.currentTarget.dataset.key
-    this.setData({ activeTab: key })
+    const settingsTab = SETTINGS_TAB_ITEMS.find(item => item.key === key)
+    if (!settingsTab) return
+    wx.navigateTo({
+      url: '/packages/admin/pages/admin/printer/printer?settings=' + settingsTab.key
+    })
   },
 
-  goFeature(e) {
-    this.setData({ activeTab: e.currentTarget.dataset.key })
+  goDishManager() {
+    wx.navigateTo({ url: '/packages/admin/pages/admin/dish/dish' })
+  },
+
+  async openDashboardMetric(e) {
+    const target = e.currentTarget.dataset.target
+    try {
+      if (target === 'printers') {
+        this.setData({ activeTab: 'printers' })
+        await this.loadPrinters()
+        return
+      }
+
+      const status = target === 'queued' || target === 'failed' ? target : ''
+      this.setData({
+        activeTab: 'jobs',
+        jobFilter: { printerId: '', ticketType: '', status, orderTail: '' },
+        jobPrinterLabel: '全部打印机',
+        jobStatusLabel: (JOB_STATUS_OPTIONS.find(item => item.key === status) || JOB_STATUS_OPTIONS[0]).label,
+        jobTicketLabel: '全部票据',
+        showJobPrinterDropdown: false,
+        showJobStatusDropdown: false,
+        showJobTicketDropdown: false
+      })
+      await Promise.all([this.loadPrinters(), this.loadJobs()])
+    } catch (err) {
+      toast(err.message || '加载打印任务失败')
+    }
   },
 
   openPrinterForm(e) {
@@ -393,7 +501,18 @@ Page({
     } catch (err) { toast(err.message || '操作失败') }
   },
 
+  openPrinterMore(e) {
+    const printer = e.currentTarget.dataset.item || null
+    const isCurrent = this.data.showPrinterMore && this.data.printerMore && printer && this.data.printerMore._id === printer._id
+    this.setData({ showPrinterMore: !isCurrent, printerMore: isCurrent ? null : printer })
+  },
+
+  closePrinterMore() {
+    this.setData({ showPrinterMore: false, printerMore: null })
+  },
+
   setPrinterHardware(e) {
+    this.closePrinterMore()
     const printer = e.currentTarget.dataset.item
     const choices = ['硬件正常', '疑似缺纸', '疑似开盖', '人工标记卡纸', '无法确认']
     const statuses = ['ok', 'paper_out', 'cover_open', 'jammed', 'unknown']
@@ -417,6 +536,7 @@ Page({
   },
 
   async confirmPrinterAction(e) {
+    if (this.data.showPrinterMore) this.closePrinterMore()
     const { action, id, name } = e.currentTarget.dataset
     const actionMap = {
       test: { title: '打印测试单', content: '将创建真实打印任务，由平板代理发送。', api: 'admin.print.printers.test' },
@@ -525,60 +645,27 @@ Page({
         throw new Error('云端未保存打印机绑定，请更新完整 tenantApi 后重试')
       }
       this.closeStationForm()
-      await Promise.all([this.loadStations(), this.loadDishes(), this.loadDashboard()])
+      await Promise.all([this.loadStations(), this.loadDashboard()])
       toast('档口已保存', 'success')
     } catch (err) { toast(err.message || '保存失败') }
   },
 
-  onDishKeyword(e) { this.setData({ dishKeyword: e.detail.value }) },
-  async searchDishes() { try { await this.loadDishes() } catch (err) { toast(err.message || '查询失败') } },
-  async toggleUnassigned() { this.setData({ dishUnassignedOnly: !this.data.dishUnassignedOnly }); await this.searchDishes() },
-  onDishCategory(e) {
-    const index = Number(e.detail.value)
-    const category = this.data.categoryOptions[index]
-    this.setData({ dishCategoryId: category ? category._id : '' })
-    this.searchDishes()
-  },
-
-  toggleDishSelect(e) {
-    const dishId = e.currentTarget.dataset.id
-    const selected = this.data.selectedDishIds.slice()
-    const index = selected.indexOf(dishId)
-    if (index >= 0) selected.splice(index, 1)
-    else selected.push(dishId)
-    this.setData({ selectedDishIds: selected, dishes: this.data.dishes.map(item => ({ ...item, selected: selected.indexOf(item.dishId) >= 0 })) })
-  },
-
-  openRouteForm(e) {
-    const dishId = e && e.currentTarget.dataset.id
-    const dish = this.data.dishes.find(item => item.dishId === dishId)
-    const selectedDishIds = dish ? [dish.dishId] : this.data.selectedDishIds
-    if (!selectedDishIds.length) { toast('请先选择要配置的菜品'); return }
+  toggleTemplateDropdown() {
     this.setData({
-      showRouteForm: true,
-      selectedDishIds,
-      routeForm: { printEnabled: dish ? dish.printEnabled : true, stationId: dish ? dish.stationId : '' }
+      showTemplateDropdown: !this.data.showTemplateDropdown,
+      showJobPrinterDropdown: false,
+      showJobStatusDropdown: false,
+      showJobTicketDropdown: false,
+      showLogDeviceDropdown: false,
+      showPrinterMore: false
     })
   },
 
-  closeRouteForm() { this.setData({ showRouteForm: false }) },
-  onRouteSwitch(e) { this.setData({ routeForm: setNested(this.data.routeForm, 'printEnabled', e.detail.value) }) },
-  onRouteStation(e) {
-    const station = this.data.stations[Number(e.detail.value)]
-    this.setData({ routeForm: setNested(this.data.routeForm, 'stationId', station ? station._id : '') })
+  selectTemplateOption(e) {
+    const template = this.data.templates[Number(e.currentTarget.dataset.index)]
+    if (!template) return
+    this.selectTemplate(template._id)
   },
-
-  async saveRoutes() {
-    try {
-      await this.call('admin.print.dishes.save', { dishIds: this.data.selectedDishIds, ...this.data.routeForm })
-      this.closeRouteForm()
-      this.setData({ selectedDishIds: [] })
-      await Promise.all([this.loadDishes(), this.loadDashboard()])
-      toast('菜品出品档口已保存', 'success')
-    } catch (err) { toast(err.message || '保存失败') }
-  },
-
-  chooseTemplate(e) { this.selectTemplate(e.currentTarget.dataset.id) },
 
   addTemplateField(e) {
     if (!this.data.editTemplate) return
@@ -586,10 +673,21 @@ Page({
     const template = clone(this.data.editTemplate)
     template.fields = template.fields || []
     template.fields.push({ id: `${source.key}-${Date.now()}`, key: source.key, label: source.label, size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: false })
-    this.setData({ editTemplate: template, previewFields: makePreviewFields(template.fields), selectedTemplateFieldIndex: template.fields.length - 1 })
+    this.setData({
+      editTemplate: template,
+      previewFields: makePreviewFields(template.fields, template),
+      selectedTemplateFieldIndex: template.fields.length - 1,
+      selectedTemplateFieldName: getTemplateFieldName(template.fields, template.fields.length - 1)
+    })
   },
 
-  selectTemplateField(e) { this.setData({ selectedTemplateFieldIndex: Number(e.currentTarget.dataset.index) }) },
+  selectTemplateField(e) {
+    const index = Number(e.currentTarget.dataset.index)
+    this.setData({
+      selectedTemplateFieldIndex: index,
+      selectedTemplateFieldName: getTemplateFieldName(this.data.editTemplate && this.data.editTemplate.fields, index)
+    })
+  },
 
   updateTemplateField(path, value) {
     const index = this.data.selectedTemplateFieldIndex
@@ -597,10 +695,13 @@ Page({
     const template = clone(this.data.editTemplate)
     const prefix = `fields.${index}.${path}`
     const next = setNested(template, prefix, value)
-    this.setData({ editTemplate: next, previewFields: makePreviewFields(next.fields) })
+    this.setData({
+      editTemplate: next,
+      previewFields: makePreviewFields(next.fields, next),
+      selectedTemplateFieldName: getTemplateFieldName(next.fields, index)
+    })
   },
 
-  onTemplateFieldInput(e) { this.updateTemplateField(e.currentTarget.dataset.key, e.detail.value) },
   onTemplateFieldSwitch(e) { this.updateTemplateField(e.currentTarget.dataset.key, e.detail.value) },
   onTemplateFieldPicker(e) {
     const options = this.data[e.currentTarget.dataset.options] || []
@@ -615,7 +716,12 @@ Page({
     const template = clone(this.data.editTemplate)
     const field = template.fields.splice(current, 1)[0]
     template.fields.splice(target, 0, field)
-    this.setData({ editTemplate: template, previewFields: makePreviewFields(template.fields), selectedTemplateFieldIndex: target })
+    this.setData({
+      editTemplate: template,
+      previewFields: makePreviewFields(template.fields, template),
+      selectedTemplateFieldIndex: target,
+      selectedTemplateFieldName: getTemplateFieldName(template.fields, target)
+    })
   },
 
   deleteTemplateField() {
@@ -623,7 +729,13 @@ Page({
     if (!this.data.editTemplate || current < 0) return
     const template = clone(this.data.editTemplate)
     template.fields.splice(current, 1)
-    this.setData({ editTemplate: template, previewFields: makePreviewFields(template.fields), selectedTemplateFieldIndex: Math.max(0, current - 1) })
+    const nextIndex = template.fields.length ? Math.max(0, current - 1) : -1
+    this.setData({
+      editTemplate: template,
+      previewFields: makePreviewFields(template.fields, template),
+      selectedTemplateFieldIndex: nextIndex,
+      selectedTemplateFieldName: getTemplateFieldName(template.fields, nextIndex)
+    })
   },
 
   onTemplatePaper(e) {
@@ -697,8 +809,16 @@ Page({
       if (action === 'reset') await this.call('admin.print.templates.reset', { templateId: template._id, ticketType: template.ticketType })
       if (action === 'history') {
         const res = await this.call('admin.print.templates.history', { templateId: template._id, ticketType: template.ticketType })
-        const latest = (res.data || []).slice(0, 5).map(item => `v${item.version} ${formatTime(item.createTime)}`).join('\n') || '暂无历史版本'
-        wx.showModal({ title: '模板版本', content: latest, showCancel: false })
+        const templateHistory = (res.data || []).slice(0, 20).map(item => ({
+          _id: item._id,
+          version: item.version || 1,
+          time: formatTime(item.createTime),
+          reason: item.reason === 'reset' ? '恢复默认前' : '保存前',
+          fields: clone(item.fields || []),
+          selected: false
+        }))
+        this._lastTemplateHistoryTap = null
+        this.setData({ showTemplateHistory: true, templateHistory, selectedTemplateHistoryIds: [] })
         return
       }
       await this.loadTemplates()
@@ -709,17 +829,161 @@ Page({
   onJobFilterInput(e) {
     this.setData({ jobFilter: setNested(this.data.jobFilter, e.currentTarget.dataset.key, e.detail.value) })
   },
-  onJobPrinterFilter(e) {
-    const printer = this.data.printers[Number(e.detail.value)]
-    this.setData({ jobFilter: setNested(this.data.jobFilter, 'printerId', printer ? printer._id : '') })
+
+  closeTemplateHistory() {
+    this._lastTemplateHistoryTap = null
+    this.setData({ showTemplateHistory: false, selectedTemplateHistoryIds: [] })
+  },
+
+  onTemplateHistoryTap(e) {
+    const versionId = e.currentTarget.dataset.id
+    const item = this.data.templateHistory.find(history => history._id === versionId)
+    if (!item) return
+    const timestamp = Date.now()
+    const previous = this._lastTemplateHistoryTap
+    this._lastTemplateHistoryTap = { versionId, timestamp }
+    if (previous && previous.versionId === versionId && timestamp - previous.timestamp < 360) {
+      const template = clone(this.data.editTemplate)
+      template.fields = clone(item.fields || [])
+      this._lastTemplateHistoryTap = null
+      this.setData({
+        editTemplate: template,
+        previewFields: makePreviewFields(template.fields, template),
+        selectedTemplateFieldIndex: -1,
+        selectedTemplateFieldName: '',
+        showTemplateHistory: false,
+        selectedTemplateHistoryIds: []
+      })
+      toast(`已载入 v${item.version}，请保存模板`, 'success')
+      return
+    }
+
+    const selected = this.data.selectedTemplateHistoryIds.slice()
+    const index = selected.indexOf(versionId)
+    if (index >= 0) selected.splice(index, 1)
+    else selected.push(versionId)
+    this.setData({
+      selectedTemplateHistoryIds: selected,
+      templateHistory: this.data.templateHistory.map(history => ({
+        ...history,
+        selected: selected.includes(history._id)
+      }))
+    })
+  },
+
+  deleteSelectedTemplateHistory() {
+    const versionIds = this.data.selectedTemplateHistoryIds
+    const template = this.data.editTemplate
+    if (!template || !versionIds.length) {
+      toast('请先选择要删除的历史版本')
+      return
+    }
+    wx.showModal({
+      title: '删除历史版本',
+      content: `确定删除已选择的 ${versionIds.length} 个历史版本吗？`,
+      success: async result => {
+        if (!result.confirm) return
+        try {
+          const res = await this.call('admin.print.templates.history.delete', {
+            templateId: template._id,
+            versionIds
+          })
+          const deleted = Number(res.data && res.data.deleted || 0)
+          const selected = new Set(versionIds)
+          this.setData({
+            templateHistory: this.data.templateHistory
+              .filter(item => !selected.has(item._id))
+              .map(item => ({ ...item, selected: false })),
+            selectedTemplateHistoryIds: []
+          })
+          toast(`已删除 ${deleted} 个历史版本`, 'success')
+        } catch (err) {
+          toast(err.message || '删除历史版本失败')
+        }
+      }
+    })
+  },
+  closeJobDropdowns() {
+    if (this.data.showJobPrinterDropdown || this.data.showJobStatusDropdown || this.data.showJobTicketDropdown || this.data.showLogDeviceDropdown || this.data.showTemplateDropdown || this.data.showPrinterMore) {
+      this.setData({
+        showJobPrinterDropdown: false,
+        showJobStatusDropdown: false,
+        showJobTicketDropdown: false,
+        showLogDeviceDropdown: false,
+        showTemplateDropdown: false,
+        showPrinterMore: false,
+        printerMore: null
+      })
+    }
+  },
+  toggleJobPrinterDropdown() {
+    this.setData({
+      showJobPrinterDropdown: !this.data.showJobPrinterDropdown,
+      showJobStatusDropdown: false,
+      showJobTicketDropdown: false,
+      showTemplateDropdown: false
+    })
+  },
+  toggleJobTicketDropdown() {
+    this.setData({
+      showJobPrinterDropdown: false,
+      showJobStatusDropdown: false,
+      showJobTicketDropdown: !this.data.showJobTicketDropdown,
+      showTemplateDropdown: false
+    })
+  },
+  toggleJobStatusDropdown() {
+    this.setData({
+      showJobPrinterDropdown: false,
+      showJobStatusDropdown: !this.data.showJobStatusDropdown,
+      showJobTicketDropdown: false,
+      showTemplateDropdown: false
+    })
+  },
+  selectJobPrinterOption(e) {
+    const item = this.data.jobPrinterOptions[Number(e.currentTarget.dataset.index)] || this.data.jobPrinterOptions[0]
+    this.setData({
+      jobFilter: setNested(this.data.jobFilter, 'printerId', item._id || ''),
+      jobPrinterLabel: item.name || '全部打印机',
+      showJobPrinterDropdown: false
+    })
     this.loadJobs()
   },
-  onJobTicketFilter(e) {
-    const item = TICKET_TYPE_OPTIONS[Number(e.detail.value)] || TICKET_TYPE_OPTIONS[0]
-    this.setData({ jobFilter: setNested(this.data.jobFilter, 'ticketType', item.key) })
+  selectJobTicketOption(e) {
+    const item = TICKET_TYPE_OPTIONS[Number(e.currentTarget.dataset.index)] || TICKET_TYPE_OPTIONS[0]
+    this.setData({
+      jobFilter: setNested(this.data.jobFilter, 'ticketType', item.key),
+      jobTicketLabel: item.label || '全部票据',
+      showJobTicketDropdown: false
+    })
     this.loadJobs()
   },
-  clearJobFilter() { this.setData({ jobFilter: { printerId: '', ticketType: '', deviceName: '', orderTail: '' } }); this.loadJobs() },
+  selectJobStatusOption(e) {
+    const item = JOB_STATUS_OPTIONS[Number(e.currentTarget.dataset.index)] || JOB_STATUS_OPTIONS[0]
+    this.setData({
+      jobFilter: setNested(this.data.jobFilter, 'status', item.key),
+      jobStatusLabel: item.label || '全部状态',
+      showJobStatusDropdown: false
+    })
+    this.loadJobs()
+  },
+  resetJobFilters() {
+    this.setData({
+      jobFilter: {
+        printerId: '',
+        ticketType: '',
+        status: '',
+        orderTail: this.data.jobFilter.orderTail || ''
+      },
+      jobPrinterLabel: '全部打印机',
+      jobStatusLabel: '全部状态',
+      jobTicketLabel: '全部票据',
+      showJobPrinterDropdown: false,
+      showJobStatusDropdown: false,
+      showJobTicketDropdown: false
+    })
+    this.loadJobs()
+  },
   loadMoreJobs() { if (this.data.jobsHasMore) this.loadJobs(true) },
 
   async openJob(e) {
@@ -744,13 +1008,33 @@ Page({
     this.setData({ logFilter: setNested(this.data.logFilter, 'printerId', printer ? printer._id : '') })
     this.loadLogs()
   },
+  toggleLogDeviceDropdown() {
+    this.setData({
+      showLogDeviceDropdown: !this.data.showLogDeviceDropdown,
+      showJobPrinterDropdown: false,
+      showJobTicketDropdown: false,
+      showTemplateDropdown: false
+    })
+  },
+  selectLogDeviceOption(e) {
+    const item = this.data.logDeviceOptions[Number(e.currentTarget.dataset.index)] || this.data.logDeviceOptions[0]
+    this.setData({
+      logFilter: setNested(this.data.logFilter, 'agentId', item._id || ''),
+      logDeviceLabel: item.name || '全部设备',
+      showLogDeviceDropdown: false
+    })
+    this.loadLogs()
+  },
   setLogRange(e) { this.setData({ logFilter: setNested(this.data.logFilter, 'range', e.currentTarget.dataset.range) }); this.loadLogs() },
   loadMoreLogs() { if (this.data.logsHasMore) this.loadLogs(true) },
   clearLogs() {
     wx.showModal({ title: '清空当前日志页', content: '一次最多删除当前筛选下的 100 条日志；较早日志建议使用“归档90天前”。', success: async modal => {
       if (!modal.confirm) return
       try {
-        const res = await this.call('admin.print.logs.clear', { printerId: this.data.logFilter.printerId })
+        const res = await this.call('admin.print.logs.clear', {
+          printerId: this.data.logFilter.printerId,
+          agentId: this.data.logFilter.agentId
+        })
         await this.loadLogs()
         const data = res.data || {}
         toast(data.hasMore ? `已清空 ${data.removed || 0} 条，本筛选下仍有更多日志` : `已清空 ${data.removed || 0} 条`, 'success')

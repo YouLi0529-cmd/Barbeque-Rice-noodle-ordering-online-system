@@ -419,6 +419,7 @@ page {
 .mini-refresh,
 .operation-btn,
 .pay-option,
+.prebill-btn,
 .checkout-btn {
   margin: 0;
   padding: 0;
@@ -436,6 +437,7 @@ page {
 .mini-refresh::after,
 .operation-btn::after,
 .pay-option::after,
+.prebill-btn::after,
 .checkout-btn::after {
   border: 0;
 }
@@ -576,9 +578,21 @@ page {
   font-weight: 900;
 }
 
+.prebill-btn {
+  height: 28rpx;
+  margin-top: auto;
+  border: 1rpx solid rgba(58, 36, 24, 0.1);
+  border-radius: 8rpx;
+  color: #6B4B34;
+  background: #FFF7EC;
+  font-size: 10rpx;
+  font-weight: 900;
+  line-height: 28rpx;
+}
+
 .checkout-btn {
   height: 38rpx;
-  margin-top: auto;
+  margin-top: 6rpx;
   border-radius: 10rpx;
   color: #FFF7EC;
   background: #B15B18;

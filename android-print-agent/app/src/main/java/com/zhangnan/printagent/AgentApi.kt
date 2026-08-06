@@ -74,8 +74,8 @@ class AgentApi(private val apiUrl: String, private val tenantId: String) {
     )
   }
 
-  fun start(agentId: String, token: String, job: PrintJob) {
-    post("print.agent.start", auth(agentId, token)
+  fun start(agentId: String, token: String, job: PrintJob): JSONObject {
+    return post("print.agent.start", auth(agentId, token)
       .put("jobId", job.id)
       .put("claimToken", job.claimToken))
   }

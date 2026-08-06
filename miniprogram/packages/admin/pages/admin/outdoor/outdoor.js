@@ -1021,10 +1021,9 @@ Page({
         }))
       })
       const sentCount = Number(res && res.data && res.data.sentCount || 0)
-      wx.showToast({
-        title: sentCount > 0 ? UI.sendSuccess : UI.actionFailed,
-        icon: sentCount > 0 ? 'success' : 'none'
-      })
+      if (sentCount <= 0) {
+        wx.showToast({ title: UI.actionFailed, icon: 'none' })
+      }
       this.setData({
         selectedGoodsMap: {},
         selectedGoodsCount: 0
@@ -1036,7 +1035,7 @@ Page({
     } catch (err) {
       console.error('send outdoor order to kitchen failed', err)
       wx.showToast({
-        title: err.message || UI.sendFailed,
+        title: UI.sendFailed,
         icon: 'none'
       })
     } finally {
@@ -1068,10 +1067,9 @@ Page({
         orderIds: getSelectedOrderDocs(order).map(item => item._id).filter(Boolean)
       })
       const retriedCount = Number(res && res.data && res.data.retriedCount || 0)
-      wx.showToast({
-        title: retriedCount > 0 ? UI.retryKitchenSuccess : UI.actionFailed,
-        icon: retriedCount > 0 ? 'success' : 'none'
-      })
+      if (retriedCount <= 0) {
+        wx.showToast({ title: UI.actionFailed, icon: 'none' })
+      }
       this.loadList({
         selectedId: order._rootOrderId || order._id,
         resetSelection: true,
@@ -1079,7 +1077,7 @@ Page({
       })
     } catch (err) {
       console.error('retry outdoor kitchen items failed', err)
-      wx.showToast({ title: err.message || UI.sendFailed, icon: 'none' })
+      wx.showToast({ title: UI.sendFailed, icon: 'none' })
     } finally {
       this.setData({ retryingKitchen: false })
     }

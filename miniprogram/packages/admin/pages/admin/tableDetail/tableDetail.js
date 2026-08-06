@@ -53,6 +53,9 @@ const UI = {
   receivable: '\u5e94\u6536',
   actualReceived: '\u5b9e\u6536',
   finishCheckout: '\u4ed8\u6b3e\u5b8c\u6210\uff0c\u786e\u5b9a\u7ed3\u8d26',
+  printPrebill: '\u6253\u5370\u9884\u7ed3\u5355',
+  prebillPrintSuccess: '\u9884\u7ed3\u5355\u5df2\u53d1\u9001',
+  prebillPrintFailed: '\u9884\u7ed3\u5355\u6253\u5370\u5931\u8d25',
   sendKitchen: '\u53d1\u9001\u540e\u53a8',
   sentToKitchen: '\u5df2\u53d1\u9001',
   refundSuccess: '\u5df2\u9000\u83dc',
@@ -391,7 +394,8 @@ Page({
     editDishTitle: '',
     editDishOptionsInput: '',
     editDishRemark: '',
-    checkingOut: false
+    checkingOut: false,
+    printingPrebill: false
   },
 
   onLoad(options) {
@@ -1441,10 +1445,9 @@ Page({
         }))
       })
       const updated = Number(res && res.data && res.data.sentCount || 0)
-      wx.showToast({
-        title: updated > 0 ? UI.sendSuccess : UI.noOrder,
-        icon: updated > 0 ? 'success' : 'none'
-      })
+      if (updated <= 0) {
+        wx.showToast({ title: UI.noOrder, icon: 'none' })
+      }
       this.setData({
         selectedDishRowId: '',
         selectedDishName: '',
@@ -1458,7 +1461,7 @@ Page({
     } catch (err) {
       console.error('send table orders to kitchen failed', err)
       wx.showToast({
-        title: err.message || '\u53d1\u9001\u5931\u8d25',
+        title: '\u53d1\u9001\u672a\u5b8c\u6210\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5',
         icon: 'none'
       })
     } finally {
@@ -1490,15 +1493,14 @@ Page({
         orderId: groupId
       })
       const retriedCount = Number(res && res.data && res.data.retriedCount || 0)
-      wx.showToast({
-        title: retriedCount > 0 ? UI.retryKitchenSuccess : UI.noOrder,
-        icon: retriedCount > 0 ? 'success' : 'none'
-      })
+      if (retriedCount <= 0) {
+        wx.showToast({ title: UI.noOrder, icon: 'none' })
+      }
       await this.loadDetail(true)
     } catch (err) {
       console.error('retry failed kitchen dishes failed', err)
       wx.showToast({
-        title: err.message || UI.actionTodo,
+        title: '\u91CD\u53D1\u672A\u5B8C\u6210\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5',
         icon: 'none'
       })
     } finally {
@@ -1552,6 +1554,37 @@ Page({
       })
     } finally {
       this.setData({ checkingOut: false })
+    }
+  },
+
+  async printPrebill() {
+    if (this.data.printingPrebill) return
+    const table = this.data.table || {}
+    if (!table.tableNumber || this.data.billGroups.length === 0) {
+      wx.showToast({ title: UI.noOrder, icon: 'none' })
+      return
+    }
+
+    try {
+      this.setData({ printingPrebill: true })
+      const res = await apiClient.call('admin.table.prebill', {
+        areaKey: table.areaKey,
+        tableNumber: table.tableNumber,
+        paymentMethod: this.data.paymentMethod,
+        discountType: this.data.discountType,
+        discountValue: this.data.discountValue,
+        directReduceValue: this.data.directReduceValue
+      })
+      const skipped = !!(res && res.data && res.data.skipped)
+      wx.showToast({
+        title: skipped ? '\u9884\u7ed3\u5355\u672a\u53d1\u9001' : UI.prebillPrintSuccess,
+        icon: skipped ? 'none' : 'success'
+      })
+    } catch (err) {
+      console.error('print prebill failed', err)
+      wx.showToast({ title: err.message || UI.prebillPrintFailed, icon: 'none' })
+    } finally {
+      this.setData({ printingPrebill: false })
     }
   }
 })

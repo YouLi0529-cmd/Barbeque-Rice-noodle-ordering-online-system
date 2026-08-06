@@ -1038,7 +1038,10 @@ async function createOrder(payload) {
       userAvatar: user.avatarUrl || '',
       userPhone: user.phoneNumber || '',
       tableNumber: orderScene === 'camping' ? '' : effectiveTableNumber,
-      ...inheritedTableGroup
+      ...inheritedTableGroup,
+      peopleCount: orderScene === 'camping'
+        ? 0
+        : Math.max(Number(inheritedTableGroup.peopleCount || 0), getSharedCartPeopleCount(sharedSession))
     }
 
     const orderRes = await transaction.collection('order').add({
@@ -6398,7 +6401,8 @@ async function adminCollectionList(payload) {
 }
 
 async function adminListInfoCenter(payload) {
-  const [orderRes, reservationRes] = await Promise.all([
+  const tenantId = getTenantId(payload)
+  const [orderRes, reservationRes, printFailureRes] = await Promise.all([
     db.collection('order')
       .where({
         type: 'order',
@@ -6413,6 +6417,13 @@ async function adminListInfoCenter(payload) {
         status: _.in(['pending', 'confirmed'])
       })
       .orderBy('createTime', 'desc')
+      .limit(100)
+      .get(),
+    db.collection('printJobs')
+      .where({
+        storeId: tenantId,
+        status: 'failed'
+      })
       .limit(100)
       .get()
   ])
@@ -6443,12 +6454,22 @@ async function adminListInfoCenter(payload) {
     status: item.status || '',
     updateTime: item.updateTime || item.createTime
   }))
+  const printFailures = (printFailureRes.data || []).map(job => ({
+    _id: job._id,
+    printerName: job.printerName || '',
+    ticketName: job.ticketName || job.ticketType || '',
+    tableNumber: job.tableNumber || '',
+    orderNumber: job.orderNumber || '',
+    failedAt: job.failedAt || job.updateTime || job.createTime,
+    updateTime: job.updateTime || job.failedAt || job.createTime
+  }))
 
   return {
     success: true,
     data: {
       orders,
-      reservations
+      reservations,
+      printFailures
     }
   }
 }

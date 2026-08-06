@@ -55,6 +55,35 @@ function valueOf(item, keys) {
   return ''
 }
 
+function isDefaultKitchenOption(value) {
+  const option = String(value || '').trim()
+  return option === '正常' || option.startsWith('正常')
+}
+
+function getKitchenSpecialNotes(item = {}) {
+  const values = []
+  const append = value => {
+    if (Array.isArray(value)) {
+      value.forEach(append)
+      return
+    }
+    if (value && typeof value === 'object') {
+      Object.values(value).forEach(append)
+      return
+    }
+    const note = String(value || '').trim().replace(/^备注[:：]\s*/, '')
+    if (!note || isDefaultKitchenOption(note) || values.includes(note)) return
+    values.push(note)
+  }
+
+  append(item.tags)
+  append(valueOf(item, ['specification', 'spec', 'skuName']))
+  append(valueOf(item, ['cookingMethod', 'method', 'practice']))
+  append(valueOf(item, ['taste', 'flavor']))
+  append(valueOf(item, ['remark', 'note']))
+  return values
+}
+
 function mergeKitchenDishes(entries = []) {
   const groups = new Map()
   entries.forEach(entry => {
@@ -63,7 +92,7 @@ function mergeKitchenDishes(entries = []) {
     const specification = valueOf(item, ['specification', 'spec', 'skuName'])
     const method = valueOf(item, ['cookingMethod', 'method', 'practice'])
     const taste = valueOf(item, ['taste', 'flavor'])
-    const remark = valueOf(item, ['remark', 'note'])
+    const remark = getKitchenSpecialNotes(item).join('、')
     const combo = valueOf(item, ['comboRelationId', 'comboId', 'setMealId', 'packageId'])
     const signature = [dishId, specification, method, taste, remark, combo].join('\u001f')
     const current = groups.get(signature)
@@ -83,6 +112,35 @@ function mergeKitchenDishes(entries = []) {
       comboRelationId: combo,
       count,
       sourceIndexes: [entry.index]
+    })
+  })
+  return Array.from(groups.values())
+}
+
+function mergeCashierDishes(entries = []) {
+  const groups = new Map()
+  entries.forEach(entry => {
+    const item = entry.item || entry || {}
+    const dishId = valueOf(item, ['dishId', '_id', 'id'])
+    const dishName = valueOf(item, ['dishName', 'name'])
+    const count = Number(item.count || 0)
+    const unitPrice = Number(item.price !== undefined ? item.price : item.originalPrice || 0)
+    const subtotal = Number(item.subtotal !== undefined ? item.subtotal : unitPrice * count)
+    const signature = [dishId, dishName, unitPrice].join('\u001f')
+    const current = groups.get(signature)
+
+    if (current) {
+      current.count += count
+      current.subtotal += subtotal
+      return
+    }
+
+    groups.set(signature, {
+      dishId,
+      dishName,
+      count,
+      unitPrice,
+      subtotal
     })
   })
   return Array.from(groups.values())
@@ -478,6 +536,124 @@ function createPrintService({ db, _, defaultTenantId }) {
     return { ...data, _id: id }
   }
 
+  function kitchenTemplateFields() {
+    return [
+      { id: 'title', key: 'title', label: '\u7968\u636e\u540d\u79f0', size: 'xlarge', align: 'center', bold: true, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
+      { id: 'table', key: 'tableNumber', label: '\u684c\u53f7', size: 'large', align: 'left', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
+      { id: 'order-type', key: 'orderType', label: '\u8ba2\u5355\u7c7b\u578b', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
+      { id: 'people', key: 'peopleCount', label: '\u4eba\u6570', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
+      { id: 'order', key: 'orderNumber', label: '\u8ba2\u5355\u53f7', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
+      { id: 'dishes', key: 'dishes', label: '\u83dc\u54c1\u660e\u7ec6', size: 'large', align: 'left', bold: true, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
+      { id: 'time', key: 'orderTime', label: '\u4e0b\u5355\u65f6\u95f4', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: true },
+      printTimeTemplateField()
+    ]
+  }
+
+  function printTimeTemplateField() {
+    return { id: 'print-time', key: 'printTime', label: '\u6253\u5370\u65f6\u95f4', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: false }
+  }
+
+  function migrateKitchenTemplateHeader(fields) {
+    const source = Array.isArray(fields) ? fields.map(field => ({ ...field })) : []
+    if (!source.length) return { fields: kitchenTemplateFields(), changed: true }
+
+    const defaults = kitchenTemplateFields()
+    const defaultMap = defaults.reduce((map, field) => ({ ...map, [field.key]: field }), {})
+    const byKey = source.reduce((map, field) => ({ ...map, [field.key]: field }), {})
+    const headerKeys = ['tableNumber', 'orderType', 'peopleCount']
+    const body = source.filter(field => field.key !== 'orderRemark' && !headerKeys.includes(field.key))
+    const headers = headerKeys.map(key => byKey[key] || { ...defaultMap[key] })
+    const titleIndex = body.findIndex(field => field.key === 'title')
+    const insertAt = titleIndex >= 0 ? titleIndex + 1 : 0
+
+    body.splice(insertAt, 0, ...headers)
+    if (!body.some(field => field.key === 'printTime')) {
+      const orderTimeIndex = body.findIndex(field => field.key === 'orderTime')
+      body.splice(orderTimeIndex >= 0 ? orderTimeIndex + 1 : body.length, 0, printTimeTemplateField())
+    }
+    return { fields: body, changed: JSON.stringify(source) !== JSON.stringify(body) }
+  }
+
+  async function ensureKitchenTemplateHeader(template) {
+    if (!template || template.scope !== 'kitchen' || Number(template.kitchenHeaderVersion || 0) >= 4) {
+      return template
+    }
+
+    const migration = migrateKitchenTemplateHeader(template.fields)
+    const patch = { kitchenHeaderVersion: 4, updateTime: now() }
+    if (migration.changed) patch.fields = migration.fields
+    await db.collection('receiptTemplates').doc(template._id).update({ data: patch })
+    return { ...template, ...patch }
+  }
+
+  function isSettlementTicket(ticketType) {
+    return ticketType === 'checkout' || ticketType === 'prebill'
+  }
+
+  function cashierSummaryFields() {
+    return [
+      { id: 'order-amount', key: 'orderAmount', label: '\u8ba2\u5355\u91d1\u989d', size: 'normal', align: 'left', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
+      { id: 'receivable-amount', key: 'receivableAmount', label: '\u5e94\u4ed8\u91d1\u989d', size: 'large', align: 'left', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false }
+    ]
+  }
+
+  function cashierTemplateFields(definition) {
+    const fields = [
+      { id: 'title', key: 'title', label: '\u7968\u636e\u540d\u79f0', size: 'large', align: 'center', bold: true, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
+      { id: 'shop', key: 'shopName', label: '\u5e97\u94fa\u540d\u79f0', size: 'normal', align: 'center', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
+      { id: 'table', key: 'tableNumber', label: '\u684c\u53f7', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
+      { id: 'order', key: 'orderNumber', label: '\u8ba2\u5355\u53f7', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
+      { id: 'dishes', key: 'dishes', label: '\u83dc\u54c1\u660e\u7ec6', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: true, blankBefore: false }
+    ]
+    if (isSettlementTicket(definition.ticketType)) {
+      fields.push(...cashierSummaryFields())
+    } else {
+      fields.push({ id: 'total', key: 'totalPrice', label: '\u8ba2\u5355\u4ef7\u683c', size: 'large', align: 'right', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false })
+    }
+    fields.push({ id: 'time', key: 'orderTime', label: '\u4e0b\u5355\u65f6\u95f4', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: true })
+    fields.push(printTimeTemplateField())
+    return fields
+  }
+
+  async function migrateCashierSummaryTemplate(template) {
+    if (!template || !isSettlementTicket(template.ticketType) || Number(template.cashierSummaryVersion || 0) >= 5) {
+      return template
+    }
+
+    const source = Array.isArray(template.fields) ? template.fields.map(field => ({ ...field })) : []
+    const existing = source.reduce((map, field) => ({ ...map, [field.key]: field }), {})
+    const summaryKeys = ['totalPrice', 'orderAmount', 'discountAmount', 'directReduceAmount', 'receivableAmount']
+    const fields = source.filter(field => !summaryKeys.includes(field.key) && field.key !== 'orderRemark')
+    const legacyTotal = existing.orderAmount || existing.totalPrice
+    const defaults = cashierSummaryFields()
+    const summaries = defaults.map(field => {
+      if (field.key === 'orderAmount' && legacyTotal) {
+        return { ...legacyTotal, id: 'order-amount', key: 'orderAmount', label: '\u8ba2\u5355\u91d1\u989d', align: 'left' }
+      }
+      return existing[field.key] || { ...field }
+    })
+    const timeIndex = fields.findIndex(field => field.key === 'orderTime')
+    fields.splice(timeIndex >= 0 ? timeIndex : fields.length, 0, ...summaries)
+    if (!fields.some(field => field.key === 'printTime')) {
+      const printTimeIndex = fields.findIndex(field => field.key === 'orderTime')
+      fields.splice(printTimeIndex >= 0 ? printTimeIndex + 1 : fields.length, 0, printTimeTemplateField())
+    }
+    const patch = { cashierSummaryVersion: 5, updateTime: now() }
+    if (JSON.stringify(source) !== JSON.stringify(fields)) patch.fields = fields
+    await db.collection('receiptTemplates').doc(template._id).update({ data: patch })
+    return { ...template, ...patch }
+  }
+
+  async function removeWholeOrderRemarkField(template) {
+    if (!template || Number(template.orderRemarkRemovedVersion || 0) >= 1) return template
+    const source = Array.isArray(template.fields) ? template.fields.map(field => ({ ...field })) : []
+    const fields = source.filter(field => field.key !== 'orderRemark')
+    const patch = { orderRemarkRemovedVersion: 1, updateTime: now() }
+    if (JSON.stringify(source) !== JSON.stringify(fields)) patch.fields = fields
+    await db.collection('receiptTemplates').doc(template._id).update({ data: patch })
+    return { ...template, ...patch }
+  }
+
   function defaultTemplate(definition) {
     const kitchen = definition.scope === 'kitchen'
     return {
@@ -489,23 +665,11 @@ function createPrintService({ db, _, defaultTenantId }) {
       printerId: '',
       paperWidth: definition.paperWidth,
       fields: kitchen
-        ? [
-            { id: 'title', key: 'title', label: '\u7968\u636e\u540d\u79f0', size: 'xlarge', align: 'center', bold: true, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
-            { id: 'table', key: 'tableNumber', label: '\u684c\u53f7', size: 'large', align: 'left', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
-            { id: 'order', key: 'orderNumber', label: '\u8ba2\u5355\u53f7', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
-            { id: 'dishes', key: 'dishes', label: '\u83dc\u54c1\u660e\u7ec6', size: 'large', align: 'left', bold: true, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
-            { id: 'remark', key: 'orderRemark', label: '\u6574\u5355\u5907\u6ce8', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
-            { id: 'time', key: 'orderTime', label: '\u4e0b\u5355\u65f6\u95f4', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: true }
-          ]
-        : [
-            { id: 'title', key: 'title', label: '\u7968\u636e\u540d\u79f0', size: 'large', align: 'center', bold: true, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
-            { id: 'shop', key: 'shopName', label: '\u5e97\u94fa\u540d\u79f0', size: 'normal', align: 'center', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
-            { id: 'table', key: 'tableNumber', label: '\u684c\u53f7', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
-            { id: 'order', key: 'orderNumber', label: '\u8ba2\u5355\u53f7', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
-            { id: 'dishes', key: 'dishes', label: '\u83dc\u54c1\u660e\u7ec6', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: true, blankBefore: false },
-            { id: 'total', key: 'totalPrice', label: '\u8ba2\u5355\u4ef7\u683c', size: 'large', align: 'right', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
-            { id: 'time', key: 'orderTime', label: '\u4e0b\u5355\u65f6\u95f4', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: true }
-          ],
+        ? kitchenTemplateFields()
+        : cashierTemplateFields(definition),
+      kitchenHeaderVersion: kitchen ? 4 : 0,
+      cashierSummaryVersion: isSettlementTicket(definition.ticketType) ? 5 : 0,
+      orderRemarkRemovedVersion: 1,
       version: 1,
       updateTime: now(),
       createTime: now()
@@ -639,12 +803,22 @@ function createPrintService({ db, _, defaultTenantId }) {
 
     for (const definition of TEMPLATE_DEFINITIONS) {
       const templateId = stableId('template', `${id}:${definition.ticketType}`)
-      await setDefault('receiptTemplates', templateId, {
+      let template = await setDefault('receiptTemplates', templateId, {
         _id: templateId,
         storeId: id,
         ...defaultTemplate(definition)
       })
+      template = await removeWholeOrderRemarkField(template)
+      if (definition.scope === 'kitchen') await ensureKitchenTemplateHeader(template)
+      if (definition.scope === 'cashier' && isSettlementTicket(definition.ticketType)) {
+        await migrateCashierSummaryTemplate(template)
+      }
     }
+
+    // Existing stores may have independently edited settlement templates. Keep the
+    // prebill layout aligned with the checkout layout while preserving each title.
+    const checkoutTemplate = await getDoc('receiptTemplates', stableId('template', `${id}:checkout`))
+    await syncSettlementTemplateLayout(id, checkoutTemplate, 'settlement-layout-initial-sync')
   }
 
   async function getActor() {
@@ -770,11 +944,124 @@ function createPrintService({ db, _, defaultTenantId }) {
     const value = data[key]
     if (key === 'dishes') {
       const dishes = Array.isArray(value) ? value : []
-      return dishes.map(item => `${item.dishName || item.name || ''} x${Number(item.count || 0)}${item.remark ? ` (${item.remark})` : ''}`).join('\n')
+       if (data.dishDisplayMode === 'cashier') {
+         return formatCashierDishTable(dishes, data.dishTableWidth)
+       }
+      return formatKitchenStyleDishes(dishes)
     }
-    if (key === 'totalPrice' && value !== undefined && value !== null && value !== '') return `\uffe5${Number(value || 0).toFixed(2)}`
+    if (key === 'totalPrice' && value !== undefined && value !== null && value !== '') {
+      return data.compactMoney ? formatCompactMoney(value) : `\uffe5${Number(value || 0).toFixed(2)}`
+    }
+    if (key === 'orderTime' && value !== undefined && value !== null && value !== '') {
+      const orderTime = String(value)
+      return orderTime.startsWith('\u4e0b\u5355\u65f6\u95f4\uff1a') ? orderTime : `\u4e0b\u5355\u65f6\u95f4\uff1a${orderTime}`
+    }
     if (value === false || value === 0) return value
-    return value
+   return value
+ }
+
+  function ticketTextWidth(value) {
+    return Array.from(String(value || '')).reduce((width, character) => {
+      return width + (character.codePointAt(0) > 0xFF ? 2 : 1)
+    }, 0)
+  }
+
+ function trimTicketText(value, maxWidth) {
+   const textValue = String(value || '')
+   let result = ''
+   for (const character of Array.from(textValue)) {
+     if (ticketTextWidth(result + character) > maxWidth) break
+     result += character
+   }
+   return result
+ }
+
+  function wrapTicketText(value, maxWidth) {
+    const lines = []
+    let line = ''
+    Array.from(String(value || '')).forEach(character => {
+      if (line && ticketTextWidth(line + character) > maxWidth) {
+        lines.push(line)
+        line = character
+        return
+      }
+      line += character
+    })
+    if (line || !lines.length) lines.push(line)
+    return lines
+  }
+
+ function formatCompactMoney(value) {
+   const amount = Number(value || 0)
+   return Number.isFinite(amount) ? String(Math.round(amount)) : '0'
+ }
+
+  function formatCashierMoneyRow(label, amount, paperWidth) {
+    const lineWidth = Number(paperWidth || 58) >= 80 ? 48 : 32
+    const left = String(label || '')
+    const right = formatCompactMoney(amount)
+    const gap = Math.max(1, lineWidth - ticketTextWidth(left) - ticketTextWidth(right))
+    return `${left}${' '.repeat(gap)}${right}`
+  }
+
+  function buildCashierSettlementTicketData(checkoutSummary = {}, fallbackOrderAmount = 0, paperWidth = 58) {
+    const summary = checkoutSummary && typeof checkoutSummary === 'object' ? checkoutSummary : {}
+    const orderAmount = summary.totalPrice !== undefined
+      ? number(summary.totalPrice, 0)
+      : number(fallbackOrderAmount, 0)
+    const discountValue = Number(summary.discountValue)
+    const hasRateDiscount = summary.discountType === 'discount' && Number.isFinite(discountValue) && discountValue >= 0 && discountValue <= 10
+    const priceAfterRateDiscount = hasRateDiscount ? orderAmount * discountValue / 10 : orderAmount
+    const discountAmount = Math.max(0, orderAmount - priceAfterRateDiscount)
+    const directReduceValue = Number(summary.directReduceValue)
+    const hasDirectReduction = Number.isFinite(directReduceValue) && directReduceValue > 0
+    const receivable = summary.receivable !== undefined
+      ? number(summary.receivable, priceAfterRateDiscount - (hasDirectReduction ? directReduceValue : 0))
+      : priceAfterRateDiscount - (hasDirectReduction ? directReduceValue : 0)
+
+    const orderAmountLines = [formatCashierMoneyRow('\u8ba2\u5355\u91d1\u989d', orderAmount, paperWidth)]
+    if (hasRateDiscount) orderAmountLines.push(formatCashierMoneyRow(`\u6253\u6298\uff08${discountValue}\u6298\uff09`, -discountAmount, paperWidth))
+    if (hasDirectReduction) orderAmountLines.push(formatCashierMoneyRow('\u76f4\u51cf', -directReduceValue, paperWidth))
+
+    return {
+      orderAmount: orderAmountLines.join('\n'),
+      receivableAmount: formatCashierMoneyRow('\u5e94\u4ed8\u91d1\u989d', Math.max(0, receivable), paperWidth)
+    }
+  }
+
+ function padTicketText(value, width, align = 'left') {
+   const textValue = trimTicketText(value, width)
+   const padding = Math.max(0, width - ticketTextWidth(textValue))
+    if (align === 'center') {
+      const leftPadding = Math.floor(padding / 2)
+      return `${' '.repeat(leftPadding)}${textValue}${' '.repeat(padding - leftPadding)}`
+    }
+   return align === 'right' ? `${' '.repeat(padding)}${textValue}` : `${textValue}${' '.repeat(padding)}`
+ }
+
+  function formatCashierDishTable(dishes = [], paperWidth = 58) {
+   const widePaper = Number(paperWidth || 58) >= 76
+   const columns = widePaper
+      ? { dish: 21, count: 16, subtotal: 11 }
+      : { dish: 14, count: 10, subtotal: 8 }
+    const header = `${padTicketText('\u83dc\u54c1', columns.dish)}${padTicketText('\u6570\u91cf', columns.count, 'center')}${padTicketText('\u5c0f\u8ba1', columns.subtotal, 'right')}`
+    const rows = dishes.reduce((list, item) => {
+      const nameLines = wrapTicketText(item.dishName || item.name || '', columns.dish)
+      const subtotal = formatCompactMoney(item.subtotal)
+      list.push(`${padTicketText(nameLines[0], columns.dish)}${padTicketText(item.count || 0, columns.count, 'center')}${padTicketText(subtotal, columns.subtotal, 'right')}`)
+      nameLines.slice(1).forEach(nameLine => list.push(padTicketText(nameLine, columns.dish)))
+      return list
+    }, [])
+    return [header].concat(rows).join('\n')
+  }
+
+  function formatKitchenStyleDishes(dishes = []) {
+    return dishes.reduce((rows, item) => {
+      rows.push(`${item.dishName || item.name || ''} x${Number(item.count || 0)}`)
+      const note = String(item.remark || '').trim()
+      if (note) rows.push(`  ${note}`)
+      return rows
+    }, []).join('\n')
   }
 
   function renderTicket(template = {}, data = {}) {
@@ -806,6 +1093,25 @@ function createPrintService({ db, _, defaultTenantId }) {
     }
   }
 
+  function formatPrintTime(timestamp) {
+    return new Date(timestamp || now()).toLocaleString('zh-CN', {
+      hour12: false,
+      timeZone: 'Asia/Shanghai'
+    })
+  }
+
+  function setTicketPrintTime(ticket, timestamp) {
+    const source = ticket && typeof ticket === 'object' ? ticket : {}
+    const lines = Array.isArray(source.lines) ? source.lines : []
+    const printTime = `\u6253\u5370\u65f6\u95f4\uff1a${formatPrintTime(timestamp)}`
+    return {
+      ...source,
+      lines: lines.map(line => line && line.key === 'printTime'
+        ? { ...line, text: printTime }
+        : line)
+    }
+  }
+
   function templateIdFor(id, ticketType, binding = {}) {
     const bindScope = text(binding.bindScope || 'global')
     if (bindScope === 'printer' && binding.printerId) return stableId('template', `${id}:${ticketType}:printer:${binding.printerId}`)
@@ -831,6 +1137,76 @@ function createPrintService({ db, _, defaultTenantId }) {
       if (isKitchenTicket(ticketType) && !isKitchenPrinter(printer)) throw new Error('kitchen template requires a kitchen printer')
     }
     return { bindScope, stationId, printerId }
+  }
+
+  function settlementPeerTicketType(ticketType) {
+    if (ticketType === 'checkout') return 'prebill'
+    if (ticketType === 'prebill') return 'checkout'
+    return ''
+  }
+
+  async function syncSettlementTemplateLayout(id, sourceTemplate, reason = 'settlement-layout-sync') {
+    if (!sourceTemplate || !isSettlementTicket(sourceTemplate.ticketType)) return null
+
+    const peerTicketType = settlementPeerTicketType(sourceTemplate.ticketType)
+    const definition = TEMPLATE_DEFINITIONS.find(item => item.ticketType === peerTicketType)
+    if (!definition) return null
+
+    const binding = {
+      bindScope: text(sourceTemplate.bindScope || 'global'),
+      stationId: text(sourceTemplate.stationId),
+      printerId: text(sourceTemplate.printerId)
+    }
+    const peerTemplateId = templateIdFor(id, peerTicketType, binding)
+    const existing = await getDoc('receiptTemplates', peerTemplateId)
+    const fields = normalizeTemplateFields(sourceTemplate.fields)
+    if (!fields.length) return existing
+
+    const sameLayout = existing
+      && JSON.stringify(existing.fields || []) === JSON.stringify(fields)
+      && Number(existing.paperWidth || 0) === Number(sourceTemplate.paperWidth || 0)
+      && text(existing.bindScope || 'global') === binding.bindScope
+      && text(existing.stationId) === binding.stationId
+      && text(existing.printerId) === binding.printerId
+    if (sameLayout) return existing
+
+    if (existing) {
+      await db.collection('receiptTemplateVersions').add({
+        data: {
+          storeId: id,
+          templateId: peerTemplateId,
+          ticketType: peerTicketType,
+          version: existing.version || 1,
+          fields: existing.fields || [],
+          createTime: now(),
+          reason
+        }
+      })
+    }
+
+    const data = documentData({
+      ...(existing || defaultTemplate(definition)),
+      _id: peerTemplateId,
+      storeId: id,
+      ticketType: peerTicketType,
+      // Keep the peer ticket's own title. Only its layout follows the source ticket.
+      name: text(existing && existing.name || definition.name),
+      scope: definition.scope,
+      fields,
+      paperWidth: Number(sourceTemplate.paperWidth) || definition.paperWidth,
+      bindScope: binding.bindScope,
+      stationId: binding.stationId,
+      printerId: binding.printerId,
+      cashierSummaryVersion: 5,
+      orderRemarkRemovedVersion: 1,
+      settlementLayoutSyncVersion: 1,
+      version: existing ? number(existing.version, 1, 1) + 1 : 1,
+      createTime: existing && existing.createTime || now(),
+      updateTime: now()
+    })
+    await db.collection('receiptTemplates').doc(peerTemplateId).set({ data })
+    await audit(id, 'template.settlement-layout.sync', 'receiptTemplate', peerTemplateId, existing || {}, data)
+    return { _id: peerTemplateId, ...data }
   }
 
   async function findTemplate(id, ticketType, context = {}) {
@@ -915,14 +1291,31 @@ function createPrintService({ db, _, defaultTenantId }) {
     return 'kitchen_order'
   }
 
-  function kitchenTicketTitle(ticketType) {
-    if (ticketType === 'kitchen_refund') return '\u9000\u83dc\u901a\u77e5'
-    if (ticketType === 'kitchen_urge') return '\u50ac\u83dc\u5355'
-    if (ticketType === 'kitchen_add') return '\u52a0\u83dc\u5355'
-    return '\u5236\u4f5c\u5355'
+ function kitchenTicketTitle(ticketType) {
+   if (ticketType === 'kitchen_refund') return '\u9000\u83dc\u901a\u77e5'
+   if (ticketType === 'kitchen_urge') return '\u50ac\u83dc\u5355'
+   if (ticketType === 'kitchen_add') return '\u52a0\u83dc\u5355'
+   return '\u5236\u4f5c\u5355'
+ }
+
+  function kitchenOrderTypeText(order = {}) {
+    const camping = order.orderScene === 'camping' || order.orderType === 'camping'
+    return `\u7c7b\u578b\uff1a${camping ? '\u9732\u8425' : '\u5802\u98df'}`
   }
 
-  async function queueKitchenJobs({ id, order, dishEntries = [], kind = 'kitchen_order', eventKey = '', reason = '' }) {
+  function kitchenTableNumberText(order = {}) {
+    const camping = order.orderScene === 'camping' || order.orderType === 'camping'
+    if (camping) return '\u684c\u53f7\uff1a\u6237\u5916\u81ea\u53d6'
+    const tableNumber = text(order.tableNumber)
+    return tableNumber ? `\u684c\u53f7\uff1a${tableNumber}` : ''
+  }
+
+  function kitchenPeopleCountText(order = {}) {
+    const peopleCount = Math.floor(Number(order.peopleCount || 0))
+    return peopleCount > 0 ? `\u4eba\u6570\uff1a${peopleCount}\u4eba` : ''
+  }
+
+ async function queueKitchenJobs({ id, order, dishEntries = [], kind = 'kitchen_order', eventKey = '', reason = '' }) {
     await ensureDefaults(id)
     const dishIds = dishEntries.map(entry => getDishId(entry))
     const [stations, printers, routes, dishes] = await Promise.all([
@@ -1007,15 +1400,17 @@ function createPrintService({ db, _, defaultTenantId }) {
       const type = kitchenTicketType(kind, order)
       const template = await findTemplate(id, type, { stationId: station._id, printerId: printer._id })
       const title = kitchenTicketTitle(type)
-      const dishes = mergeKitchenDishes(entries)
-      const ticketData = {
-        title,
-        tableNumber: order.tableNumber || '',
-        orderNumber: order.orderNumber || order._id,
+     const dishes = mergeKitchenDishes(entries)
+     const ticketData = {
+       title,
+        tableNumber: kitchenTableNumberText(order),
+        orderType: kitchenOrderTypeText(order),
+        peopleCount: kitchenPeopleCountText(order),
+       orderNumber: order.orderNumber || order._id,
         orderTime: new Date(order.createTime || now()).toLocaleString('zh-CN', { hour12: false }),
-        orderRemark: reason || order.frontDeskRemark || '',
-        dishes
-      }
+        printTime: '\u6253\u5370\u65f6\u95f4\uff1a\u7b49\u5f85\u53d1\u9001',
+       dishes
+     }
       const jobResult = await createJob(id, {
         printer,
         stationId: station._id,
@@ -1065,9 +1460,17 @@ function createPrintService({ db, _, defaultTenantId }) {
     if (!printer || printer.status === false) return { jobs: [], skipped: true, reason: 'cashier printer unavailable' }
     const sortedOrders = (orders || []).slice().sort((a, b) => new Date(a.createTime || 0).getTime() - new Date(b.createTime || 0).getTime())
     const first = sortedOrders[0] || {}
-    const allDishes = mergeKitchenDishes(sortedOrders.reduce((list, order) => {
+    const useCashierDishTable = ticketType === 'checkout' || ticketType === 'prebill'
+    const dishEntries = sortedOrders.reduce((list, order) => {
       return list.concat((Array.isArray(order.goods) ? order.goods : []).map((item, index) => ({ index: `${order._id || ''}-${index}`, item })))
-    }, []))
+    }, [])
+    const allDishes = useCashierDishTable ? mergeCashierDishes(dishEntries) : mergeKitchenDishes(dishEntries)
+    const fallbackOrderAmount = sortedOrders.reduce((sum, order) => {
+      return sum + number(order.finalPrice !== undefined ? order.finalPrice : order.totalPrice, 0)
+    }, 0)
+    const settlementTicketData = useCashierDishTable
+      ? buildCashierSettlementTicketData(checkoutSummary, fallbackOrderAmount, printer.paperWidth)
+      : {}
     const template = await findTemplate(id, ticketType)
     const jobResult = await createJob(id, {
       printer,
@@ -1083,7 +1486,12 @@ function createPrintService({ db, _, defaultTenantId }) {
         tableNumber: first.tableNumber || '',
         orderNumber: first.rootOrderId || first._id || '',
         orderTime: new Date(first.createTime || now()).toLocaleString('zh-CN', { hour12: false }),
+        printTime: '\u6253\u5370\u65f6\u95f4\uff1a\u7b49\u5f85\u53d1\u9001',
         dishes: allDishes,
+        dishDisplayMode: useCashierDishTable ? 'cashier' : '',
+        dishTableWidth: printer.paperWidth || 58,
+        compactMoney: useCashierDishTable,
+        ...settlementTicketData,
         totalPrice: checkoutSummary.receivable !== undefined ? checkoutSummary.receivable : first.finalPrice || first.totalPrice || 0
       },
       payload: { ticketType, orderIds: sortedOrders.map(order => order._id), checkoutSummary },
@@ -1093,9 +1501,46 @@ function createPrintService({ db, _, defaultTenantId }) {
     return { jobs: [jobResult.job], skipped: false }
   }
 
+  async function reconcileOpenUnassignedAlerts(id) {
+    const alerts = await listDocs('unassignedDishAlerts', { storeId: id, status: 'open' }, 300)
+    if (!alerts.length) return
+
+    const dishIds = Array.from(new Set(alerts.map(alert => text(alert.dishId)).filter(Boolean)))
+    const [dishes, categories, routes, stations] = await Promise.all([
+      listDishesByIds(dishIds),
+      listDocs('dishCategory', {}, 300),
+      listDocs('dishPrintRoutes', { storeId: id }, 1200),
+      listDocs('printStations', { storeId: id })
+    ])
+    const dishMap = dishes.reduce((map, dish) => ({ ...map, [dish._id]: dish }), {})
+    const categoryMap = categories.reduce((map, category) => ({ ...map, [category._id]: category.name }), {})
+    const routeMap = routes.reduce((map, route) => ({ ...map, [route.dishId]: route }), {})
+    const stationMap = stations.reduce((map, station) => ({ ...map, [station._id]: station }), {})
+    const resolvedAt = now()
+
+    const resolvedAlerts = alerts.filter(alert => {
+      const dish = dishMap[alert.dishId]
+      if (!dish) return true
+
+      const route = routeMap[dish._id]
+      if (route && route.printEnabled === false) return true
+
+      const categoryName = dish.categoryName || categoryMap[dish.categoryId] || ''
+      const plan = getDefaultDishRoutePlan({ ...dish, categoryName })
+      const configuredStation = route && route.printEnabled !== false && route.stationId && stationMap[route.stationId] && stationMap[route.stationId].status !== false
+      const ruleStation = plan.stationCode ? getStationByCode(stationMap, id, plan.stationCode) : null
+      return !!configuredStation || (plan.matched && (!plan.stationCode || !!ruleStation))
+    })
+
+    await Promise.all(resolvedAlerts.map(alert => db.collection('unassignedDishAlerts').doc(alert._id).update({
+      data: { status: 'resolved', resolvedAt, updateTime: resolvedAt }
+    }).catch(err => console.error('resolve stale unassigned dish alert failed', alert._id, err))))
+  }
+
   async function dashboard(payload) {
     const id = storeId(payload)
     await ensureDefaults(id)
+    await reconcileOpenUnassignedAlerts(id)
     const [printers, agents, queued, claimed, sending, failed, unassigned, alerts] = await Promise.all([
       listPrinters(id),
       listDocs('printerAgents', { storeId: id }),
@@ -1459,14 +1904,38 @@ function createPrintService({ db, _, defaultTenantId }) {
     return { success: true, data: await getDoc('cashierPrintConfigs', configId) }
   }
 
+  async function removeUnversionedDuplicateCheckoutTemplates(id, templates) {
+    const checkoutTemplates = templates.filter(template => template.ticketType === 'checkout')
+    if (checkoutTemplates.length < 2) return templates
+
+    const versions = await listDocs('receiptTemplateVersions', { storeId: id }, 500)
+    const versionCount = versions.reduce((map, version) => {
+      map[version.templateId] = (map[version.templateId] || 0) + 1
+      return map
+    }, {})
+    const savedTemplate = checkoutTemplates
+      .filter(template => Number(versionCount[template._id] || 0) > 0)
+      .sort((a, b) => Number(versionCount[b._id] || 0) - Number(versionCount[a._id] || 0) || new Date(b.updateTime || 0) - new Date(a.updateTime || 0))[0]
+    if (!savedTemplate) return templates
+
+    const removable = checkoutTemplates.filter(template => template._id !== savedTemplate._id && Number(versionCount[template._id] || 0) === 0)
+    if (!removable.length) return templates
+
+    await Promise.all(removable.map(template => db.collection('receiptTemplates').doc(template._id).remove()))
+    await audit(id, 'template.checkout-duplicate.remove', 'receiptTemplate', savedTemplate._id, { removedTemplateIds: removable.map(item => item._id) }, { retainedTemplateId: savedTemplate._id })
+    const removedIds = new Set(removable.map(template => template._id))
+    return templates.filter(template => !removedIds.has(template._id))
+  }
+
   async function listTemplates(payload) {
     const id = storeId(payload)
     await ensureDefaults(id)
-    const [templates, printers, stations] = await Promise.all([
+    const [loadedTemplates, printers, stations] = await Promise.all([
       listDocs('receiptTemplates', { storeId: id }),
       listDocs('printers', { storeId: id }),
       listDocs('printStations', { storeId: id })
     ])
+    const templates = await removeUnversionedDuplicateCheckoutTemplates(id, loadedTemplates)
     const printerMap = new Map(printers.map(item => [item._id, item]))
     const stationMap = new Map(stations.map(item => [item._id, item]))
     const data = templates.map(template => {
@@ -1496,7 +1965,7 @@ function createPrintService({ db, _, defaultTenantId }) {
       id: text(field.id || `${field.key}-${index}`),
       key: text(field.key),
       label: text(field.label),
-      size: ['normal', 'medium', 'large', 'xlarge'].includes(field.size) ? field.size : 'normal',
+      size: ['small', 'normal', 'medium', 'large', 'xlarge'].includes(field.size) ? field.size : 'normal',
       align: ['left', 'center', 'right'].includes(field.align) ? field.align : 'left',
       bold: bool(field.bold),
       inverse: bool(field.inverse),
@@ -1541,7 +2010,9 @@ function createPrintService({ db, _, defaultTenantId }) {
     })
     await db.collection('receiptTemplates').doc(templateId).set({ data })
     await audit(id, existing ? 'template.update' : 'template.create', 'receiptTemplate', templateId, existing || {}, data)
-    return { success: true, data: await getDoc('receiptTemplates', templateId) }
+    const saved = await getDoc('receiptTemplates', templateId)
+    await syncSettlementTemplateLayout(id, saved, 'settlement-layout-save')
+    return { success: true, data: saved }
   }
 
   async function resetTemplate(payload) {
@@ -1559,7 +2030,9 @@ function createPrintService({ db, _, defaultTenantId }) {
     const reset = defaultTemplate(definition)
     await db.collection('receiptTemplateVersions').add({ data: { storeId: id, templateId, ticketType, version: existing.version || 1, fields: existing.fields || [], createTime: now(), reason: 'reset' } })
     await db.collection('receiptTemplates').doc(templateId).update({ data: { fields: reset.fields, paperWidth: reset.paperWidth, version: number(existing.version, 1) + 1, updateTime: now() } })
-    return { success: true, data: await getDoc('receiptTemplates', templateId) }
+    const saved = await getDoc('receiptTemplates', templateId)
+    await syncSettlementTemplateLayout(id, saved, 'settlement-layout-reset')
+    return { success: true, data: saved }
   }
 
   async function templateHistory(payload) {
@@ -1571,6 +2044,23 @@ function createPrintService({ db, _, defaultTenantId }) {
     }
     const versions = await listDocs('receiptTemplateVersions', { storeId: id, templateId })
     return { success: true, data: versions.sort((a, b) => new Date(b.createTime || 0) - new Date(a.createTime || 0)) }
+  }
+
+  async function deleteTemplateHistory(payload) {
+    const id = storeId(payload)
+    const templateId = text(payload.templateId)
+    const versionIds = Array.from(new Set((Array.isArray(payload.versionIds) ? payload.versionIds : [payload.versionId])
+      .map(value => text(value))
+      .filter(Boolean)))
+    if (!templateId || !versionIds.length) {
+      return { success: false, code: 'TEMPLATE_HISTORY_REQUIRED', message: 'select template history first' }
+    }
+
+    const versions = await listDocs('receiptTemplateVersions', { storeId: id, templateId })
+    const targets = versions.filter(item => versionIds.includes(item._id))
+    await Promise.all(targets.map(item => db.collection('receiptTemplateVersions').doc(item._id).remove()))
+    await audit(id, 'template.history.delete', 'receiptTemplate', templateId, { versionIds }, { deleted: targets.length })
+    return { success: true, data: { deleted: targets.length } }
   }
 
   async function testTemplate(payload) {
@@ -1588,7 +2078,24 @@ function createPrintService({ db, _, defaultTenantId }) {
       ? await getDoc('receiptTemplates', text(payload.templateId))
       : await findTemplate(id, ticketType, { printerId: printer._id, stationId: text(payload.stationId) })
     if (!template || template.storeId !== id) return { success: false, code: 'TEMPLATE_NOT_FOUND', message: 'template not found' }
-    const ticketData = { title: template.name, shopName: '\u5f20\u5357\u706b\u76c6\u70e7\u70e4', tableNumber: 'T01', orderNumber: 'TEST-0001', orderTime: now().toLocaleString('zh-CN', { hour12: false }), dishes: [{ dishName: '\u4e2d\u6587\u6d4b\u8bd5\u83dc\u54c1', count: 1, remark: '' }, { dishName: 'English 123', count: 2, remark: 'No ice' }], totalPrice: 88 }
+    const settlementSample = buildCashierSettlementTicketData({
+      totalPrice: 88,
+      discountType: 'discount',
+      discountValue: 8.8,
+      directReduceValue: 5,
+      receivable: 73
+    }, 88, printer.paperWidth)
+    const ticketData = {
+      title: template.name,
+      shopName: '\u5f20\u5357\u706b\u76c6\u70e7\u70e4',
+      tableNumber: 'T01',
+      orderNumber: 'TEST-0001',
+      orderTime: now().toLocaleString('zh-CN', { hour12: false }),
+      printTime: '\u6253\u5370\u65f6\u95f4\uff1a\u7b49\u5f85\u53d1\u9001',
+      dishes: [{ dishName: '\u4e2d\u6587\u6d4b\u8bd5\u83dc\u54c1', count: 1, remark: '' }, { dishName: 'English 123', count: 2, remark: 'No ice' }],
+      totalPrice: 88,
+      ...settlementSample
+    }
     const jobResult = await createJob(id, { printer, stationId: text(payload.stationId), ticketType, ticketName: template.name, template, ticketData, payload: { type: 'template_test', templateId: template._id }, idempotencyKey: `template-test:${template._id}:${printer._id}:${Math.floor(Date.now() / 1000)}` })
     return { success: true, data: jobResult.job }
   }
@@ -1597,11 +2104,13 @@ function createPrintService({ db, _, defaultTenantId }) {
     const id = storeId(payload)
     const printerId = text(payload.printerId)
     const ticketType = text(payload.ticketType)
+    const status = text(payload.status)
     const deviceName = text(payload.deviceName)
     const orderTail = text(payload.orderTail)
     const where = { storeId: id }
     if (printerId) where.printerId = printerId
     if (ticketType) where.ticketType = ticketType
+    if (status) where.status = status
     const page = await pagedDocs('printJobs', where, payload)
     return {
       success: true,
@@ -1659,6 +2168,7 @@ function createPrintService({ db, _, defaultTenantId }) {
   async function listLogs(payload) {
     const id = storeId(payload)
     const printerId = text(payload.printerId)
+    const agentId = text(payload.agentId)
     const range = text(payload.range || 'all')
     const start = range === 'today' ? new Date(new Date().setHours(0, 0, 0, 0)).getTime()
       : range === 'yesterday' ? new Date(new Date().setHours(0, 0, 0, 0)).getTime() - 24 * 60 * 60 * 1000
@@ -1666,21 +2176,35 @@ function createPrintService({ db, _, defaultTenantId }) {
     const end = range === 'yesterday' ? new Date(new Date().setHours(0, 0, 0, 0)).getTime() : Number.MAX_SAFE_INTEGER
     const where = { storeId: id }
     if (printerId) where.printerId = printerId
-    const page = await pagedDocs('printerEventLogs', where, payload)
+    if (agentId) where.agentId = agentId
+    const [page, agents] = await Promise.all([
+      pagedDocs('printerEventLogs', where, payload),
+      listDocs('printerAgents', { storeId: id })
+    ])
+    const agentNameMap = agents.reduce((map, agent) => {
+      map[agent._id] = agent.name || ''
+      return map
+    }, {})
     return { success: true, data: {
       ...page,
+      devices: agents.map(agent => ({ _id: agent._id, name: agent.name || '未命名设备' })),
       list: page.list.filter(log => {
-      const time = new Date(log.createTime || 0).getTime()
-      return time >= start && time < end
-      })
+        const time = new Date(log.createTime || 0).getTime()
+        return time >= start && time < end
+      }).map(log => ({
+        ...log,
+        deviceName: log.deviceName || agentNameMap[log.agentId] || ''
+      }))
     } }
   }
 
   async function clearLogs(payload) {
     const id = storeId(payload)
     const printerId = text(payload.printerId)
+    const agentId = text(payload.agentId)
     const where = { storeId: id }
     if (printerId) where.printerId = printerId
+    if (agentId) where.agentId = agentId
     const page = await pagedDocs('printerEventLogs', where, { pageSize: 100 })
     const targets = page.list
     await Promise.all(targets.map(log => db.collection('printerEventLogs').doc(log._id).remove()))
@@ -1797,6 +2321,7 @@ function createPrintService({ db, _, defaultTenantId }) {
         agentId: agent._id,
         printerId,
         printerName: printer && printer.name || text(input.printerName),
+        deviceName: agent.name || '',
         status: text(input.status),
         level: text(input.level || 'info'),
         message: text(input.message),
@@ -1897,8 +2422,18 @@ function createPrintService({ db, _, defaultTenantId }) {
     if (!job || job.storeId !== agent.storeId || job.agentId !== agent._id || job.claimToken !== text(payload.claimToken)) {
       return { success: false, code: 'PRINT_JOB_CLAIM_INVALID', message: 'print job claim invalid' }
     }
-    await db.collection('printJobs').doc(job._id).update({ data: { status: JOB_STATUS.sending, sendingAt: now(), leaseUntil: new Date(Date.now() + 2 * 60 * 1000), updateTime: now() } })
-    return { success: true }
+    const sendingAt = now()
+    const ticket = setTicketPrintTime(job.ticket, sendingAt)
+    await db.collection('printJobs').doc(job._id).update({
+      data: {
+        status: JOB_STATUS.sending,
+        ticket,
+        sendingAt,
+        leaseUntil: new Date(Date.now() + 2 * 60 * 1000),
+        updateTime: sendingAt
+      }
+    })
+    return { success: true, data: { ticket } }
   }
 
   function getKitchenJobDishIndexes(job) {
@@ -2093,6 +2628,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     if (action === 'admin.print.templates.save') return saveTemplate(payload)
     if (action === 'admin.print.templates.reset') return resetTemplate(payload)
     if (action === 'admin.print.templates.history') return templateHistory(payload)
+    if (action === 'admin.print.templates.history.delete') return deleteTemplateHistory(payload)
     if (action === 'admin.print.templates.test') return testTemplate(payload)
     if (action === 'admin.print.jobs.list') return listJobs(payload)
     if (action === 'admin.print.jobs.detail') return getJob(payload)

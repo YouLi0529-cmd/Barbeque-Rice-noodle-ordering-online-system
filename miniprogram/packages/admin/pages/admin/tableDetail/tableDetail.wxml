@@ -177,6 +177,12 @@
       </view>
 
       <button
+        class="prebill-btn"
+        loading="{{printingPrebill}}"
+        disabled="{{printingPrebill || checkingOut}}"
+        bindtap="printPrebill"
+      >{{ui.printPrebill}}</button>
+      <button
         class="checkout-btn"
         loading="{{checkingOut}}"
         disabled="{{checkingOut}}"

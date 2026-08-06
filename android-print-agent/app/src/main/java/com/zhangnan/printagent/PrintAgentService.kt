@@ -101,10 +101,11 @@ class PrintAgentService : Service() {
     }
     jobs.markInFlight(job.id)
     try {
-      api.start(prefs.agentId, prefs.agentToken, job)
+      val startResult = api.start(prefs.agentId, prefs.agentToken, job)
       val printer = printers[job.printerId] ?: throw IllegalStateException("Printer configuration not available")
       if (!printer.enabled) throw IllegalStateException("Printer is disabled")
-      val bytes = EscPosRenderer.render(job.ticket, job.copies)
+      val ticket = startResult.optJSONObject("ticket") ?: job.ticket
+      val bytes = EscPosRenderer.render(ticket, job.copies)
       if (printer.connectionType == "usb") UsbPrinterTransport(this, printer).send(bytes)
       else TcpPrinterTransport(printer.ip, printer.port).send(bytes)
       jobs.markCompleted(job.id)

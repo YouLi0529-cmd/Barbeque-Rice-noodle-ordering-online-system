@@ -27,12 +27,14 @@ object EscPosRenderer {
     output.write(byteArrayOf(0x1b, 0x61, alignment(line.optString("align"))))
     output.write(byteArrayOf(0x1b, 0x45, if (line.optBoolean("bold")) 1 else 0))
     if (line.optBoolean("inverse")) output.write(byteArrayOf(0x1d, 0x42, 1))
+    val font = if (line.optString("size") == "small") 1 else 0
+    output.write(byteArrayOf(0x1b, 0x4d, font.toByte()))
     val size = when (line.optString("size")) { "medium" -> 0x11; "large" -> 0x22; "xlarge" -> 0x33; else -> 0x00 }
     output.write(byteArrayOf(0x1d, 0x21, size.toByte()))
     if (line.optString("color") == "red" && capabilities.optBoolean("twoColor", false)) output.write(byteArrayOf(0x1b, 0x72, 1))
     output.write(line.optString("text").toByteArray(gb18030))
     output.write('\n'.code)
-    output.write(byteArrayOf(0x1b, 0x45, 0, 0x1d, 0x21, 0, 0x1b, 0x72, 0, 0x1d, 0x42, 0))
+    output.write(byteArrayOf(0x1b, 0x45, 0, 0x1d, 0x21, 0, 0x1b, 0x4d, 0, 0x1b, 0x72, 0, 0x1d, 0x42, 0))
   }
 
   private fun alignment(value: String): Byte = when (value) { "center" -> 1; "right" -> 2; else -> 0 }

@@ -116,16 +116,28 @@
   <view class="modal-mask" wx:if="{{showDishModal}}" catchtap="closeDishModal">
     <view class="modal-dialog large" catchtap="stopPropagation">
       <view class="modal-title">{{editDishMode ? ui.editDish : ui.addDish}}</view>
-      <scroll-view class="modal-content" scroll-y>
+      <scroll-view class="modal-content" scroll-y bindtap="closeDishCategoryDropdown">
         <view class="form-item">
           <view class="form-label">{{ui.dishName}}</view>
           <input class="form-input" placeholder="{{ui.inputDishName}}" value="{{currentDish.name}}" data-field="name" bindinput="onDishInput" />
         </view>
-        <view class="form-item">
+        <view class="form-item category-form-item">
           <view class="form-label">{{ui.dishCategory}}</view>
-          <view class="printer-picker category-picker {{showCategoryDropdown ? 'open' : ''}}" bindtap="toggleDishCategoryDropdown">
-            <text>{{currentDish.categoryName || ui.selectCategory}}</text>
-            <text class="printer-arrow {{showCategoryDropdown ? 'open' : ''}}">∨</text>
+          <view class="category-select {{showCategoryDropdown ? 'open' : ''}}">
+            <view class="printer-picker category-picker {{showCategoryDropdown ? 'open' : ''}}" catchtap="toggleDishCategoryDropdown">
+              <text>{{currentDish.categoryName || ui.selectCategory}}</text>
+              <text class="printer-arrow {{showCategoryDropdown ? 'open' : ''}}">∨</text>
+            </view>
+            <scroll-view wx:if="{{showCategoryDropdown}}" class="category-dropdown" scroll-y>
+              <view
+                class="category-option {{currentDish.categoryIndex === index ? 'active' : ''}}"
+                wx:for="{{categories}}"
+                wx:key="_id"
+                data-index="{{index}}"
+                catchtap="selectDishCategory">
+                <text>{{item.name}}</text>
+              </view>
+            </scroll-view>
           </view>
         </view>
         <view class="form-row">
@@ -245,20 +257,5 @@
     </view>
   </view>
 
-  <view class="category-select-mask" wx:if="{{showDishModal && showCategoryDropdown}}" catchtap="closeDishCategoryDropdown">
-    <view class="category-select-popover" catchtap="stopPropagation">
-      <view class="category-select-title">{{ui.dishCategory}}</view>
-      <scroll-view class="category-select-list" scroll-y>
-        <view
-          class="category-select-option {{currentDish.categoryIndex === index ? 'active' : ''}}"
-          wx:for="{{categories}}"
-          wx:key="_id"
-          data-index="{{index}}"
-          catchtap="selectDishCategory">
-          <text>{{item.name}}</text>
-        </view>
-      </scroll-view>
-    </view>
-  </view>
 </view>
 <admin-info-center />
