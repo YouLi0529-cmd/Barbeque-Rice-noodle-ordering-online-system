@@ -13,19 +13,6 @@
   <view class="user-header">
     <view class="member-card">
       <view class="card-shine"></view>
-      <view class="card-top">
-        <view class="user-detail">
-          <view class="user-name">
-              {{isLoggedOut ? '未登录' : (userInfo && userInfo.nickName ? userInfo.nickName : '会员')}}
-          </view>
-          <view class="user-phone" wx:if="{{userInfo && userInfo.phoneNumber}}">
-            {{userInfo.phoneNumber}}
-          </view>
-          <view class="user-phone login-prompt-text" wx:else bindtap="showAuthModal">
-            {{isLoggedOut ? '点击登录' : '请先完善个人信息'}}
-          </view>
-        </view>
-      </view>
       <view class="card-mark">ZN</view>
       <view class="member-code-block" wx:if="{{userInfo && userInfo.userCode}}">
         <view class="member-code">{{userInfo.userCode}}</view>

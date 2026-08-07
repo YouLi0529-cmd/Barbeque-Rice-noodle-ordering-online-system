@@ -284,17 +284,21 @@
 }
 
 .table-code-page {
-  min-height: 100vh;
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: #fff7ec;
   color: #3a2418;
   box-sizing: border-box;
 }
 
 .table-code-header {
+  flex: none;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 22rpx;
+  align-items: center;
   padding: 24rpx 28rpx;
   border-bottom: 1rpx solid rgba(58, 36, 24, 0.1);
   background: #fff2dd;
@@ -358,6 +362,7 @@
 }
 
 .merchant-code-card {
+  flex: none;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 150rpx auto;
   align-items: center;
@@ -412,7 +417,9 @@
 }
 
 .table-code-scroll {
-  height: calc(100vh - 122rpx);
+  flex: 1;
+  min-height: 0;
+  height: auto;
   padding: 20rpx 28rpx 40rpx;
   box-sizing: border-box;
 }
@@ -480,6 +487,12 @@
   margin-top: 12rpx;
 }
 
+.table-card-actions .table-action {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4rpx;
+}
+
 .table-action {
   min-width: 56rpx;
   height: 40rpx;
@@ -493,14 +506,6 @@
     height: 100vh;
     overflow: hidden;
     background: #fff7ec;
-  }
-
-  .table-code-page {
-    width: 100vw;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
   }
 
   .table-code-header {
@@ -571,7 +576,7 @@
   }
 
   .table-code-grid {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10rpx;
   }
 
@@ -599,9 +604,56 @@
   }
 
   .table-action {
-    min-width: 48rpx;
-    height: 34rpx;
-    padding: 0 8rpx;
-    font-size: 16rpx;
+    min-width: 0;
+    height: 32rpx;
+    padding: 0 5rpx;
+    font-size: 15rpx;
   }
+}
+
+/* rpx grows with a tablet viewport. Keep table-code controls compact and
+   readable on both horizontal and vertical iPads. */
+@media (min-width: 700px) {
+  .table-code-header {
+    padding: 10px 16px;
+  }
+
+  .page-title { font-size: 18px; }
+
+  .progress-tip {
+    margin-bottom: 8px;
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+
+  .table-code-scroll {
+    padding: 12px 16px 20px;
+  }
+
+  .merchant-code-card {
+    grid-template-columns: minmax(0, 1fr) 86px auto;
+    gap: 10px;
+    margin: 0 0 14px;
+    padding: 10px;
+    border-radius: 8px;
+  }
+
+  .merchant-code-title { font-size: 15px; }
+  .merchant-code-subtitle { margin-top: 3px; font-size: 11px; }
+  .merchant-code-image,
+  .merchant-code-placeholder { width: 86px; height: 86px; border-radius: 6px; }
+  .merchant-code-placeholder { padding: 8px; font-size: 11px; }
+  .merchant-code-actions { flex-direction: row; gap: 5px; }
+  .merchant-code-actions .table-action { min-width: 46px; padding: 0 8px; }
+
+  .table-code-section { margin-bottom: 16px; }
+  .section-title { margin-bottom: 7px; font-size: 15px; }
+  .table-code-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .table-code-card { padding: 8px; border-radius: 8px; }
+  .table-name { margin-bottom: 5px; font-size: 13px; }
+  .table-qr,
+  .table-qr-placeholder { height: 88px; border-radius: 6px; }
+  .table-qr-placeholder { font-size: 11px; }
+  .table-card-actions { gap: 4px; margin-top: 6px; }
+  .table-action { height: 28px; padding: 0 4px; border-radius: 5px; font-size: 11px; }
 }

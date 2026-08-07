@@ -134,6 +134,13 @@
   min-width: 116rpx;
 }
 
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8rpx;
+}
+
 .settings-menu { padding-top: 28rpx; }
 
 .settings-menu-list {
@@ -361,6 +368,11 @@
   align-items: center;
   gap: 12rpx;
   margin-bottom: 14rpx;
+}
+
+.job-card.selected {
+  background: #FFF4E2;
+  box-shadow: 0 10rpx 24rpx rgba(138, 94, 55, 0.2);
 }
 
 .job-filter-row { position: relative; z-index: 12; }
@@ -695,6 +707,7 @@
   height: calc(100vh - 48rpx);
   display: flex;
   min-width: 0;
+  min-height: 0;
 }
 
 .tab-scroll {
@@ -709,6 +722,9 @@
   height: 100%;
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .settings-detail-mode .print-content {
@@ -720,7 +736,9 @@
 }
 
 .content-scroll {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  height: auto;
 }
 
 .tabs {
@@ -745,6 +763,156 @@
 @media (orientation: landscape) {
   .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .metric-card { min-height: 92rpx; }
+}
+
+/* rpx grows with the width of a tablet. Keep the operational controls at a
+   stable physical size, otherwise horizontal iPads make them oversized. */
+@media (min-width: 700px) {
+  .page-head {
+    height: 38px;
+    padding: 0 14px;
+  }
+
+  .page-title { font-size: 16px; }
+
+  .print-workspace {
+    height: calc(100vh - 38px);
+  }
+
+  .tab-scroll {
+    width: 108px;
+    flex-basis: 108px;
+  }
+
+  .tabs {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .tab {
+    padding: 8px 6px;
+    border-radius: 5px;
+    font-size: 12px;
+  }
+
+  .tab-panel {
+    padding: 10px 14px 24px;
+  }
+
+  .section-title,
+  .task-title-row {
+    margin-top: 16px;
+    margin-bottom: 12px;
+  }
+
+  .section-title { font-size: 18px; }
+  .section-tip,
+  .top-tip,
+  .card-sub,
+  .row-sub,
+  .agent-sub,
+  .modal-note,
+  .log-time { font-size: 12px; }
+
+  .metric-grid { gap: 10px; margin-top: 12px; }
+  .metric-card { min-height: 78px; padding: 14px; }
+  .metric-num { font-size: 28px; }
+  .metric-label { margin-top: 4px; font-size: 12px; }
+
+  .agent-banner { gap: 14px; padding: 14px; }
+  .agent-title { font-size: 18px; }
+  .outline-btn { padding: 8px 10px; border-radius: 5px; font-size: 12px; }
+
+  .compact-row,
+  .data-card,
+  .alert-box,
+  .log-row { margin-bottom: 10px; padding: 14px; }
+
+  .card-title,
+  .row-title { font-size: 16px; }
+  .status-pill { padding: 4px 8px; font-size: 11px; }
+  .detail-grid { gap: 6px 12px; margin-top: 10px; font-size: 12px; }
+
+  .small-btn,
+  .primary-small,
+  .primary-btn,
+  .search-btn,
+  .filter-toggle {
+    min-height: 30px;
+    padding: 0 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    line-height: 30px;
+  }
+
+  .primary-btn { min-width: 58px; }
+  .card-actions,
+  .template-actions,
+  .field-actions { gap: 7px; margin-top: 12px; }
+
+  .filter-row { gap: 8px; margin-bottom: 9px; }
+  .search-input,
+  .filter-picker,
+  .inline-input {
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    line-height: 34px;
+  }
+
+  .filter-picker { min-width: 108px; max-width: 190px; }
+  .job-filter-option { min-height: 34px; padding: 0 10px; font-size: 12px; }
+  .job-filter-dropdown { max-height: 210px; }
+  .job-filter-arrow { font-size: 13px; }
+
+  .settings-menu { padding-top: 16px; }
+  .settings-menu-list { margin-top: 12px; }
+  .settings-menu-item { min-height: 48px; padding: 0 14px; font-size: 14px; }
+  .settings-menu-arrow { font-size: 22px; }
+  .task-actions { gap: 6px; }
+  .task-title-row .small-btn { min-width: 0; }
+
+  .error-line {
+    margin-top: 8px;
+    padding: 8px;
+    border-radius: 5px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .modal-mask { padding: 16px; }
+  .modal-card {
+    max-width: 820px;
+    max-height: calc(100vh - 32px);
+    border-radius: 8px;
+  }
+  .modal-card.short { max-width: 520px; }
+  .modal-title { padding: 16px 18px 10px; font-size: 18px; }
+  .modal-body { max-height: 64vh; padding: 0 18px 16px; }
+  .modal-footer { gap: 8px; padding: 12px 18px 16px; }
+  .modal-btn { min-height: 34px; border-radius: 5px; font-size: 13px; line-height: 34px; }
+
+  .job-detail-card {
+    width: 500px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+  }
+
+  .job-detail-body {
+    height: calc(100vh - 142px);
+    padding-bottom: 12px;
+  }
+
+  .job-meta { margin-bottom: 8px; font-size: 12px; }
+  .job-preview { min-height: 0; padding: 10px; }
+  .job-detail-card .preview-line { min-height: 16px; padding: 3px 4px; font-size: 11px; }
+  .job-detail-card .preview-line.size-small { font-size: 10px; }
+  .job-detail-card .preview-line.size-medium { font-size: 12px; }
+  .job-detail-card .preview-line.size-large { font-size: 14px; }
+  .job-detail-card .preview-line.size-xlarge { font-size: 16px; }
+  .job-detail-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .job-detail-footer .modal-btn { padding: 0 8px; }
 }
 
 @media (max-width: 540px) {

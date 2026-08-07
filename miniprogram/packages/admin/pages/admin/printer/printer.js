@@ -166,6 +166,8 @@ Page({
     templateTestPrinterId: '',
     templateTestPrinterName: '请选择要测试的打印机',
     jobs: [],
+    selectedJobIds: [],
+    deletingSelectedJobs: false,
     jobsHasMore: false,
     jobsNextCursor: '',
     logs: [],
@@ -340,9 +342,16 @@ Page({
       cursor: append ? this.data.jobsNextCursor : ''
     })
     const page = Array.isArray(res.data) ? { list: res.data, hasMore: false, nextCursor: '' } : (res.data || {})
-    const rows = (page.list || []).map(item => ({ ...item, displayTime: formatTime(item.createTime) }))
+    const selectedIds = append ? this.data.selectedJobIds : []
+    const selectedSet = new Set(selectedIds)
+    const rows = (page.list || []).map(item => ({
+      ...item,
+      displayTime: formatTime(item.createTime),
+      selected: selectedSet.has(item._id)
+    }))
     this.setData({
       jobs: append ? this.data.jobs.concat(rows) : rows,
+      selectedJobIds: selectedIds,
       jobsHasMore: !!page.hasMore,
       jobsNextCursor: page.nextCursor || ''
     })
@@ -986,12 +995,74 @@ Page({
   },
   loadMoreJobs() { if (this.data.jobsHasMore) this.loadJobs(true) },
 
-  async openJob(e) {
+  async openJobById(jobId) {
     try {
-      const res = await this.call('admin.print.jobs.detail', { jobId: e.currentTarget.dataset.id })
+      const res = await this.call('admin.print.jobs.detail', { jobId })
       this.setData({ showJobDetail: true, jobDetail: res.data || null })
     } catch (err) { toast(err.message || '任务读取失败') }
   },
+
+  openJob(e) {
+    return this.openJobById(e.currentTarget.dataset.id)
+  },
+
+  handleJobTap(e) {
+    const jobId = e.currentTarget.dataset.id
+    if (!jobId) return
+
+    if (this.data.selectedJobIds.includes(jobId)) {
+      this.openJobById(jobId)
+      return
+    }
+
+    const selectedJobIds = this.data.selectedJobIds.concat(jobId)
+    this.setData({
+      selectedJobIds,
+      jobs: this.data.jobs.map(item => ({
+        ...item,
+        selected: selectedJobIds.includes(item._id)
+      }))
+    })
+  },
+
+  clearJobSelection() {
+    if (!this.data.selectedJobIds.length) return
+    this.setData({
+      selectedJobIds: [],
+      jobs: this.data.jobs.map(item => ({ ...item, selected: false }))
+    })
+  },
+
+  deleteSelectedJobs() {
+    if (this.data.deletingSelectedJobs) return
+    const jobIds = this.data.selectedJobIds.slice()
+    if (!jobIds.length) {
+      toast('请先选择打印任务')
+      return
+    }
+
+    wx.showModal({
+      title: '删除打印任务',
+      content: `确认删除已选 ${jobIds.length} 条任务记录吗？正在等待或发送中的任务会保留。`,
+      success: async modal => {
+        if (!modal.confirm) return
+        try {
+          this.setData({ deletingSelectedJobs: true })
+          const result = await this.call('admin.print.jobs.batchDelete', { jobIds })
+          const data = result.data || {}
+          this.clearJobSelection()
+          await Promise.all([this.loadJobs(), this.loadDashboard()])
+          const skipped = Number(data.skipped || 0)
+          toast(skipped ? `已删除 ${data.deleted || 0} 条，${skipped} 条进行中未删除` : `已删除 ${data.deleted || 0} 条`, 'success')
+        } catch (err) {
+          toast(err.message || '删除失败')
+        } finally {
+          this.setData({ deletingSelectedJobs: false })
+        }
+      }
+    })
+  },
+
   closeJob() { this.setData({ showJobDetail: false, jobDetail: null }) },
   async jobAction(e) {
     const { action, id } = e.currentTarget.dataset

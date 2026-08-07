@@ -5406,7 +5406,7 @@ function sanitizeCloudPathName(value, fallback = 'dish') {
   return name || fallback
 }
 
-async function storeDishImageFile({ tenantId, dishId, dishName, fileContent }) {
+async function storeDishImageFile({ tenantId, dishId, dishName, fileContent, assetFolder = 'dish' }) {
   if (!fileContent.length || fileContent.length > MAX_DISH_IMAGE_SIZE) {
     return {
       success: false,
@@ -5426,8 +5426,9 @@ async function storeDishImageFile({ tenantId, dishId, dishName, fileContent }) {
 
   const safeTenantId = sanitizeCloudPathName(tenantId, DEFAULT_TENANT_ID)
   const safeDishName = sanitizeCloudPathName(dishName || dishId || 'dish')
+  const safeAssetFolder = sanitizeCloudPathName(assetFolder, 'dish')
   const random = crypto.randomBytes(4).toString('hex')
-  const cloudPath = `tenant/${safeTenantId}/dish/${safeDishName}-${Date.now()}-${random}.${imageType.ext}`
+  const cloudPath = `tenant/${safeTenantId}/${safeAssetFolder}/${safeDishName}-${Date.now()}-${random}.${imageType.ext}`
   const uploadRes = await cloud.uploadFile({
     cloudPath,
     fileContent
@@ -5503,6 +5504,24 @@ async function adminUploadDishFile(payload) {
     tenantId: getTenantId(payload),
     dishId: String(payload.dishId || payload._id || '').trim(),
     dishName: String(payload.dishName || payload.name || '').trim(),
+    fileContent
+  })
+}
+
+async function adminUploadShopContactFile(payload) {
+  const fileContent = Buffer.isBuffer(payload.fileContent) ? payload.fileContent : Buffer.alloc(0)
+  if (!fileContent.length) {
+    return {
+      success: false,
+      code: 'IMAGE_REQUIRED',
+      message: 'image required'
+    }
+  }
+
+  return storeDishImageFile({
+    tenantId: getTenantId(payload),
+    dishName: 'contact',
+    assetFolder: 'contact',
     fileContent
   })
 }
@@ -5924,11 +5943,93 @@ async function syncMenu(payload) {
   }
 }
 
-async function getShopInfo() {
-  const res = await db.collection('shopInfo').limit(1).get()
+async function getShopInfo(payload = {}) {
+  const tenantId = getTenantId(payload)
+  let res = await db.collection('shopInfo').where({ tenantId }).limit(1).get()
+
+  // Keep the original single-store document readable while the old data is
+  // being migrated to a tenant-scoped record.
+  if (!res.data || !res.data.length) {
+    res = await db.collection('shopInfo').limit(1).get()
+  }
+  const shopInfo = res.data && res.data[0] ? res.data[0] : null
   return {
     success: true,
-    data: res.data && res.data[0] ? res.data[0] : null
+    data: await normalizeShopInfoForClient(shopInfo)
+  }
+}
+
+async function adminSaveShopInfo(payload) {
+  const tenantId = getTenantId(payload)
+  const contactPhone = String(payload.contactPhone || '').trim()
+  const contactImageFileID = String(payload.contactImageFileID || payload.contactImage || '').trim()
+
+  if (contactPhone && !/^1\d{10}$/.test(contactPhone)) {
+    return {
+      success: false,
+      code: 'PHONE_INVALID',
+      message: 'phone number must contain 11 digits'
+    }
+  }
+
+  const existing = await db.collection('shopInfo').where({ tenantId }).limit(1).get()
+  const data = {
+    tenantId,
+    contactPhone,
+    contactImageFileID,
+    contactImage: contactImageFileID,
+    updateTime: db.serverDate()
+  }
+
+  let id = ''
+  if (existing.data && existing.data[0]) {
+    id = existing.data[0]._id
+    await db.collection('shopInfo').doc(id).update({ data })
+  } else {
+    const addRes = await db.collection('shopInfo').add({
+      data: {
+        ...data,
+        createTime: db.serverDate()
+      }
+    })
+    id = addRes._id
+  }
+
+  return {
+    success: true,
+    data: await normalizeShopInfoForClient({
+      _id: id,
+      ...data
+    })
+  }
+}
+
+async function normalizeShopInfoForClient(shopInfo) {
+  if (!shopInfo) return null
+
+  const contactImageFileID = String(shopInfo.contactImageFileID || shopInfo.contactImage || '').trim()
+  if (!isCloudFileID(contactImageFileID)) return shopInfo
+
+  try {
+    const result = await cloud.getTempFileURL({
+      fileList: [{
+        fileID: contactImageFileID,
+        maxAge: DISH_IMAGE_TEMP_URL_MAX_AGE
+      }]
+    })
+    const contactImage = result.fileList && result.fileList[0] && result.fileList[0].tempFileURL || ''
+    return {
+      ...shopInfo,
+      contactImageFileID,
+      contactImage
+    }
+  } catch (err) {
+    console.error('resolve shop contact image failed', err)
+    return {
+      ...shopInfo,
+      contactImageFileID,
+      contactImage: ''
+    }
   }
 }
 
@@ -6819,6 +6920,7 @@ async function handleAction(action, payload) {
     action.indexOf('admin.order.') === 0 ||
     action.indexOf('admin.notification.') === 0 ||
     action.indexOf('admin.collection.') === 0 ||
+    action.indexOf('admin.shop.') === 0 ||
     action.indexOf('admin.print.') === 0
   ) {
     const adminAuth = await requireAdminAuth(payload)
@@ -6835,6 +6937,8 @@ async function handleAction(action, payload) {
   if (action === 'admin.dish.matchImages') return adminMatchDishImages(payload)
   if (action === 'admin.dish.uploadImage') return adminUploadDishImage(payload)
   if (action === 'admin.dish.uploadFile') return adminUploadDishFile(payload)
+  if (action === 'admin.shop.uploadFile') return adminUploadShopContactFile(payload)
+  if (action === 'admin.shop.save') return adminSaveShopInfo(payload)
   if (action === 'admin.table.list') return adminListTables(payload)
   if (action === 'admin.table.status') return adminGetTableBoardStatus(payload)
   if (action === 'admin.table.detail') return adminGetTableDetail(payload)

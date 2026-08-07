@@ -2165,6 +2165,37 @@ function createPrintService({ db, _, defaultTenantId }) {
     return { success: true }
   }
 
+  async function batchDeleteJobs(payload) {
+    const id = storeId(payload)
+    const jobIds = Array.from(new Set((Array.isArray(payload.jobIds) ? payload.jobIds : [])
+      .map(item => text(item))
+      .filter(Boolean)))
+      .slice(0, 50)
+
+    if (!jobIds.length) {
+      return { success: false, code: 'PRINT_JOB_IDS_REQUIRED', message: 'select print jobs first' }
+    }
+
+    const jobs = await Promise.all(jobIds.map(jobId => getDoc('printJobs', jobId)))
+    const targets = jobs.filter(job => job && job.storeId === id && !ACTIVE_JOB_STATUS.includes(job.status))
+    const skipped = jobIds.length - targets.length
+
+    await Promise.all(targets.map(job => db.collection('printJobs').doc(job._id).remove()))
+    await audit(id, 'print-jobs.batch-delete', 'printJob', '', {}, {
+      requested: jobIds.length,
+      deleted: targets.length,
+      skipped
+    })
+
+    return {
+      success: true,
+      data: {
+        deleted: targets.length,
+        skipped
+      }
+    }
+  }
+
   async function listLogs(payload) {
     const id = storeId(payload)
     const printerId = text(payload.printerId)
@@ -2634,6 +2665,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     if (action === 'admin.print.jobs.detail') return getJob(payload)
     if (action === 'admin.print.jobs.reprint') return reprintJob(payload)
     if (action === 'admin.print.jobs.cancel') return cancelJob(payload)
+    if (action === 'admin.print.jobs.batchDelete') return batchDeleteJobs(payload)
     if (action === 'admin.print.logs.list') return listLogs(payload)
     if (action === 'admin.print.logs.clear') return clearLogs(payload)
     if (action === 'admin.print.history.archive') return archiveHistory(payload)

@@ -18,7 +18,7 @@
     <view class="backend-retry" bindtap="loadAll">重新连接</view>
   </view>
 
-  <scroll-view class="content-scroll" scroll-y>
+  <scroll-view class="content-scroll" scroll-y bindtap="clearJobSelection">
     <view wx:if="{{activeTab === 'dashboard'}}" class="tab-panel">
       <view class="agent-banner {{dashboard.agentOnline ? 'online' : 'offline'}}">
         <view>
@@ -140,7 +140,14 @@
     </view>
 
     <view wx:if="{{activeTab === 'jobs'}}" class="tab-panel">
-      <view class="section-head task-title-row"><view class="section-title no-margin">打印任务</view><view class="small-btn" bindtap="resetJobFilters">重置筛选</view></view>
+      <view class="section-head task-title-row">
+        <view class="section-title no-margin">打印任务</view>
+        <view class="task-actions">
+          <view class="small-btn danger" catchtap="deleteSelectedJobs">批量删除<text wx:if="{{selectedJobIds.length}}">({{selectedJobIds.length}})</text></view>
+          <view class="small-btn" wx:if="{{selectedJobIds.length}}" catchtap="clearJobSelection">取消选择</view>
+          <view class="small-btn" catchtap="resetJobFilters">重置筛选</view>
+        </view>
+      </view>
       <view class="filter-row job-filter-row">
         <view class="job-filter-select {{showJobPrinterDropdown ? 'open' : ''}}" catchtap="toggleJobPrinterDropdown">
           <view class="filter-picker job-filter-trigger"><text>{{jobPrinterLabel}}</text><text class="job-filter-arrow {{showJobPrinterDropdown ? 'open' : ''}}">∨</text></view>
@@ -162,8 +169,8 @@
         </view>
       </view>
       <view class="filter-row"><input class="search-input" value="{{jobFilter.orderTail}}" placeholder="订单号尾号" data-key="orderTail" bindinput="onJobFilterInput" bindconfirm="loadJobs" /><view class="search-btn" bindtap="loadJobs">查询</view></view>
-      <view wx:for="{{jobs}}" wx:key="_id" class="data-card" bindtap="openJob" data-id="{{item._id}}"><view class="card-top"><view><view class="card-title">{{item.ticketName}}</view><view class="card-sub">{{item.tableNumber || item.orderNumber || item.orderId}} · {{item.printerName}}</view></view><view class="status-pill {{item.status}}">{{item.statusLabel || item.status}}</view></view><view class="detail-grid"><text>{{item.orderNumber}}</text><text>{{item.deviceName || '未领取'}}</text><text>{{item.copies || 1}}份 · {{item.attempts}} 次尝试</text></view><view class="card-sub">{{item.status === 'printed' ? '已发送至打印机，缺纸/卡纸请按设备状态人工确认' : item.displayTime}}</view></view>
-      <view wx:if="{{jobsHasMore}}" class="load-more" bindtap="loadMoreJobs">加载更多任务</view>
+      <view wx:for="{{jobs}}" wx:key="_id" class="data-card job-card {{item.selected ? 'selected' : ''}}" catchtap="handleJobTap" data-id="{{item._id}}"><view class="card-top"><view><view class="card-title">{{item.ticketName}}</view><view class="card-sub">{{item.tableNumber || item.orderNumber || item.orderId}} · {{item.printerName}}</view></view><view class="status-pill {{item.status}}">{{item.statusLabel || item.status}}</view></view><view class="detail-grid"><text>{{item.orderNumber}}</text><text>{{item.deviceName || '未领取'}}</text><text>{{item.copies || 1}}份 · {{item.attempts}} 次尝试</text></view><view class="card-sub">{{item.status === 'printed' ? '已发送至打印机，缺纸/卡纸请按设备状态人工确认' : item.displayTime}}</view></view>
+      <view wx:if="{{jobsHasMore}}" class="load-more" catchtap="loadMoreJobs">加载更多任务</view>
       <view wx:if="{{!jobs.length}}" class="empty-state">暂无符合条件的打印任务</view>
     </view>
 

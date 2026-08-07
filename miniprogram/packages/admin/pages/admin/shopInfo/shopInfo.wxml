@@ -1,0 +1,31 @@
+<view class="shop-info-page">
+  <view class="top-bar">
+    <view class="page-title">联系我设置</view>
+    <view class="back-btn" bindtap="goBack">返回</view>
+  </view>
+
+  <view class="settings-content">
+    <view class="form-section phone-section">
+      <view class="form-label">联系电话</view>
+      <input
+        class="phone-input"
+        type="number"
+        maxlength="11"
+        placeholder="请输入联系电话"
+        value="{{contactPhone}}"
+        bindinput="onPhoneInput" />
+    </view>
+
+    <view class="form-section image-section">
+      <view class="form-label">联系图片</view>
+      <view class="image-picker" hover-class="image-picker-pressed" hover-stay-time="120" bindtap="chooseContactImage">
+        <image wx:if="{{contactImage}}" class="contact-image" src="{{contactImage}}" mode="aspectFit" />
+        <view wx:else class="image-placeholder">上传图片</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="bottom-bar">
+    <button class="save-btn" loading="{{saving}}" disabled="{{saving || uploading}}" bindtap="saveShopInfo">{{saving ? '保存中' : '保存'}}</button>
+  </view>
+</view>

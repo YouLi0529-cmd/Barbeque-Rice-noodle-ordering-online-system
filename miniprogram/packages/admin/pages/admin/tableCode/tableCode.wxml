@@ -1,36 +1,27 @@
 <view class="table-code-page">
   <view class="table-code-header">
-    <view>
-      <view class="page-title">{{ui.title}}</view>
-      <view class="page-subtitle">{{ui.subtitle}}</view>
-    </view>
-    <view class="header-actions">
-      <view class="header-action" bindtap="loadList">{{ui.refresh}}</view>
-      <view class="header-action primary {{batchGenerating ? 'disabled' : ''}}" bindtap="generateMissingCodes">
-        {{batchGenerating ? ui.generating : ui.generateMissing}}
-      </view>
-    </view>
+    <view class="page-title">{{ui.title}}</view>
   </view>
 
-  <view class="progress-tip" wx:if="{{batchGenerating}}">{{ui.generating}} {{batchProgress}}</view>
+  <scroll-view class="table-code-scroll" scroll-y enable-flex>
+    <view class="progress-tip" wx:if="{{batchGenerating}}">{{ui.generating}} {{batchProgress}}</view>
 
-  <view class="merchant-code-card">
-    <view class="merchant-code-copy">
-      <view class="merchant-code-title">{{ui.merchantTitle}}</view>
-      <view class="merchant-code-subtitle">{{ui.merchantSubtitle}}</view>
-    </view>
-    <image class="merchant-code-image" wx:if="{{merchantCode && merchantCode.qrCodeUrl}}" src="{{merchantCode.qrCodeUrl}}" mode="aspectFit" />
-    <view class="merchant-code-placeholder" wx:else>{{ui.merchantNotGenerated}}</view>
-    <view class="merchant-code-actions">
-      <view class="table-action primary {{generatingMerchantCode ? 'disabled' : ''}}" bindtap="generateMerchantCode">
-        {{generatingMerchantCode ? ui.generating : (merchantCode && merchantCode.qrCodeUrl ? ui.regenerate : ui.generate)}}
+    <view class="merchant-code-card">
+      <view class="merchant-code-copy">
+        <view class="merchant-code-title">{{ui.merchantTitle}}</view>
+        <view class="merchant-code-subtitle">{{ui.merchantSubtitle}}</view>
       </view>
-      <view class="table-action" wx:if="{{merchantCode && merchantCode.qrCodeUrl}}" bindtap="previewCode" data-url="{{merchantCode.qrCodeUrl}}">{{ui.preview}}</view>
-      <view class="table-action" wx:if="{{merchantCode && merchantCode.qrCodeUrl}}" bindtap="saveCode" data-url="{{merchantCode.qrCodeUrl}}">{{ui.save}}</view>
+      <image class="merchant-code-image" wx:if="{{merchantCode && merchantCode.qrCodeUrl}}" src="{{merchantCode.qrCodeUrl}}" mode="aspectFit" />
+      <view class="merchant-code-placeholder" wx:else>{{ui.merchantNotGenerated}}</view>
+      <view class="merchant-code-actions">
+        <view class="table-action primary {{generatingMerchantCode ? 'disabled' : ''}}" bindtap="generateMerchantCode">
+          {{generatingMerchantCode ? ui.generating : (merchantCode && merchantCode.qrCodeUrl ? ui.regenerate : ui.generate)}}
+        </view>
+        <view class="table-action" wx:if="{{merchantCode && merchantCode.qrCodeUrl}}" bindtap="previewCode" data-url="{{merchantCode.qrCodeUrl}}">{{ui.preview}}</view>
+        <view class="table-action" wx:if="{{merchantCode && merchantCode.qrCodeUrl}}" bindtap="saveCode" data-url="{{merchantCode.qrCodeUrl}}">{{ui.save}}</view>
+      </view>
     </view>
-  </view>
 
-  <scroll-view class="table-code-scroll" scroll-y>
     <view class="table-code-section" wx:for="{{sections}}" wx:for-item="section" wx:key="areaKey">
       <view class="section-title">{{section.name}}</view>
       <view class="table-code-grid">

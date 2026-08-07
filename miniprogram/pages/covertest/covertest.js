@@ -1,6 +1,7 @@
 ﻿// pages/covertest/covertest.js
 const { getCustomNavOptions } = require('../../utils/customNav')
 const { openPrivacyPolicyDocument } = require('../../utils/privacyPolicyDocument')
+const apiClient = require('../../utils/apiClient')
 
 Page({
   data: {
@@ -19,6 +20,8 @@ Page({
     showOrderPreview: false,
     showCampingPreview: false,
     showContactModal: false,
+    contactImage: '',
+    contactPhone: '',
     showPrivacyConsent: false,
     privacyConsentChecked: false,
     privacyReady: false
@@ -38,6 +41,7 @@ Page({
   onLoad() {
     this.refreshCustomNav()
     this.refreshPrivacyConsent()
+    this.loadContactInfo()
   },
 
   onShow() {
@@ -49,6 +53,22 @@ Page({
       showOrderPreview: false
     })
     this.refreshPrivacyConsent()
+    this.loadContactInfo()
+  },
+
+  async loadContactInfo() {
+    if (!apiClient.isEnabled()) return
+
+    try {
+      const result = await apiClient.call('shop.info')
+      const shopInfo = result.data || {}
+      this.setData({
+        contactImage: shopInfo.contactImage || '',
+        contactPhone: shopInfo.contactPhone || ''
+      })
+    } catch (err) {
+      console.error('load contact info failed', err)
+    }
   },
 
   refreshPrivacyConsent() {
