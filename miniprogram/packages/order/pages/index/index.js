@@ -6,6 +6,7 @@ const _ = db ? db.command : null
 const { getCustomNavOptions } = require('../../../../utils/customNav')
 const SHARED_CART_ACTIVE_POLL_MS = 8000
 const SHARED_CART_IDLE_POLL_MS = 20000
+const NOTICE_SEPARATOR = ' '.repeat(11)
 
 Page({
   data: {
@@ -853,7 +854,7 @@ Page({
       this.setData({
         shopInfo: data.shopInfo || {},
         noticeList,
-        noticeText: noticeList.map(item => item.content).join('       '),
+        noticeText: noticeList.map(item => item.content).join(NOTICE_SEPARATOR),
         menuList,
         currentMenuId: menuList[0] ? menuList[0]._id : '',
         goodsPage: 0,
@@ -931,7 +932,7 @@ Page({
         const noticeList = result.data || []
         this.setData({
           noticeList,
-          noticeText: noticeList.map(item => item.content).join('       ')
+          noticeText: noticeList.map(item => item.content).join(NOTICE_SEPARATOR)
         })
         return
       }
@@ -951,7 +952,7 @@ Page({
             : (!item.target || item.target === 'dineIn' || item.target === 'all')
         })
         .slice(0, 10)
-      const noticeText = noticeList.map(item => item.content).join('       ')
+      const noticeText = noticeList.map(item => item.content).join(NOTICE_SEPARATOR)
       
       this.setData({
         noticeList,
@@ -1763,11 +1764,6 @@ Page({
 
     this.updateCart(cart)
     this.playCartAddEffect(e)
-    wx.showToast({
-      title: '已添加',
-      icon: 'success',
-      duration: 1000
-    })
   },
 
   // 从菜品列表减少数量（无标签版本）
@@ -2534,5 +2530,3 @@ Page({
     }
   }
 })
-
-

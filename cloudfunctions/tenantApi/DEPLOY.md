@@ -23,7 +23,9 @@ WECHAT_SECRET=your customer mini program app secret
 TENANT_ID=zhangnan
 ```
 
-`WECHAT_APPID` and `WECHAT_SECRET` are needed for `auth.login`.
+`WECHAT_APPID` and `WECHAT_SECRET` are needed for `auth.login`, phone-number
+exchange, and mini-program code generation. They must belong to the same mini
+program whose AppID is configured in `project.config.json`.
 
 ## 3. Database license record
 

@@ -4,6 +4,7 @@ const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()
 const _ = db ? db.command : null
 const { getCustomNavOptions } = require('../../../../utils/customNav')
+const NOTICE_SEPARATOR = ' '.repeat(11)
 
 Page({
   data: {
@@ -368,7 +369,7 @@ Page({
         const noticeList = result.data || []
         this.setData({
           noticeList,
-          noticeText: noticeList.map(item => item.content).join('       ')
+          noticeText: noticeList.map(item => item.content).join(NOTICE_SEPARATOR)
         })
         return
       }
@@ -388,7 +389,7 @@ Page({
             : (!item.target || item.target === 'camping' || item.target === 'all')
         })
         .slice(0, 10)
-      const noticeText = noticeList.map(item => item.content).join('       ')
+      const noticeText = noticeList.map(item => item.content).join(NOTICE_SEPARATOR)
       
       this.setData({
         noticeList,
@@ -1155,11 +1156,6 @@ Page({
 
     this.updateCart(cart)
     this.playCartAddEffect(e)
-    wx.showToast({
-      title: '已添加',
-      icon: 'success',
-      duration: 1000
-    })
   },
 
   // 从菜品列表减少数量（无标签版本）
@@ -1923,5 +1919,3 @@ Page({
     }
   }
 })
-
-
