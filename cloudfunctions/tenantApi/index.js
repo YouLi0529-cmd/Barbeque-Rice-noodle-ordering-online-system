@@ -276,6 +276,24 @@ async function createWechatMiniProgramCode(scene, page) {
   return response.body
 }
 
+async function exchangeWechatPhoneNumber(code) {
+  const accessToken = await getWechatAccessToken()
+  const response = await requestBuffer(
+    `https://api.weixin.qq.com/wxa/business/getuserphonenumber?access_token=${encodeURIComponent(accessToken)}`,
+    'POST',
+    { code }
+  )
+  const data = parseJson(response.body.toString('utf8'))
+
+  if (response.statusCode < 200 || response.statusCode >= 300 || Number(data.errcode || 0) !== 0) {
+    const error = new Error(data.errmsg || `wechat phone api http ${response.statusCode}`)
+    error.errCode = data.errcode || response.statusCode
+    throw error
+  }
+
+  return data.phone_info || data.phoneInfo || {}
+}
+
 function buildResponse(payload, statusCode = 200) {
   return {
     statusCode,
@@ -1471,8 +1489,11 @@ async function getPhoneNumber(payload) {
   }
 
   try {
-    const result = await cloud.openapi.phonenumber.getPhoneNumber({ code })
-    const phoneNumber = result && result.phoneInfo && result.phoneInfo.phoneNumber
+    // tenantApi is invoked through an HTTP trigger, so it does not reliably
+    // inherit the mini program OpenAPI resource context. Use the official
+    // server API with this tenant's AppID/secret instead.
+    const phoneInfo = await exchangeWechatPhoneNumber(code)
+    const phoneNumber = phoneInfo.phoneNumber || phoneInfo.purePhoneNumber
     if (!phoneNumber) {
       return {
         success: false,
@@ -1491,10 +1512,18 @@ async function getPhoneNumber(payload) {
       phoneNumber
     }
   } catch (err) {
+    const errCode = err && (err.errCode || err.errcode || err.code)
+    console.error('phone.getNumber failed', {
+      errCode,
+      message: err && err.message
+    })
+
     return {
       success: false,
       code: 'PHONE_NUMBER_FAILED',
-      message: err.message || 'get phone number failed'
+      message: Number(errCode) === 40029
+        ? '手机号授权已过期，请重新点击授权'
+        : '获取手机号失败，请重试'
     }
   }
 }

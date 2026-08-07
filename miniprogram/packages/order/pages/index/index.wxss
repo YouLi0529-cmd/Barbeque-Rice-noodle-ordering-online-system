@@ -1465,8 +1465,8 @@ page {
 }
 
 .spec-content {
-  flex: 0 0 16vh;
-  height: 16vh;
+  flex: 1;
+  height: auto;
   min-height: 0;
   padding: 0 32rpx 24rpx;
   box-sizing: border-box;
@@ -1548,7 +1548,6 @@ page {
 }
 
 .spec-footer {
-  margin-top: auto;
   flex-shrink: 0;
   background: #fffaf1;
   border-top: 2rpx solid rgba(234, 214, 184, 0.78);
@@ -1781,4 +1780,3 @@ page {
   font-weight: 600;
   line-height: 1.3;
 }
-
