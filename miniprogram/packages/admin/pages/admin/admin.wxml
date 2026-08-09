@@ -16,20 +16,16 @@
       <view class="admin-grid">
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToOrder">
           <view class="card-title">{{ui.orderTitle}}</view>
-          <view class="card-desc">{{ui.orderDesc}}</view>
         </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToDish">
           <view class="card-title">{{ui.dishTitle}}</view>
-          <view class="card-desc">{{ui.dishDesc}}</view>
         </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToReservation">
           <view class="reservation-badge" wx:if="{{reservationUnreadCount > 0}}">{{reservationUnreadBadge}}</view>
           <view class="card-title">{{ui.reservationTitle}}</view>
-          <view class="card-desc">{{ui.reservationDesc}}</view>
         </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToOutdoor">
           <view class="card-title">{{ui.outdoorTitle}}</view>
-          <view class="card-desc">{{ui.outdoorDesc}}</view>
         </view>
       </view>
     </view>
@@ -39,19 +35,18 @@
       <view class="admin-grid">
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToShopInfo">
           <view class="card-title">{{ui.shopInfoTitle}}</view>
-          <view class="card-desc">{{ui.shopInfoDesc}}</view>
         </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToNotice">
           <view class="card-title">{{ui.noticeTitle}}</view>
-          <view class="card-desc">{{ui.noticeDesc}}</view>
+        </view>
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToTableCode">
+          <view class="card-title">{{ui.tableCodeTitle}}</view>
         </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToPrinter">
           <view class="card-title">{{ui.printerTitle}}</view>
-          <view class="card-desc">{{ui.printerDesc}}</view>
         </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToFeedback">
           <view class="card-title">{{ui.feedbackTitle}}</view>
-          <view class="card-desc">{{ui.feedbackDesc}}</view>
         </view>
       </view>
     </view>

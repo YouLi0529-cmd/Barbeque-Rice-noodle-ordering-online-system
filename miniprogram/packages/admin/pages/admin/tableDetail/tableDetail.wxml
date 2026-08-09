@@ -7,6 +7,7 @@
           <view class="bill-title-row">
             <view class="panel-title">{{ui.pageTitle}}</view>
             <view class="status-pill {{table.statusClass}}">{{table.statusText}}</view>
+            <view class="waiter-order-btn" bindtap="startWaiterOrder">{{billGroups.length ? ui.waiterAdd : ui.waiterCreate}}</view>
           </view>
           <view class="table-meta-row">
             <text class="meta-strong">{{table.areaName}}{{table.tableNumber}}{{ui.tableUnit}}</text>

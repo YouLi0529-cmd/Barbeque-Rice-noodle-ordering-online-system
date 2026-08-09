@@ -1101,6 +1101,102 @@ async function createOrder(payload) {
   return result
 }
 
+async function adminCreateOfflineOrder(payload) {
+  const tableRef = getAdminTableRef(payload.areaKey, payload.tableNumber)
+  if (!tableRef) {
+    return { success: false, code: 'TABLE_NOT_FOUND', message: '桌台不存在' }
+  }
+
+  const activeOrders = (await getSingleAdminTableOrders(tableRef.areaKey, tableRef.tableNumber))
+    .filter(order => !isAdminPaidOrder(order))
+  const mode = payload.mode === 'create' ? 'create' : 'add'
+  if (mode === 'create' && activeOrders.length > 0) {
+    return { success: false, code: 'TABLE_OCCUPIED', message: '该桌已有订单，请使用加菜' }
+  }
+  if (mode === 'add' && activeOrders.length === 0) {
+    return { success: false, code: 'ORDER_NOT_FOUND', message: '该桌还没有主订单，请先开单' }
+  }
+
+  const parentOrder = mode === 'add'
+    ? (activeOrders.find(order => order.isAddOnOrder !== true) || activeOrders[0])
+    : null
+  const rootOrderId = parentOrder ? String(parentOrder.rootOrderId || parentOrder._id) : ''
+  const addOnIndex = mode === 'add'
+    ? activeOrders.reduce((max, order) => Math.max(max, Number(order.addOnIndex || 0)), 0) + 1
+    : 0
+  const peopleCount = Math.max(1, Math.min(99, Math.floor(Number(
+    payload.peopleCount || parentOrder && parentOrder.peopleCount || 1
+  ))))
+  const result = await db.runTransaction(async transaction => {
+    const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods)
+    if (!priceResult.goods.length) throw new Error('请选择菜品')
+
+    const orderData = {
+      type: 'order',
+      orderScene: 'dineIn',
+      orderType: 'dineIn',
+      isAddOnOrder: mode === 'add',
+      parentOrderId: mode === 'add' ? rootOrderId : '',
+      rootOrderId,
+      addOnIndex,
+      orderCardTitle: mode === 'add' ? `加菜单${addOnIndex}` : '服务员开单',
+      orderSource: 'waiter',
+      createdByAdmin: true,
+      goods: priceResult.goods,
+      totalPrice: priceResult.totalPrice,
+      finalPrice: priceResult.finalPrice,
+      pay_status: false,
+      payStatus: false,
+      payMethod: 'offline',
+      status: 'submitted',
+      tableCleared: false,
+      frontDeskConfirmed: false,
+      frontDeskRemark: '',
+      kitchenPrinted: false,
+      kitchenPrintStatus: 'pending',
+      storeId: getTenantId(payload),
+      createTime: db.serverDate(),
+      updateTime: db.serverDate(),
+      _openid: '',
+      userId: '',
+      userCode: '',
+      userSnapshot: { userCode: '', nickName: '线下顾客', avatarUrl: '', phoneNumber: '' },
+      userNickName: '线下顾客',
+      userAvatar: '',
+      userPhone: '',
+      tableNumber: formatAdminTableNumber(tableRef),
+      peopleCount
+    }
+
+    const addRes = await transaction.collection('order').add({ data: orderData })
+    const savedRootOrderId = rootOrderId || addRes._id
+    if (!rootOrderId) {
+      await transaction.collection('order').doc(addRes._id).update({ data: { rootOrderId: savedRootOrderId } })
+    }
+    return {
+      success: true,
+      orderId: addRes._id,
+      order: { ...orderData, _id: addRes._id, rootOrderId: savedRootOrderId }
+    }
+  })
+
+  const sessionId = getSharedCartSessionId(formatAdminTableNumber(tableRef))
+  const sessionRes = await db.collection('tableOrderSession').doc(sessionId).get()
+  if (sessionRes.data) {
+    await db.collection('tableOrderSession').doc(sessionId).update({
+      data: {
+        activeOrderRootId: result.order.rootOrderId,
+        addOnCount: addOnIndex,
+        peopleCount,
+        peopleConfirmed: true,
+        updateTime: db.serverDate()
+      }
+    })
+  }
+  await touchAdminTableBoard()
+  return result
+}
+
 async function getCurrentUser(payload) {
   const auth = await getAuthSession(payload)
   if (!auth.success) return auth
@@ -6989,6 +7085,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.order.sendKitchenItems') return completeAdminTableMutation(adminSendKitchenItems(payload))
   if (action === 'admin.order.retryFailedKitchenItems') return completeAdminTableMutation(adminRetryFailedKitchenItems(payload))
   if (action === 'admin.order.urgeKitchenItems') return completeAdminTableMutation(adminUrgeKitchenItems(payload))
+  if (action === 'admin.order.createOffline') return adminCreateOfflineOrder(payload)
   if (action === 'admin.table.refundDish') return completeAdminTableMutation(adminRefundDish(payload))
   if (action === 'admin.table.refundDishes') return completeAdminTableMutation(adminRefundDishes(payload))
   if (action === 'admin.table.giftDishes') return completeAdminTableMutation(adminGiftDishes(payload))

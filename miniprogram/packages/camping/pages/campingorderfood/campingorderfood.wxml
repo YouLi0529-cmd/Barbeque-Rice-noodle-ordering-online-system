@@ -249,10 +249,11 @@
       <view class="spec-product-card">
         <image wx:if="{{currentDish.hasImage}}" class="spec-product-image" src="{{currentDish.image}}" mode="aspectFill"></image>
         <view wx:else class="spec-product-image spec-product-image-placeholder"></view>
-        <view class="spec-product-info">
-          <view class="spec-product-name">{{currentDish.name}}</view>
-          <view class="spec-product-desc" wx:if="{{currentDish.description || currentDish.desc}}">{{currentDish.description || currentDish.desc}}</view>
-        </view>
+      </view>
+
+      <view class="spec-product-info">
+        <view class="spec-product-name">{{currentDish.name}}</view>
+        <view class="spec-product-desc" wx:if="{{currentDish.description || currentDish.desc}}">{{currentDish.description || currentDish.desc}}</view>
       </view>
 
       <scroll-view class="spec-content" scroll-y>

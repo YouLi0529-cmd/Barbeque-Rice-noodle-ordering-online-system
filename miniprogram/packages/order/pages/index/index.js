@@ -6,7 +6,8 @@ const _ = db ? db.command : null
 const { getCustomNavOptions } = require('../../../../utils/customNav')
 const SHARED_CART_ACTIVE_POLL_MS = 8000
 const SHARED_CART_IDLE_POLL_MS = 20000
-const NOTICE_SEPARATOR = ' '.repeat(11)
+// Non-breaking spaces are preserved by the mini program text renderer.
+const NOTICE_SEPARATOR = '\u00a0'.repeat(11)
 
 Page({
   data: {

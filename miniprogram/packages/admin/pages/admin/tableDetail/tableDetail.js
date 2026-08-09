@@ -13,6 +13,8 @@ const UI = {
   orderDetail: '\u8ba2\u5355\u8be6\u60c5',
   emptyBill: '\u8be5\u684c\u6682\u65e0\u5df2\u63d0\u4ea4\u83dc\u54c1',
   emptyTip: '\u987e\u5ba2\u63d0\u4ea4\u8ba2\u5355\u540e\uff0c\u8fd9\u91cc\u4f1a\u663e\u793a\u83dc\u54c1\u548c\u603b\u4ef7',
+  waiterCreate: '\u4ee3\u5ba2\u5f00\u5355',
+  waiterAdd: '\u52a0\u83dc',
   loading: '\u52a0\u8f7d\u4e2d',
   total: '\u5408\u8ba1',
   dishes: '\u4ef6\u83dc\u54c1',
@@ -414,6 +416,38 @@ Page({
     if (this.data.table && this.data.table.tableNumber) {
       this.loadDetail(true)
     }
+  },
+
+  startWaiterOrder() {
+    const table = this.data.table || {}
+    const mode = (this.data.billGroups || []).length > 0 ? 'add' : 'create'
+
+    const openOrderPage = peopleCount => {
+      wx.navigateTo({
+        url: `/packages/admin/pages/admin/waiterOrder/waiterOrder?mode=${mode}&areaKey=${encodeURIComponent(table.areaKey || 'normal')}&areaName=${encodeURIComponent(table.areaName || '')}&tableNumber=${encodeURIComponent(table.tableNumber || '')}&peopleCount=${peopleCount}`
+      })
+    }
+
+    if (mode === 'add' || Number(table.peopleCount) > 0) {
+      openOrderPage(Number(table.peopleCount))
+      return
+    }
+
+    wx.showModal({
+      title: '\u8f93\u5165\u7528\u9910\u4eba\u6570',
+      editable: true,
+      placeholderText: '1-99',
+      confirmText: '\u5f00\u59cb\u70b9\u5355',
+      success: res => {
+        if (!res.confirm) return
+        const peopleCount = Math.floor(Number(res.content || 0))
+        if (peopleCount < 1 || peopleCount > 99) {
+          wx.showToast({ title: UI.peopleInvalid, icon: 'none' })
+          return
+        }
+        openOrderPage(peopleCount)
+      }
+    })
   },
 
   async loadDetail(silent = false) {

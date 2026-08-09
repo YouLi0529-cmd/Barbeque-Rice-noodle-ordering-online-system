@@ -147,6 +147,22 @@ page {
   text-align: center;
 }
 
+.waiter-order-btn {
+  margin-left: auto;
+  min-width: 72rpx;
+  height: 22rpx;
+  padding: 0 14rpx;
+  border-radius: 999rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFF7EC;
+  background: #B15B18;
+  font-size: 9rpx;
+  font-weight: 900;
+  box-sizing: border-box;
+}
+
 .empty-title {
   color: rgba(58, 36, 24, 0.72);
   font-size: 12rpx;

@@ -19,6 +19,7 @@ Page({
     orderPageSize: 20,
     orderHasMore: true,
     loadingOrders: false,
+    ordersLoaded: false,
     actionLoading: false,
     actionLoadingText: '',
     actionLoadingGif: '/images/orderloadinggif-transparent.gif'
@@ -102,7 +103,8 @@ Page({
       // 重置分页状态
       orderPage: 0,
       orderHasMore: true,
-      orderList: []
+      orderList: [],
+      ordersLoaded: false
     })
     this.loadOrders()
   },
@@ -114,6 +116,7 @@ Page({
     }
 
     if (!append) {
+      this.setData({ ordersLoaded: false })
       this.showActionLoading('加载中')
     }
     
@@ -187,7 +190,8 @@ Page({
       this.setData({
         orderList: newList,
         orderPage: page,
-        orderHasMore: hasMore
+        orderHasMore: hasMore,
+        ordersLoaded: true
       })
     } catch (err) {
       console.error('加载订单失败', err)

@@ -4,7 +4,8 @@ const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()
 const _ = db ? db.command : null
 const { getCustomNavOptions } = require('../../../../utils/customNav')
-const NOTICE_SEPARATOR = ' '.repeat(11)
+// Non-breaking spaces are preserved by the mini program text renderer.
+const NOTICE_SEPARATOR = '\u00a0'.repeat(11)
 
 Page({
   data: {

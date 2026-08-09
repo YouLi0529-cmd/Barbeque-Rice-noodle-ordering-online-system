@@ -22,44 +22,16 @@
     "miniprogram": {
       "list": [
         {
-          "name": "堂食扫码点单",
-          "pathName": "packages/order/pages/index/index",
-          "query": "scene=12",
-          "scene": null,
-          "launchMode": "default"
-        },
-        {
-          "name": "用户端首页",
-          "pathName": "pages/covertest/covertest",
-          "query": "scene=01",
-          "launchMode": "default",
-          "scene": null
-        },
-        {
-          "name": "商户后台入口",
+          "name": "商户端",
           "pathName": "packages/admin/pages/admin/admin",
           "query": "",
-          "launchMode": "default",
-          "scene": null
-        },
-        {
-          "name": "露营点单",
-          "pathName": "packages/camping/pages/campingorderfood/campingorderfood",
-          "query": "",
-          "launchMode": "default",
-          "scene": null
-        },
-        {
-          "name": "用户订单",
-          "pathName": "packages/user/pages/myorder/myorder",
-          "query": "",
-          "launchMode": "default",
-          "scene": null
+          "scene": null,
+          "launchMode": "default"
         }
       ]
     }
   },
   "libVersion": "3.12.1",
   "description": "项目私有配置文件。此文件中的内容将覆盖 project.config.json 中的相同字段。项目的改动优先同步到此文件中。详见文档：https://developers.weixin.qq.com/miniprogram/dev/devtools/projectconfig.html",
-  "projectname": "orderFood-wxCloud"
+  "projectname": "Barbeque-Rice-noodle-ordering-online-system"
 }

@@ -74,7 +74,7 @@
         <text>{{order.tableNumberText}}</text>
       </view>
     </view>
-    <view class="empty-order" wx:if="{{orderList.length === 0}}">
+    <view class="empty-order" wx:if="{{ordersLoaded && !loadingOrders && orderList.length === 0}}">
       <image class="empty-order-image" src="/packages/user/images/meidingdan-transparent.png" mode="aspectFit"></image>
     </view>
   </view>

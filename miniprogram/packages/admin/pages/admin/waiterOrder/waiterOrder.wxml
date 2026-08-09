@@ -1,0 +1,95 @@
+<view class="waiter-page">
+  <view class="topbar">
+    <view class="table-title">{{areaName}}{{tableNumber}}号桌</view>
+    <view class="mode-pill">{{modeText}}</view>
+    <view class="people-text">{{peopleCount}}人</view>
+    <view class="top-action search-action" bindtap="toggleSearch">{{searchOpen ? '关闭搜索' : '搜索菜品'}}</view>
+    <view class="top-action" bindtap="refreshTap">刷新菜单</view>
+  </view>
+
+  <view class="search-bar" wx:if="{{searchOpen}}">
+    <input class="search-input" focus="{{searchOpen}}" value="{{searchKeyword}}" placeholder="输入菜品名称" bindinput="onSearchInput" />
+    <view class="search-count">{{searchKeyword ? '找到 ' + searchResults.length + ' 个菜品' : '输入名称即时搜索'}}</view>
+  </view>
+
+  <view class="workspace {{cartOpen ? 'cart-open' : 'cart-closed'}}">
+    <scroll-view class="category-list" scroll-y enable-flex="{{true}}">
+      <view class="category-item {{currentCategoryId === item._id ? 'active' : ''}}" wx:for="{{categories}}" wx:key="_id" data-id="{{item._id}}" bindtap="selectCategory">{{item.name}}</view>
+    </scroll-view>
+
+    <scroll-view class="dish-list" scroll-y enable-flex="{{true}}" scroll-into-view="{{scrollIntoView}}" bindscroll="onGoodsScroll" enhanced show-scrollbar="{{false}}">
+      <view class="loading" wx:if="{{loading && sections.length === 0}}">菜单加载中...</view>
+
+      <view class="dish-grid search-grid" wx:elif="{{searchOpen && searchKeyword}}">
+        <view class="dish-card" wx:for="{{searchResults}}" wx:key="_id">
+          <view class="dish-name">{{item.name}}</view>
+          <view class="dish-bottom">
+            <text class="dish-price">￥{{item.price}}</text>
+            <view class="dish-stepper">
+              <view class="dish-qty-btn minus {{item.cartCount ? '' : 'hidden'}}" data-id="{{item._id}}" bindtap="reduceDish">−</view>
+              <text class="dish-count" wx:if="{{item.cartCount}}">{{item.cartCount}}</text>
+              <view class="dish-qty-btn add" data-dish="{{item}}" bindtap="selectDish">+</view>
+            </view>
+          </view>
+        </view>
+        <view class="empty" wx:if="{{searchResults.length === 0}}">没有找到匹配菜品</view>
+      </view>
+
+      <block wx:else>
+        <view class="category-section" id="category-{{section.id}}" wx:for="{{sections}}" wx:for-item="section" wx:key="id">
+          <view class="section-heading"><text>{{section.name}}</text><text>{{section.goods.length}}个菜品</text></view>
+          <view class="dish-grid">
+            <view class="dish-card" wx:for="{{section.goods}}" wx:for-item="item" wx:key="_id">
+              <view class="dish-name">{{item.name}}</view>
+              <view class="dish-bottom">
+                <text class="dish-price">￥{{item.price}}</text>
+                <view class="dish-stepper">
+                  <view class="dish-qty-btn minus {{item.cartCount ? '' : 'hidden'}}" data-id="{{item._id}}" bindtap="reduceDish">−</view>
+                  <text class="dish-count" wx:if="{{item.cartCount}}">{{item.cartCount}}</text>
+                  <view class="dish-qty-btn add" data-dish="{{item}}" bindtap="selectDish">+</view>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+      </block>
+    </scroll-view>
+
+    <view class="cart-panel" wx:if="{{cartOpen}}">
+        <view class="cart-head" bindtap="toggleCart">
+          <view class="cart-head-title"><text class="collapse-arrow">›</text><text>订单详情</text></view>
+          <text class="clear" catchtap="clearCart">清空</text>
+        </view>
+        <scroll-view class="cart-list" scroll-y>
+          <view class="cart-empty" wx:if="{{cartList.length === 0}}">点击菜品右下角 + 加入</view>
+          <view class="cart-item" wx:for="{{cartList}}" wx:key="key">
+            <view class="cart-copy"><view class="cart-name">{{item.info.name}}</view><view class="cart-tags" wx:if="{{item.tagText}}">{{item.tagText}}</view></view>
+            <view class="qty-btn" data-key="{{item.key}}" data-delta="-1" bindtap="changeCartCount">−</view>
+            <view class="qty-num">{{item.count}}</view>
+            <view class="qty-btn add" data-key="{{item.key}}" data-delta="1" bindtap="changeCartCount">+</view>
+          </view>
+        </scroll-view>
+        <view class="cart-footer">
+          <view><text class="count">{{cartCount}}件</text><text class="total">￥{{totalPriceText}}</text></view>
+          <view class="submit {{cartCount && !submitting ? 'active' : ''}}" bindtap="submitOrder">{{submitting ? '提交中' : (mode === 'create' ? '确认开单' : '确认加菜')}}</view>
+        </view>
+    </view>
+  </view>
+
+  <view class="cart-trigger" wx:if="{{!cartOpen}}" bindtap="toggleCart">
+    <text class="trigger-label">订单详情</text>
+    <text class="trigger-count" wx:if="{{cartCount}}">{{cartCount}}</text>
+  </view>
+
+  <view class="spec-mask" wx:if="{{showSpecModal}}" bindtap="closeSpecModal">
+    <view class="spec-dialog" catchtap="stopTap">
+      <view class="spec-title">{{currentDish.name}}</view>
+      <scroll-view class="spec-body" scroll-y>
+        <view class="spec-group" wx:if="{{flavorOptions.length}}"><view class="group-title">{{flavorTitle}}</view><view class="option-row"><view class="option {{selectedOptions.flavor === item ? 'active' : ''}}" wx:for="{{flavorOptions}}" wx:key="*this" data-value="{{item}}" bindtap="chooseFlavor">{{item}}</view></view></view>
+        <view class="spec-group" wx:for="{{optionGroups}}" wx:key="id"><view class="group-title">{{item.title}}</view><view class="option-row"><view class="option {{selectedOptions[item.id] === option ? 'active' : ''}}" wx:for="{{item.options}}" wx:for-item="option" wx:key="*this" data-id="{{item.id}}" data-value="{{option}}" bindtap="chooseGroupOption">{{option}}</view></view></view>
+        <input class="remark" value="{{remark}}" maxlength="20" placeholder="备注（可选）" bindinput="onRemarkInput" />
+      </scroll-view>
+      <view class="spec-footer"><view class="modal-qty"><view bindtap="decreaseModalCount">−</view><text>{{modalCount}}</text><view bindtap="increaseModalCount">+</view></view><view class="spec-confirm" bindtap="confirmSpec">加入已选</view></view>
+    </view>
+  </view>
+</view>

@@ -31,22 +31,15 @@ const ADMIN_TEXT = {
   heroTitle: '\u5f20\u5357\u70e4\u8089\u540e\u53f0',
   coreSection: '\u6838\u5fc3\u4e1a\u52a1',
   orderTitle: '\u684c\u53f0\u7ba1\u7406',
-  orderDesc: '\u67e5\u770b\u684c\u53f0\u72b6\u6001\u548c\u5f53\u524d\u8d26\u5355',
   dishTitle: '\u83dc\u54c1\u7ba1\u7406',
-  dishDesc: '\u5206\u7c7b\u3001\u83dc\u54c1\u3001\u4e0a\u4e0b\u67b6',
   reservationTitle: '\u9884\u7ea6\u7ba1\u7406',
-  reservationDesc: '\u786e\u8ba4\u9884\u7ea6\u548c\u5230\u5e97\u8bb0\u5f55',
   outdoorTitle: '\u6237\u5916\u8ba2\u5355',
-  outdoorDesc: '\u9732\u8425\u8ba2\u5355\u5904\u7406',
   settingsSection: '\u5e97\u94fa\u8bbe\u7f6e',
   shopInfoTitle: '\u8054\u7cfb\u6211\u8bbe\u7f6e',
-  shopInfoDesc: '\u66f4\u6362\u8054\u7cfb\u56fe\u7247\u548c\u7535\u8bdd',
   noticeTitle: '\u516c\u544a\u7ba1\u7406',
-  noticeDesc: '\u9996\u9875\u901a\u77e5\u5185\u5bb9',
+  tableCodeTitle: '\u684c\u7801\u7ba1\u7406',
   printerTitle: '\u6253\u5370\u673a\u7ba1\u7406',
-  printerDesc: '\u5c0f\u7968\u6253\u5370\u914d\u7f6e',
   feedbackTitle: '\u610f\u89c1\u6536\u96c6',
-  feedbackDesc: '\u67e5\u770b\u7528\u6237\u63d0\u4ea4\u7684\u53cd\u9988',
   reservationModalTitle: '\u65b0\u9884\u7ea6',
   reservationEmpty: '\u6682\u65e0\u65b0\u9884\u7ea6',
   reservationRefresh: '\u5237\u65b0',
@@ -262,6 +255,10 @@ Page({
 
   goToOrder() {
     wx.navigateTo({ url: `${ADMIN_ROOT}/table/table` })
+  },
+
+  goToTableCode() {
+    wx.navigateTo({ url: `${ADMIN_ROOT}/tableCode/tableCode` })
   },
 
   goToReservation() {

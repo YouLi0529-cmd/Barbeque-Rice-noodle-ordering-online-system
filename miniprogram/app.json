@@ -34,6 +34,7 @@
         "pages/admin/admin",
         "pages/admin/table/table",
         "pages/admin/tableDetail/tableDetail",
+        "pages/admin/waiterOrder/waiterOrder",
         "pages/admin/order/order",
         "pages/admin/queue/queue",
         "pages/admin/outdoor/outdoor",
