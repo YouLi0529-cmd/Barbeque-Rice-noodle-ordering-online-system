@@ -823,13 +823,15 @@ function isCampingAccessoryCategory(categoryName) {
   return name === '\u70e4\u67b6' || name === '\u9732\u8425\u7528\u54c1'
 }
 
-async function buildServerOrderGoods(transaction, orderGoods) {
+async function buildServerOrderGoods(transaction, orderGoods, options = {}) {
   if (!Array.isArray(orderGoods) || orderGoods.length === 0) {
     throw new Error('empty cart')
   }
 
   const records = []
   const exclusiveGroupCount = {}
+  const packageCache = {}
+  const packageRequests = {}
   let thresholdBasePrice = 0
 
   for (const item of orderGoods) {
@@ -839,6 +841,47 @@ async function buildServerOrderGoods(transaction, orderGoods) {
     }
 
     const count = normalizeCount(item.count)
+    const packageId = String(item && item.packageId || '').trim()
+    let packageMeta = null
+
+    if (packageId) {
+      if (options.allowPackages !== true) {
+        throw new Error('package order is only available to staff')
+      }
+      const packageCount = normalizeCount(item.packageCount)
+      let mealPackage = packageCache[packageId]
+      if (!mealPackage) {
+        const packageRes = await transaction.collection('mealPackage').doc(packageId).get()
+        mealPackage = packageRes.data
+        if (!mealPackage || mealPackage.status !== 1) {
+          throw new Error('package unavailable')
+        }
+        packageCache[packageId] = mealPackage
+      }
+      const packageItem = (mealPackage.items || []).find(entry => String(entry.dishId || '') === String(dishId))
+      const expectedCount = Math.max(1, Math.floor(Number(packageItem && packageItem.count || 0))) * packageCount
+      if (!packageItem || count !== expectedCount) {
+        throw new Error('package items changed, please add again')
+      }
+      packageMeta = {
+        packageId,
+        packageName: String(mealPackage.name || '').trim(),
+        packagePrice: roundMoney(mealPackage.price || 0),
+        packageCount
+      }
+      if (!packageRequests[packageId]) {
+        packageRequests[packageId] = {
+          mealPackage,
+          packageCount,
+          itemCounts: {}
+        }
+      }
+      const request = packageRequests[packageId]
+      if (request.packageCount !== packageCount) {
+        throw new Error('package count mismatch')
+      }
+      request.itemCounts[dishId] = (request.itemCounts[dishId] || 0) + count
+    }
     const dishRes = await transaction.collection('dish').doc(dishId).get()
     const dish = dishRes.data
 
@@ -891,14 +934,32 @@ async function buildServerOrderGoods(transaction, orderGoods) {
       returnRequired: !!dish.returnRequired,
       printerId: normalizePrinterId(dish.printerId || dish.kitchenPrinterId || ''),
       printerName: getPrinterName(dish.printerId || dish.kitchenPrinterId || ''),
-      tags: normalizeTags(item.tags)
+      tags: normalizeTags(item.tags),
+      ...packageMeta
     })
   }
 
+  Object.keys(packageRequests).forEach(packageId => {
+    const request = packageRequests[packageId]
+    ;(request.mealPackage.items || []).forEach(item => {
+      const dishId = String(item.dishId || '')
+      const expectedCount = Math.max(1, Math.floor(Number(item.count || 0))) * request.packageCount
+      if (!dishId || request.itemCounts[dishId] !== expectedCount) {
+        throw new Error('package items incomplete')
+      }
+    })
+  })
+
   const goods = []
   let totalPrice = 0
+  const packageGroups = {}
 
   records.forEach(record => {
+    if (record.packageId) {
+      if (!packageGroups[record.packageId]) packageGroups[record.packageId] = []
+      packageGroups[record.packageId].push(record)
+      return
+    }
     const freeByThreshold = record.freeThreshold > 0 && thresholdBasePrice >= record.freeThreshold
     const price = freeByThreshold ? 0 : record.originalPrice
     const subtotal = roundMoney(price * record.count)
@@ -910,6 +971,28 @@ async function buildServerOrderGoods(transaction, orderGoods) {
       subtotal,
       freeByThreshold
     })
+  })
+
+  Object.keys(packageGroups).forEach(packageId => {
+    const packageRecords = packageGroups[packageId]
+    const packagePrice = roundMoney(packageRecords[0].packagePrice * packageRecords[0].packageCount)
+    const originalTotal = roundMoney(packageRecords.reduce((sum, record) => sum + record.originalSubtotal, 0))
+    let remainingSubtotal = packagePrice
+
+    packageRecords.forEach((record, index) => {
+      const isLast = index === packageRecords.length - 1
+      const subtotal = isLast
+        ? remainingSubtotal
+        : roundMoney(originalTotal > 0 ? packagePrice * record.originalSubtotal / originalTotal : 0)
+      remainingSubtotal = roundMoney(remainingSubtotal - subtotal)
+      goods.push({
+        ...record,
+        price: record.count > 0 ? roundMoney(subtotal / record.count) : 0,
+        subtotal,
+        freeByThreshold: false
+      })
+    })
+    totalPrice = roundMoney(totalPrice + packagePrice)
   })
 
   return {
@@ -1128,7 +1211,7 @@ async function adminCreateOfflineOrder(payload) {
     payload.peopleCount || parentOrder && parentOrder.peopleCount || 1
   ))))
   const result = await db.runTransaction(async transaction => {
-    const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods)
+    const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods, { allowPackages: true })
     if (!priceResult.goods.length) throw new Error('请选择菜品')
 
     const orderData = {
@@ -6306,6 +6389,160 @@ async function adminDeleteCategory(payload) {
   }
 }
 
+function normalizePackageItems(items) {
+  const merged = {}
+  ;(Array.isArray(items) ? items : []).forEach(item => {
+    const dishId = String(item && item.dishId || '').trim()
+    const count = Math.max(0, Math.floor(Number(item && item.count || 0)))
+    if (!dishId || !count) return
+    merged[dishId] = {
+      dishId,
+      count: Math.min(99, (merged[dishId] && merged[dishId].count || 0) + count)
+    }
+  })
+  return Object.keys(merged).map(key => merged[key])
+}
+
+function isCollectionNotFoundError(err) {
+  const message = String(err && (err.errMsg || err.message) || err || '')
+  return /collection not exists|Db or Table not exist|ResourceNotFound/i.test(message)
+}
+
+function normalizeAdminMealPackage(payload) {
+  const mealPackage = payload.mealPackage || payload.package || payload
+  return {
+    _id: String(mealPackage._id || mealPackage.packageId || '').trim(),
+    name: String(mealPackage.name || '').trim(),
+    price: roundMoney(mealPackage.price || 0),
+    description: String(mealPackage.description || '').trim(),
+    menuType: getMenuType(mealPackage.menuType || payload.menuType),
+    status: mealPackage.status === 0 ? 0 : 1,
+    sort: Number(mealPackage.sort || 0),
+    items: normalizePackageItems(mealPackage.items)
+  }
+}
+
+async function adminListMealPackages(payload) {
+  const menuType = getMenuType(payload.menuType)
+  const keyword = String(payload.keyword || '').trim()
+  const limit = getLimit(payload, 100, 100)
+  const where = { menuType: getMenuTypeWhere(menuType) }
+
+  try {
+    if (keyword) {
+      const matcher = db.RegExp({
+        regexp: keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+        options: 'i'
+      })
+      const res = await db.collection('mealPackage')
+        .where(_.or([
+          { ...where, name: matcher },
+          { ...where, description: matcher }
+        ]))
+        .limit(limit)
+        .get()
+      return { success: true, data: res.data || [] }
+    }
+
+    const res = await db.collection('mealPackage')
+      .where(where)
+      .orderBy('sort', 'asc')
+      .limit(limit)
+      .get()
+    return { success: true, data: res.data || [] }
+  } catch (err) {
+    if (isCollectionNotFoundError(err)) return { success: true, data: [] }
+    throw err
+  }
+}
+
+async function adminListPackageDishOptions(payload) {
+  const menuType = getMenuType(payload.menuType)
+  const res = await db.collection('dish')
+    .where({ menuType: getMenuTypeWhere(menuType) })
+    .orderBy('sort', 'asc')
+    .limit(getLimit(payload, 100, 100))
+    .get()
+
+  return {
+    success: true,
+    data: (res.data || []).map(dish => ({
+      _id: dish._id,
+      name: dish.name || '',
+      price: roundMoney(dish.price || 0),
+      unit: dish.unit || '份',
+      status: dish.status === 0 ? 0 : 1,
+      categoryName: dish.categoryName || ''
+    }))
+  }
+}
+
+async function adminSaveMealPackage(payload) {
+  const mealPackage = normalizeAdminMealPackage(payload)
+  if (!mealPackage.name) {
+    return { success: false, code: 'PACKAGE_NAME_REQUIRED', message: 'package name required' }
+  }
+  if (mealPackage.price < 0) {
+    return { success: false, code: 'PACKAGE_PRICE_INVALID', message: 'package price invalid' }
+  }
+  if (!mealPackage.items.length) {
+    return { success: false, code: 'PACKAGE_ITEMS_REQUIRED', message: 'package items required' }
+  }
+
+  const items = []
+  for (const item of mealPackage.items) {
+    const res = await db.collection('dish').doc(item.dishId).get()
+    const dish = res.data
+    if (!dish || getMenuType(dish.menuType) !== mealPackage.menuType) {
+      return { success: false, code: 'PACKAGE_DISH_INVALID', message: 'package dish invalid' }
+    }
+    items.push({
+      dishId: dish._id,
+      dishName: dish.name || '',
+      dishPrice: roundMoney(dish.price || 0),
+      dishUnit: dish.unit || '份',
+      count: item.count
+    })
+  }
+
+  const data = {
+    name: mealPackage.name,
+    price: mealPackage.price,
+    description: mealPackage.description,
+    menuType: mealPackage.menuType,
+    status: mealPackage.status,
+    sort: mealPackage.sort,
+    items,
+    updateTime: db.serverDate()
+  }
+
+  if (mealPackage._id) {
+    await db.collection('mealPackage').doc(mealPackage._id).update({ data })
+    return { success: true, data: { _id: mealPackage._id } }
+  }
+
+  const addRes = await db.collection('mealPackage').add({
+    data: { ...data, createTime: db.serverDate() }
+  })
+  return { success: true, data: { _id: addRes._id } }
+}
+
+async function adminSetMealPackageStatus(payload) {
+  const packageId = String(payload.packageId || payload._id || '').trim()
+  if (!packageId) return { success: false, code: 'PACKAGE_ID_REQUIRED', message: 'package id required' }
+  await db.collection('mealPackage').doc(packageId).update({
+    data: { status: payload.status === 0 ? 0 : 1, updateTime: db.serverDate() }
+  })
+  return { success: true }
+}
+
+async function adminDeleteMealPackage(payload) {
+  const packageId = String(payload.packageId || payload._id || '').trim()
+  if (!packageId) return { success: false, code: 'PACKAGE_ID_REQUIRED', message: 'package id required' }
+  await db.collection('mealPackage').doc(packageId).remove()
+  return { success: true }
+}
+
 async function adminListDishes(payload) {
   const menuType = getMenuType(payload.menuType)
   const categoryId = String(payload.categoryId || '').trim()
@@ -7039,6 +7276,7 @@ async function handleAction(action, payload) {
   if (
     action.indexOf('admin.category.') === 0 ||
     action.indexOf('admin.dish.') === 0 ||
+    action.indexOf('admin.package.') === 0 ||
     action.indexOf('admin.table.') === 0 ||
     action.indexOf('admin.tableCode.') === 0 ||
     action.indexOf('admin.merchantCode.') === 0 ||
@@ -7062,6 +7300,11 @@ async function handleAction(action, payload) {
   if (action === 'admin.dish.matchImages') return adminMatchDishImages(payload)
   if (action === 'admin.dish.uploadImage') return adminUploadDishImage(payload)
   if (action === 'admin.dish.uploadFile') return adminUploadDishFile(payload)
+  if (action === 'admin.package.list') return adminListMealPackages(payload)
+  if (action === 'admin.package.dishOptions') return adminListPackageDishOptions(payload)
+  if (action === 'admin.package.save') return adminSaveMealPackage(payload)
+  if (action === 'admin.package.status') return adminSetMealPackageStatus(payload)
+  if (action === 'admin.package.delete') return adminDeleteMealPackage(payload)
   if (action === 'admin.shop.uploadFile') return adminUploadShopContactFile(payload)
   if (action === 'admin.shop.save') return adminSaveShopInfo(payload)
   if (action === 'admin.table.list') return adminListTables(payload)

@@ -24,7 +24,7 @@
         {
           "name": "商户端",
           "pathName": "packages/admin/pages/admin/admin",
-          "query": "",
+          "query": "packages/admin/pages/admin/admin",
           "scene": null,
           "launchMode": "default"
         }

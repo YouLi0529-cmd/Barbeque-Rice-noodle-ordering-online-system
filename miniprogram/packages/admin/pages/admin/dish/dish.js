@@ -3,6 +3,8 @@ const apiClient = require('../../../../../utils/apiClient')
 
 const UI = {
   pageTitle: '\u83dc\u54c1\u7ba1\u7406',
+  contentDish: '\u83dc\u54c1',
+  contentPackage: '\u5957\u9910',
   dineIn: '\u5802\u98df',
   camping: '\u9732\u8425',
   addCategory: '\u6dfb\u52a0\u5206\u7c7b',
@@ -78,10 +80,22 @@ const UI = {
   slash: '/',
   defaultUnit: '\u4efd',
   searchPlaceholder: '\u641c\u7d22\u83dc\u54c1',
+  searchPackagePlaceholder: '\u641c\u7d22\u5957\u9910',
   searchResult: '\u641c\u7d22\u7ed3\u679c',
   emptySearch: '\u672a\u627e\u5230\u83dc\u54c1',
   clearSearch: '\u6e05\u7a7a',
   imageTip: '\u4ec5\u652f\u6301 jpg/png/webp\uff0c\u9009\u56fe\u540e\u53ef\u88c1\u526a\u4e3a\u65b9\u56fe\uff0c\u7cfb\u7edf\u4f1a\u81ea\u52a8\u538b\u7f29\u3002',
+  addPackage: '\u6dfb\u52a0\u5957\u9910',
+  editPackage: '\u7f16\u8f91\u5957\u9910',
+  emptyPackage: '\u6682\u65e0\u5957\u9910',
+  packageName: '\u5957\u9910\u540d\u79f0',
+  packageItems: '\u5957\u9910\u5305\u542b\u83dc\u54c1',
+  packagePrice: '\u5957\u9910\u552e\u4ef7',
+  inputPackageName: '\u8bf7\u8f93\u5165\u5957\u9910\u540d\u79f0',
+  packageRequired: '\u8bf7\u8f93\u5165\u5957\u9910\u540d\u79f0',
+  packageItemsRequired: '\u81f3\u5c11\u9009\u62e9\u4e00\u9053\u5957\u9910\u83dc\u54c1',
+  confirmDeletePackage: '\u786e\u5b9a\u5220\u9664\u8fd9\u4e2a\u5957\u9910\u5417\uff1f',
+  packageInternalTip: '\u5957\u9910\u4ec5\u4f9b\u5546\u6237\u7aef\u4f7f\u7528\uff0c\u4e0d\u4f1a\u51fa\u73b0\u5728\u987e\u5ba2\u70b9\u5355\u9875\u3002'
 }
 
 const DEFAULT_CATEGORY = {
@@ -123,6 +137,16 @@ const DEFAULT_DISH = {
   customSpecNote: '',
   tags: [],
   options: []
+}
+
+const DEFAULT_PACKAGE = {
+  _id: '',
+  name: '',
+  price: '',
+  description: '',
+  status: 1,
+  sort: 0,
+  items: []
 }
 
 const MAX_IMAGE_SIZE = 1024 * 1024
@@ -258,6 +282,48 @@ function normalizeDishCategoryFields(dish = {}, categories = []) {
 function toNumber(value, fallback = 0) {
   const number = Number(value)
   return Number.isFinite(number) ? number : fallback
+}
+
+function getPackageItemCount(items, dishId) {
+  const item = (Array.isArray(items) ? items : []).find(entry => entry.dishId === dishId)
+  return item ? Math.max(0, Number(item.count || 0)) : 0
+}
+
+function buildPackageDishCatalog(dishes = [], items = []) {
+  return (Array.isArray(dishes) ? dishes : []).map(dish => ({
+    ...dish,
+    selectedCount: getPackageItemCount(items, dish._id),
+    selected: getPackageItemCount(items, dish._id) > 0
+  }))
+}
+
+function findPackageDishResults(dishes = [], keyword = '') {
+  const normalizedKeyword = String(keyword || '').trim().toLowerCase()
+  if (!normalizedKeyword) return []
+  return (Array.isArray(dishes) ? dishes : [])
+    .filter(dish => {
+      const name = String(dish.name || '').toLowerCase()
+      const categoryName = String(dish.categoryName || '').toLowerCase()
+      return name.includes(normalizedKeyword) || categoryName.includes(normalizedKeyword)
+    })
+    .slice(0, 12)
+}
+
+function buildPackageItemSummary(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .filter(item => item && item.dishName && Number(item.count || 0) > 0)
+    .map(item => `${item.dishName} x${item.count}`)
+    .join('\u3001')
+}
+
+function normalizePackageForList(mealPackage = {}) {
+  const items = Array.isArray(mealPackage.items) ? mealPackage.items : []
+  return {
+    ...mealPackage,
+    items,
+    itemSummary: buildPackageItemSummary(items),
+    itemCount: items.reduce((sum, item) => sum + Number(item.count || 0), 0)
+  }
 }
 
 function getFileExtension(filePath = '') {
@@ -459,14 +525,20 @@ function buildSpecPreviewGroups(dish = {}) {
 Page({
   data: {
     ui: UI,
-    menuTypes: [
-      { label: UI.dineIn, value: 'dineIn' },
-      { label: UI.camping, value: 'camping' }
+    managementTabs: [
+      { label: UI.dineIn, value: 'dineIn', menuType: 'dineIn', contentMode: 'dish' },
+      { label: UI.camping, value: 'camping', menuType: 'camping', contentMode: 'dish' },
+      { label: UI.contentPackage, value: 'package', menuType: 'dineIn', contentMode: 'package' }
     ],
+    currentManagementTab: 'dineIn',
+    currentContentMode: 'dish',
     currentMenuType: 'dineIn',
     categories: [],
     currentCategoryId: '',
     dishes: [],
+    packages: [],
+    packageDishCatalog: [],
+    loadingPackages: false,
     searchKeyword: '',
     isSearching: false,
     loadingCategories: false,
@@ -477,6 +549,11 @@ Page({
     showDishModal: false,
     editDishMode: false,
     currentDish: { ...DEFAULT_DISH },
+    showPackageModal: false,
+    editPackageMode: false,
+    currentPackage: { ...DEFAULT_PACKAGE },
+    packageDishKeyword: '',
+    packageSearchResults: [],
     showCategoryDropdown: false,
     showStationDropdown: false,
     specPreviewGroups: [],
@@ -503,10 +580,56 @@ Page({
       currentCategoryId: '',
       categories: [],
       dishes: [],
+      packages: [],
       searchKeyword: '',
       isSearching: false
     })
     this.searchToken = null
+    await this.loadCategories()
+    if (this.data.currentContentMode === 'package') await this.loadPackages()
+  },
+
+  async changeContentMode(e) {
+    const mode = e.currentTarget.dataset.mode
+    if (!mode || mode === this.data.currentContentMode) return
+
+    this.clearSearchTimer()
+    this.searchToken = null
+    this.setData({
+      currentContentMode: mode,
+      searchKeyword: '',
+      isSearching: false
+    })
+    if (mode === 'package') {
+      await this.loadPackages()
+      return
+    }
+    await this.loadCategories()
+  },
+
+  async changeManagementTab(e) {
+    const value = e.currentTarget.dataset.value
+    const tab = this.data.managementTabs.find(item => item.value === value)
+    if (!tab || tab.value === this.data.currentManagementTab) return
+
+    this.clearSearchTimer()
+    this.searchToken = null
+    this.setData({
+      currentManagementTab: tab.value,
+      currentContentMode: tab.contentMode,
+      currentMenuType: tab.menuType,
+      currentCategoryId: '',
+      categories: [],
+      dishes: [],
+      packages: [],
+      searchKeyword: '',
+      isSearching: false
+    })
+
+    if (tab.contentMode === 'package') {
+      await this.loadPackages()
+      return
+    }
     await this.loadCategories()
   },
 
@@ -594,6 +717,38 @@ Page({
     }
   },
 
+  async loadPackages(keyword = '') {
+    this.setData({ loadingPackages: true })
+    try {
+      const res = await apiClient.call('admin.package.list', {
+        menuType: this.data.currentMenuType,
+        keyword: String(keyword || '').trim(),
+        limit: 100
+      })
+      this.setData({
+        packages: (res.data || []).map(normalizePackageForList),
+        loadingPackages: false
+      })
+    } catch (err) {
+      console.error('load packages failed', err)
+      this.setData({ loadingPackages: false })
+      showToast(err.message || UI.failed)
+    }
+  },
+
+  async loadPackageDishCatalog(items = []) {
+    const res = await apiClient.call('admin.package.dishOptions', {
+      menuType: this.data.currentMenuType,
+      limit: 100
+    })
+    const packageDishCatalog = buildPackageDishCatalog(res.data || [], items)
+    this.setData({
+      packageDishCatalog,
+      packageSearchResults: findPackageDishResults(packageDishCatalog, this.data.packageDishKeyword)
+    })
+    return packageDishCatalog
+  },
+
   switchCategory(e) {
     const categoryId = e.currentTarget.dataset.id
     this.clearSearchTimer()
@@ -623,13 +778,15 @@ Page({
     if (!keyword) {
       this.searchToken = null
       this.setData({ isSearching: false }, () => {
-        this.loadDishes()
+        if (this.data.currentContentMode === 'package') this.loadPackages()
+        else this.loadDishes()
       })
       return
     }
 
     this.searchTimer = setTimeout(() => {
-      this.searchDishes(keyword)
+      if (this.data.currentContentMode === 'package') this.searchPackages(keyword)
+      else this.searchDishes(keyword)
     }, 260)
   },
 
@@ -637,7 +794,8 @@ Page({
     const keyword = String(this.data.searchKeyword || '').trim()
     if (keyword) {
       this.clearSearchTimer()
-      this.searchDishes(keyword)
+      if (this.data.currentContentMode === 'package') this.searchPackages(keyword)
+      else this.searchDishes(keyword)
     }
   },
 
@@ -648,7 +806,8 @@ Page({
       searchKeyword: '',
       isSearching: false
     }, () => {
-      this.loadDishes()
+      if (this.data.currentContentMode === 'package') this.loadPackages()
+      else this.loadDishes()
     })
   },
 
@@ -682,6 +841,34 @@ Page({
       if (this.searchToken !== token) return
       console.error('search admin dishes failed', err)
       this.setData({ loadingDishes: false })
+      showToast(err.message || UI.failed)
+    }
+  },
+
+  async searchPackages(keyword) {
+    const currentKeyword = String(keyword || '').trim()
+    if (!currentKeyword) {
+      this.clearSearch()
+      return
+    }
+    this.searchToken = Date.now()
+    const token = this.searchToken
+    this.setData({ isSearching: true, loadingPackages: true })
+    try {
+      const res = await apiClient.call('admin.package.list', {
+        menuType: this.data.currentMenuType,
+        keyword: currentKeyword,
+        limit: 100
+      })
+      if (this.searchToken !== token) return
+      this.setData({
+        packages: (res.data || []).map(normalizePackageForList),
+        loadingPackages: false
+      })
+    } catch (err) {
+      if (this.searchToken !== token) return
+      console.error('search packages failed', err)
+      this.setData({ loadingPackages: false })
       showToast(err.message || UI.failed)
     }
   },
@@ -1187,6 +1374,203 @@ Page({
         } catch (err) {
           wx.hideLoading()
           console.error('delete dish failed', err)
+          showToast(err.message || UI.failed)
+        }
+      }
+    })
+  },
+
+  async showAddPackageModal() {
+    try {
+      const currentPackage = {
+        ...DEFAULT_PACKAGE,
+        menuType: this.data.currentMenuType,
+        sort: this.data.packages.length
+      }
+      await this.loadPackageDishCatalog(currentPackage.items)
+      this.setData({
+        showPackageModal: true,
+        editPackageMode: false,
+      currentPackage,
+      packageDishKeyword: '',
+      packageSearchResults: []
+      })
+    } catch (err) {
+      console.error('open add package modal failed', err)
+      showToast(err.message || UI.failed)
+    }
+  },
+
+  async showEditPackageModal(e) {
+    const mealPackage = e.currentTarget.dataset.package
+    if (!mealPackage) return
+    try {
+      const currentPackage = {
+        ...DEFAULT_PACKAGE,
+        ...mealPackage,
+        items: (mealPackage.items || []).map(item => ({ ...item }))
+      }
+      await this.loadPackageDishCatalog(currentPackage.items)
+      this.setData({
+        showPackageModal: true,
+        editPackageMode: true,
+        currentPackage,
+        packageDishKeyword: '',
+        packageSearchResults: []
+      })
+    } catch (err) {
+      console.error('open edit package modal failed', err)
+      showToast(err.message || UI.failed)
+    }
+  },
+
+  closePackageModal() {
+    this.setData({
+      showPackageModal: false,
+      packageDishKeyword: '',
+      packageDishCatalog: [],
+      packageSearchResults: []
+    })
+  },
+
+  onPackageInput(e) {
+    const field = e.currentTarget.dataset.field
+    if (!field) return
+    this.setData({ [`currentPackage.${field}`]: e.detail.value })
+  },
+
+  onPackageStatusChange(e) {
+    this.setData({ 'currentPackage.status': e.detail.value ? 1 : 0 })
+  },
+
+  onPackageDishSearch(e) {
+    const packageDishKeyword = String(e.detail.value || '').trim()
+    this.setData({
+      packageDishKeyword,
+      packageSearchResults: findPackageDishResults(this.data.packageDishCatalog, packageDishKeyword)
+    })
+  },
+
+  getPackageDishItemsWithCount(dishId, nextCount) {
+    const currentItems = (this.data.currentPackage.items || []).map(item => ({ ...item }))
+    const index = currentItems.findIndex(item => item.dishId === dishId)
+    if (nextCount <= 0) {
+      if (index >= 0) currentItems.splice(index, 1)
+      return currentItems
+    }
+
+    const selectedDish = this.data.packageDishCatalog.find(item => item._id === dishId) || {}
+    const item = {
+      dishId,
+      dishName: selectedDish.name || '',
+      dishPrice: toNumber(selectedDish.price),
+      dishUnit: selectedDish.unit || UI.defaultUnit,
+      count: Math.min(99, Math.max(1, nextCount))
+    }
+    if (index >= 0) currentItems[index] = item
+    else currentItems.push(item)
+    return currentItems
+  },
+
+  updatePackageDishSelection(dishId, count) {
+    const items = this.getPackageDishItemsWithCount(dishId, count)
+    this.setData({
+      'currentPackage.items': items,
+      packageDishCatalog: buildPackageDishCatalog(this.data.packageDishCatalog, items),
+      packageSearchResults: findPackageDishResults(
+        buildPackageDishCatalog(this.data.packageDishCatalog, items),
+        this.data.packageDishKeyword
+      )
+    })
+  },
+
+  addPackageDish(e) {
+    const dish = e.currentTarget.dataset.dish
+    if (!dish) return
+    const count = getPackageItemCount(this.data.currentPackage.items, dish._id)
+    if (count > 0) return
+    this.updatePackageDishSelection(dish._id, 1)
+  },
+
+  changePackageDishCount(e) {
+    const dishId = e.currentTarget.dataset.id
+    const delta = Number(e.currentTarget.dataset.delta || 0)
+    if (!dishId || !delta) return
+    const count = getPackageItemCount(this.data.currentPackage.items, dishId)
+    this.updatePackageDishSelection(dishId, count + delta)
+  },
+
+  async savePackage() {
+    const currentPackage = this.data.currentPackage || {}
+    const mealPackage = {
+      ...currentPackage,
+      menuType: this.data.currentMenuType,
+      price: toNumber(currentPackage.price, -1),
+      sort: toNumber(currentPackage.sort),
+      items: (currentPackage.items || []).map(item => ({
+        dishId: item.dishId,
+        count: Math.max(1, Math.floor(Number(item.count || 0)))
+      }))
+    }
+    if (!String(mealPackage.name || '').trim()) {
+      showToast(UI.packageRequired)
+      return
+    }
+    if (mealPackage.price < 0) {
+      showToast(UI.priceRequired)
+      return
+    }
+    if (!mealPackage.items.length) {
+      showToast(UI.packageItemsRequired)
+      return
+    }
+
+    try {
+      wx.showLoading({ title: UI.saving })
+      await apiClient.call('admin.package.save', { mealPackage })
+      wx.hideLoading()
+      this.closePackageModal()
+      showToast(UI.saved, 'success')
+      await this.loadPackages(this.data.isSearching ? this.data.searchKeyword : '')
+    } catch (err) {
+      wx.hideLoading()
+      console.error('save package failed', err)
+      showToast(err.message || UI.failed)
+    }
+  },
+
+  async togglePackageStatus(e) {
+    const mealPackage = e.currentTarget.dataset.package
+    if (!mealPackage) return
+    try {
+      await apiClient.call('admin.package.status', {
+        packageId: mealPackage._id,
+        status: mealPackage.status === 1 ? 0 : 1
+      })
+      await this.loadPackages(this.data.isSearching ? this.data.searchKeyword : '')
+    } catch (err) {
+      console.error('toggle package status failed', err)
+      showToast(err.message || UI.failed)
+    }
+  },
+
+  deletePackage(e) {
+    const mealPackage = e.currentTarget.dataset.package
+    if (!mealPackage) return
+    wx.showModal({
+      title: UI.confirmDelete,
+      content: UI.confirmDeletePackage,
+      success: async res => {
+        if (!res.confirm) return
+        try {
+          wx.showLoading({ title: UI.deleting })
+          await apiClient.call('admin.package.delete', { packageId: mealPackage._id })
+          wx.hideLoading()
+          showToast(UI.deleted, 'success')
+          await this.loadPackages(this.data.isSearching ? this.data.searchKeyword : '')
+        } catch (err) {
+          wx.hideLoading()
+          console.error('delete package failed', err)
           showToast(err.message || UI.failed)
         }
       }

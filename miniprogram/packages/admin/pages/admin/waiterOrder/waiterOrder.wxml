@@ -3,21 +3,25 @@
     <view class="table-title">{{areaName}}{{tableNumber}}号桌</view>
     <view class="mode-pill">{{modeText}}</view>
     <view class="people-text">{{peopleCount}}人</view>
-    <view class="top-action search-action" bindtap="toggleSearch">{{searchOpen ? '关闭搜索' : '搜索菜品'}}</view>
+    <view class="menu-content-tabs">
+      <view class="menu-content-tab {{menuContentMode === 'dish' ? 'active' : ''}}" data-mode="dish" bindtap="changeMenuContentMode">菜品</view>
+      <view class="menu-content-tab {{menuContentMode === 'package' ? 'active' : ''}}" data-mode="package" bindtap="changeMenuContentMode">套餐</view>
+    </view>
+    <view class="top-action search-action" bindtap="toggleSearch">{{searchOpen ? '关闭搜索' : (menuContentMode === 'package' ? '搜索套餐' : '搜索菜品')}}</view>
     <view class="top-action" bindtap="refreshTap">刷新菜单</view>
   </view>
 
   <view class="search-bar" wx:if="{{searchOpen}}">
     <input class="search-input" focus="{{searchOpen}}" value="{{searchKeyword}}" placeholder="输入菜品名称" bindinput="onSearchInput" />
-    <view class="search-count">{{searchKeyword ? '找到 ' + searchResults.length + ' 个菜品' : '输入名称即时搜索'}}</view>
+    <view class="search-count">{{searchKeyword ? '找到 ' + searchResults.length + (menuContentMode === 'package' ? ' 个套餐' : ' 个菜品') : '输入名称即时搜索'}}</view>
   </view>
 
   <view class="workspace {{cartOpen ? 'cart-open' : 'cart-closed'}}">
-    <scroll-view class="category-list" scroll-y enable-flex="{{true}}">
+    <scroll-view class="category-list" scroll-y enable-flex="{{true}}" wx:if="{{menuContentMode === 'dish'}}">
       <view class="category-item {{currentCategoryId === item._id ? 'active' : ''}}" wx:for="{{categories}}" wx:key="_id" data-id="{{item._id}}" bindtap="selectCategory">{{item.name}}</view>
     </scroll-view>
 
-    <scroll-view class="dish-list" scroll-y enable-flex="{{true}}" scroll-into-view="{{scrollIntoView}}" bindscroll="onGoodsScroll" enhanced show-scrollbar="{{false}}">
+    <scroll-view class="dish-list" scroll-y enable-flex="{{true}}" scroll-into-view="{{scrollIntoView}}" bindscroll="onGoodsScroll" enhanced show-scrollbar="{{false}}" wx:if="{{menuContentMode === 'dish'}}">
       <view class="loading" wx:if="{{loading && sections.length === 0}}">菜单加载中...</view>
 
       <view class="dish-grid search-grid" wx:elif="{{searchOpen && searchKeyword}}">
@@ -52,6 +56,37 @@
             </view>
           </view>
         </view>
+      </block>
+    </scroll-view>
+
+    <scroll-view class="dish-list package-list" scroll-y enable-flex="{{true}}" wx:if="{{menuContentMode === 'package'}}">
+      <view class="loading" wx:if="{{loadingPackages}}">套餐加载中...</view>
+      <block wx:elif="{{searchOpen && searchKeyword}}">
+        <view class="dish-grid search-grid">
+          <view class="dish-card package-card" wx:for="{{searchResults}}" wx:key="_id">
+            <view class="dish-name">{{item.name}}</view>
+            <view class="package-summary">{{item.itemSummary}}</view>
+            <view class="dish-bottom">
+              <text class="dish-price">￥{{item.price}}</text>
+              <view class="dish-qty-btn add" bindtap="addPackageToCart" data-package="{{item}}">+</view>
+            </view>
+          </view>
+        </view>
+        <view class="empty" wx:if="{{searchResults.length === 0}}">没有找到匹配套餐</view>
+      </block>
+      <block wx:else>
+        <view class="package-section-title">套餐仅供服务员代客开单和加菜使用</view>
+        <view class="dish-grid search-grid">
+          <view class="dish-card package-card" wx:for="{{packages}}" wx:key="_id">
+            <view class="dish-name">{{item.name}}</view>
+            <view class="package-summary">{{item.itemSummary}}</view>
+            <view class="dish-bottom">
+              <text class="dish-price">￥{{item.price}}</text>
+              <view class="dish-qty-btn add" bindtap="addPackageToCart" data-package="{{item}}">+</view>
+            </view>
+          </view>
+        </view>
+        <view class="empty" wx:if="{{packages.length === 0 && !loadingPackages}}">暂无已启用套餐</view>
       </block>
     </scroll-view>
 

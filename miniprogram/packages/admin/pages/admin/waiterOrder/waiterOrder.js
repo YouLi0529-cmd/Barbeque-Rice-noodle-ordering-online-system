@@ -17,11 +17,20 @@ function defaultOption(list) {
   return options.find(item => String(item).includes('正常')) || options[0] || ''
 }
 
+function buildPackageSummary(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .filter(item => item && item.dishName && Number(item.count || 0) > 0)
+    .map(item => `${item.dishName} x${item.count}`)
+    .join('\u3001')
+}
+
 Page({
   data: {
     areaKey: 'normal', areaName: '', tableNumber: '', peopleCount: 1,
     mode: 'add', modeText: '服务员加菜',
+    menuContentMode: 'dish',
     categories: [], sections: [], currentCategoryId: '', goodsCache: {},
+    packages: [], loadingPackages: false,
     loading: true, scrollIntoView: '', goodsScrollTop: 0,
     searchOpen: false, searchKeyword: '', searchResults: [],
     cartOpen: false, cart: {}, cartList: [], cartCount: 0, totalPriceText: '0',
@@ -42,6 +51,7 @@ Page({
     })
     this.restoreMenuCache()
     this.refreshMenu()
+    this.loadPackages()
   },
 
   onUnload() {
@@ -122,6 +132,23 @@ Page({
     })
   },
 
+  async loadPackages() {
+    this.setData({ loadingPackages: true })
+    try {
+      const result = await apiClient.call('admin.package.list', {
+        menuType: 'dineIn',
+        limit: 100
+      })
+      const packages = (result.data || [])
+        .filter(item => item.status === 1)
+        .map(item => ({ ...item, itemSummary: buildPackageSummary(item.items) }))
+      this.setData({ packages, loadingPackages: false }, () => this.applySearch())
+    } catch (err) {
+      console.error('load staff packages failed', err)
+      this.setData({ loadingPackages: false })
+    }
+  },
+
   selectCategory(event) {
     const id = event.currentTarget.dataset.id
     this.setData({ currentCategoryId: id, scrollIntoView: `category-${id}` })
@@ -175,6 +202,12 @@ Page({
       this.setData({ searchResults: [] })
       return
     }
+    if (this.data.menuContentMode === 'package') {
+      const searchResults = this.data.packages
+        .filter(item => String(item.name || '').toLowerCase().includes(keyword))
+      this.setData({ searchResults })
+      return
+    }
     const countMap = this.getDishCountMap()
     const results = this.data.sections.reduce((list, section) => list.concat(section.goods), [])
       .filter(dish => String(dish.name || '').toLowerCase().includes(keyword))
@@ -186,6 +219,14 @@ Page({
     wx.removeStorageSync(CACHE_KEY)
     this.setData({ goodsCache: {}, loading: true })
     this.refreshMenu(true)
+    this.loadPackages()
+  },
+
+  changeMenuContentMode(event) {
+    const menuContentMode = event.currentTarget.dataset.mode
+    if (!menuContentMode || menuContentMode === this.data.menuContentMode) return
+    this.setData({ menuContentMode, searchKeyword: '', searchResults: [] })
+    if (menuContentMode === 'package' && !this.data.packages.length) this.loadPackages()
   },
 
   toggleCart() { this.setData({ cartOpen: !this.data.cartOpen }) },
@@ -247,10 +288,76 @@ Page({
     this.updateCart(cart)
   },
 
+  findCachedDish(dishId) {
+    const goodsCache = this.data.goodsCache || {}
+    const categories = this.data.categories || []
+    for (const category of categories) {
+      const dish = (goodsCache[category._id] || []).find(item => item._id === dishId)
+      if (dish) return dish
+    }
+    return null
+  },
+
+  addPackageToCart(event) {
+    const mealPackage = event.currentTarget.dataset.package
+    if (!mealPackage || !Array.isArray(mealPackage.items) || !mealPackage.items.length) return
+
+    const resolvedItems = mealPackage.items.map(item => ({
+      config: item,
+      dish: this.findCachedDish(item.dishId)
+    }))
+    if (resolvedItems.some(item => !item.dish)) {
+      wx.showToast({ title: '套餐中有菜品已下架', icon: 'none' })
+      return
+    }
+
+    const cart = { ...this.data.cart }
+    const existingPackageItem = Object.keys(cart)
+      .map(key => cart[key])
+      .find(item => item.packageId === mealPackage._id)
+    const nextPackageCount = Math.max(1, Number(existingPackageItem && existingPackageItem.packageCount || 0) + 1)
+
+    resolvedItems.forEach(({ config, dish }) => {
+      const packageItemCount = Math.max(1, Math.floor(Number(config.count || 0)))
+      const key = `package:${mealPackage._id}:${dish._id}`
+      cart[key] = {
+        key,
+        dishId: dish._id,
+        info: dish,
+        count: packageItemCount * nextPackageCount,
+        tags: {},
+        tagLabels: [],
+        tagText: `套餐：${mealPackage.name || ''}`,
+        packageId: mealPackage._id,
+        packageName: mealPackage.name || '',
+        packagePrice: Number(mealPackage.price || 0),
+        packageCount: nextPackageCount,
+        packageItemCount
+      }
+    })
+    this.updateCart(cart)
+  },
+
   changeCartCount(event) {
     const { key, delta } = event.currentTarget.dataset
     const cart = { ...this.data.cart }
     if (!cart[key]) return
+    if (cart[key].packageId) {
+      const packageId = cart[key].packageId
+      const nextPackageCount = Math.max(0, Number(cart[key].packageCount || 0) + Number(delta))
+      Object.keys(cart).forEach(itemKey => {
+        const item = cart[itemKey]
+        if (item.packageId !== packageId) return
+        if (nextPackageCount <= 0) {
+          delete cart[itemKey]
+          return
+        }
+        item.packageCount = nextPackageCount
+        item.count = Number(item.packageItemCount || 1) * nextPackageCount
+      })
+      this.updateCart(cart)
+      return
+    }
     cart[key].count += Number(delta)
     if (cart[key].count <= 0) delete cart[key]
     this.updateCart(cart)
@@ -260,7 +367,13 @@ Page({
   updateCart(cart) {
     const cartList = Object.keys(cart).map(key => cart[key])
     const cartCount = cartList.reduce((sum, item) => sum + item.count, 0)
-    const total = cartList.reduce((sum, item) => sum + Number(item.info.price || 0) * item.count, 0)
+    const packageTotalMap = {}
+    const total = cartList.reduce((sum, item) => {
+      if (!item.packageId) return sum + Number(item.info.price || 0) * item.count
+      if (packageTotalMap[item.packageId]) return sum
+      packageTotalMap[item.packageId] = true
+      return sum + Number(item.packagePrice || 0) * Number(item.packageCount || 0)
+    }, 0)
     const sections = this.buildSections(this.data.categories, this.data.goodsCache, cart)
     this.setData({ cart, cartList, cartCount, totalPriceText: money(total), sections }, () => this.applySearch())
   },
@@ -269,7 +382,9 @@ Page({
     if (!this.data.cartCount || this.data.submitting) return
     const orderGoods = this.data.cartList.map(item => ({
       dishId: item.dishId, dishName: item.info.name, price: Number(item.info.price || 0),
-      count: item.count, tags: item.tagLabels
+      count: item.count, tags: item.tagLabels,
+      packageId: item.packageId || '',
+      packageCount: item.packageId ? Number(item.packageCount || 0) : 0
     }))
     this.setData({ submitting: true })
     try {

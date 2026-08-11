@@ -3,11 +3,21 @@
   <view class="top-bar">
     <view class="title-search">
       <view class="page-title">{{ui.pageTitle}}</view>
+      <view class="content-tabs">
+        <view
+          wx:for="{{managementTabs}}"
+          wx:key="value"
+          class="content-tab {{currentManagementTab === item.value ? 'active' : ''}}"
+          bindtap="changeManagementTab"
+          data-value="{{item.value}}">
+          {{item.label}}
+        </view>
+      </view>
       <view class="dish-search">
         <input
           class="dish-search-input"
           value="{{searchKeyword}}"
-          placeholder="{{ui.searchPlaceholder}}"
+          placeholder="{{currentContentMode === 'package' ? ui.searchPackagePlaceholder : ui.searchPlaceholder}}"
           placeholder-style="color: rgba(255, 247, 236, 0.52);"
           confirm-type="search"
           bindinput="onSearchInput"
@@ -15,20 +25,10 @@
         <text class="search-clear" wx:if="{{searchKeyword}}" bindtap="clearSearch">x</text>
       </view>
     </view>
-    <view class="menu-tabs">
-      <view
-        wx:for="{{menuTypes}}"
-        wx:key="value"
-        class="menu-tab {{currentMenuType === item.value ? 'active' : ''}}"
-        bindtap="changeMenuType"
-        data-type="{{item.value}}">
-        {{item.label}}
-      </view>
-    </view>
   </view>
 
   <view class="main-content">
-    <scroll-view class="category-sidebar" scroll-y>
+    <scroll-view class="category-sidebar" scroll-y wx:if="{{currentContentMode === 'dish'}}">
       <view
         class="category-item {{currentCategoryId === item._id ? 'active' : ''}}"
         wx:for="{{categories}}"
@@ -48,7 +48,7 @@
       </view>
     </scroll-view>
 
-    <view class="dish-content">
+    <view class="dish-content" wx:if="{{currentContentMode === 'dish'}}">
       <view class="dish-header">
         <view class="header-title">{{isSearching ? ui.searchResult : (currentCategoryId ? ui.pageTitle : ui.selectCategory)}}</view>
         <view class="add-dish-btn" bindtap="showAddDishModal" wx:if="{{currentCategoryId && !isSearching}}">
@@ -90,6 +90,43 @@
       </scroll-view>
 
       <view class="empty-category" wx:if="{{!currentCategoryId}}">{{ui.selectCategory}}</view>
+    </view>
+
+    <view class="package-content" wx:if="{{currentContentMode === 'package'}}">
+      <view class="dish-header">
+        <view class="header-title">{{isSearching ? ui.searchResult : ui.contentPackage}}</view>
+        <view class="add-dish-btn" bindtap="showAddPackageModal">
+          <text class="add-icon">+</text>
+          <text>{{ui.addPackage}}</text>
+        </view>
+      </view>
+
+      <scroll-view class="package-list" scroll-y>
+        <view class="package-internal-tip">{{ui.packageInternalTip}}</view>
+        <view class="package-item {{index % 2 ? 'even' : ''}}" wx:for="{{packages}}" wx:key="_id">
+          <view class="package-status {{item.status === 1 ? 'online' : 'offline'}}">
+            {{item.status === 1 ? ui.online : ui.offline}}
+          </view>
+          <view class="package-info">
+            <view class="package-name">{{item.name}}</view>
+            <view class="package-summary">{{item.itemSummary || ui.packageItems}}</view>
+            <view class="package-desc" wx:if="{{item.description}}">{{item.description}}</view>
+            <view class="dish-price">
+              <text class="price-current">{{ui.currency}}{{item.price}}</text>
+              <text class="price-unit">/{{item.itemCount || 0}}道菜</text>
+            </view>
+          </view>
+          <view class="dish-actions">
+            <view class="action-btn status" bindtap="togglePackageStatus" data-package="{{item}}">
+              {{item.status === 1 ? ui.setOffline : ui.setOnline}}
+            </view>
+            <view class="action-btn edit" bindtap="showEditPackageModal" data-package="{{item}}">{{ui.edit}}</view>
+            <view class="action-btn delete" bindtap="deletePackage" data-package="{{item}}">{{ui.delete}}</view>
+          </view>
+        </view>
+        <view class="empty-list" wx:if="{{packages.length === 0 && !loadingPackages}}">{{isSearching ? ui.emptySearch : ui.emptyPackage}}</view>
+        <view class="empty-list" wx:if="{{loadingPackages}}">{{ui.loading}}</view>
+      </scroll-view>
     </view>
   </view>
 
@@ -253,6 +290,77 @@
       <view class="modal-footer">
         <view class="modal-btn cancel" bindtap="closeDishModal">{{ui.cancel}}</view>
         <view class="modal-btn confirm" bindtap="saveDish">{{ui.save}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="modal-mask" wx:if="{{showPackageModal}}" catchtap="closePackageModal">
+    <view class="modal-dialog large package-modal" catchtap="stopPropagation">
+      <view class="modal-title">{{editPackageMode ? ui.editPackage : ui.addPackage}}</view>
+      <scroll-view class="modal-content" scroll-y>
+        <view class="form-row">
+          <view class="form-item half">
+            <view class="form-label">{{ui.packageName}}</view>
+            <input class="form-input" placeholder="{{ui.inputPackageName}}" value="{{currentPackage.name}}" data-field="name" bindinput="onPackageInput" />
+          </view>
+          <view class="form-item half">
+            <view class="form-label">{{ui.packagePrice}}</view>
+            <input class="form-input" type="digit" placeholder="{{ui.inputPrice}}" value="{{currentPackage.price}}" data-field="price" bindinput="onPackageInput" />
+          </view>
+        </view>
+        <view class="form-row">
+          <view class="form-item half">
+            <view class="form-label">{{ui.sort}}</view>
+            <input class="form-input" type="number" placeholder="{{ui.inputSort}}" value="{{currentPackage.sort}}" data-field="sort" bindinput="onPackageInput" />
+          </view>
+          <view class="switch-row package-status-switch">
+            <text>{{ui.status}}</text>
+            <switch checked="{{currentPackage.status === 1}}" bindchange="onPackageStatusChange" color="#C99A4A" />
+          </view>
+        </view>
+        <view class="form-item">
+          <view class="form-label">{{ui.description}}</view>
+          <textarea class="form-textarea" placeholder="{{ui.inputDescription}}" value="{{currentPackage.description}}" data-field="description" bindinput="onPackageInput" />
+        </view>
+        <view class="package-picker-header">
+          <view class="form-label">{{ui.packageItems}}</view>
+          <input class="package-picker-search" value="{{packageDishKeyword}}" placeholder="搜索菜品" bindinput="onPackageDishSearch" />
+        </view>
+        <view class="package-search-result-list" wx:if="{{packageDishKeyword}}">
+          <view
+            wx:for="{{packageSearchResults}}"
+            wx:key="_id"
+            class="package-dish-option {{item.selected ? 'selected' : ''}} {{item.status === 0 ? 'offline-option' : ''}}"
+            bindtap="addPackageDish"
+            data-dish="{{item}}">
+            <view class="package-dish-copy">
+              <text class="package-dish-name">{{item.name}}</text>
+              <text class="package-dish-meta">{{item.categoryName}} {{ui.currency}}{{item.price}}/{{item.unit}}</text>
+            </view>
+            <view class="package-dish-add">{{item.selected ? '已添加' : '添加'}}</view>
+          </view>
+        </view>
+        <view class="package-search-empty" wx:if="{{packageDishKeyword && packageSearchResults.length === 0}}">未找到匹配菜品</view>
+
+        <view class="selected-package-title">已添加菜品（{{currentPackage.items.length}}）</view>
+        <view class="selected-package-list">
+          <view class="selected-package-item" wx:for="{{currentPackage.items}}" wx:key="dishId">
+            <view class="package-dish-copy">
+              <text class="package-dish-name">{{item.dishName}}</text>
+              <text class="package-dish-meta">{{ui.currency}}{{item.dishPrice}}/{{item.dishUnit}}</text>
+            </view>
+            <view class="package-dish-stepper">
+              <view class="package-step-btn" bindtap="changePackageDishCount" data-id="{{item.dishId}}" data-delta="-1">−</view>
+              <text>{{item.count}}</text>
+              <view class="package-step-btn add" bindtap="changePackageDishCount" data-id="{{item.dishId}}" data-delta="1">+</view>
+            </view>
+          </view>
+          <view class="package-search-empty" wx:if="{{currentPackage.items.length === 0}}">搜索菜品后点击“添加”</view>
+        </view>
+      </scroll-view>
+      <view class="modal-footer">
+        <view class="modal-btn cancel" bindtap="closePackageModal">{{ui.cancel}}</view>
+        <view class="modal-btn confirm" bindtap="savePackage">{{ui.save}}</view>
       </view>
     </view>
   </view>
