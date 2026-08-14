@@ -48,6 +48,14 @@
       ]
     }
   ],
+  "preloadRule": {
+    "pages/covertest/covertest": {
+      "network": "all",
+      "packages": [
+        "packages/order"
+      ]
+    }
+  },
 
   "window": {
     "backgroundColor": "#F6F6F6",

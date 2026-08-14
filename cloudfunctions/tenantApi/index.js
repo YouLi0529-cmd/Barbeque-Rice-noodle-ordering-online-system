@@ -6458,15 +6458,29 @@ async function adminListMealPackages(payload) {
 
 async function adminListPackageDishOptions(payload) {
   const menuType = getMenuType(payload.menuType)
-  const res = await db.collection('dish')
-    .where({ menuType: getMenuTypeWhere(menuType) })
-    .orderBy('sort', 'asc')
-    .limit(getLimit(payload, 100, 100))
-    .get()
+  // The package editor searches this catalog locally. A single CloudBase
+  // request is capped at 100 records, which silently hid dishes sorted after
+  // the first 100 from package search.
+  const batchSize = 100
+  const dishes = []
+  let offset = 0
+
+  while (true) {
+    const res = await db.collection('dish')
+      .where({ menuType: getMenuTypeWhere(menuType) })
+      .orderBy('sort', 'asc')
+      .skip(offset)
+      .limit(batchSize)
+      .get()
+    const batch = res.data || []
+    dishes.push(...batch)
+    if (batch.length < batchSize) break
+    offset += batch.length
+  }
 
   return {
     success: true,
-    data: (res.data || []).map(dish => ({
+    data: dishes.map(dish => ({
       _id: dish._id,
       name: dish.name || '',
       price: roundMoney(dish.price || 0),

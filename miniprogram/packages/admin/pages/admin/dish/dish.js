@@ -94,8 +94,7 @@ const UI = {
   inputPackageName: '\u8bf7\u8f93\u5165\u5957\u9910\u540d\u79f0',
   packageRequired: '\u8bf7\u8f93\u5165\u5957\u9910\u540d\u79f0',
   packageItemsRequired: '\u81f3\u5c11\u9009\u62e9\u4e00\u9053\u5957\u9910\u83dc\u54c1',
-  confirmDeletePackage: '\u786e\u5b9a\u5220\u9664\u8fd9\u4e2a\u5957\u9910\u5417\uff1f',
-  packageInternalTip: '\u5957\u9910\u4ec5\u4f9b\u5546\u6237\u7aef\u4f7f\u7528\uff0c\u4e0d\u4f1a\u51fa\u73b0\u5728\u987e\u5ba2\u70b9\u5355\u9875\u3002'
+  confirmDeletePackage: '\u786e\u5b9a\u5220\u9664\u8fd9\u4e2a\u5957\u9910\u5417\uff1f'
 }
 
 const DEFAULT_CATEGORY = {
@@ -569,6 +568,7 @@ Page({
   onUnload() {
     this.clearSearchTimer()
     this.searchToken = null
+    this.activeSearchKey = ''
   },
 
   async changeMenuType(e) {
@@ -774,6 +774,11 @@ Page({
     this.setData({ searchKeyword })
     this.clearSearchTimer()
 
+    // A result from the previous text must never repaint the list after the
+    // user has already typed something new.
+    this.searchToken = null
+    this.activeSearchKey = ''
+
     const keyword = searchKeyword.trim()
     if (!keyword) {
       this.searchToken = null
@@ -785,23 +790,45 @@ Page({
     }
 
     this.searchTimer = setTimeout(() => {
-      if (this.data.currentContentMode === 'package') this.searchPackages(keyword)
-      else this.searchDishes(keyword)
+      this.runSearch(keyword)
     }, 260)
   },
 
   confirmSearch() {
-    const keyword = String(this.data.searchKeyword || '').trim()
-    if (keyword) {
-      this.clearSearchTimer()
-      if (this.data.currentContentMode === 'package') this.searchPackages(keyword)
-      else this.searchDishes(keyword)
-    }
+    this.runSearch(String(this.data.searchKeyword || '').trim())
+  },
+
+  onSearchBlur() {
+    // Tapping a blank area used to leave the debounce timer running while
+    // the native input was closing. In landscape this could overlap two full
+    // list renders and make the page feel frozen for several seconds.
+    this.runSearch(String(this.data.searchKeyword || '').trim())
+  },
+
+  runSearch(keyword) {
+    this.clearSearchTimer()
+    const normalizedKeyword = String(keyword || '').trim()
+    if (!normalizedKeyword) return
+
+    const searchKey = [
+      this.data.currentContentMode,
+      this.data.currentMenuType,
+      normalizedKeyword.toLowerCase()
+    ].join('|')
+
+    // `confirm` is commonly followed by `blur`. Only one network request and
+    // one list repaint are needed for the same text.
+    if (this.activeSearchKey === searchKey) return
+    this.activeSearchKey = searchKey
+
+    if (this.data.currentContentMode === 'package') this.searchPackages(normalizedKeyword)
+    else this.searchDishes(normalizedKeyword)
   },
 
   clearSearch() {
     this.clearSearchTimer()
     this.searchToken = null
+    this.activeSearchKey = ''
     this.setData({
       searchKeyword: '',
       isSearching: false

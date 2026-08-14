@@ -1238,16 +1238,6 @@ page {
   box-sizing: border-box;
 }
 
-.package-internal-tip {
-  margin-bottom: 10rpx;
-  padding: 8rpx 10rpx;
-  border-radius: 8rpx;
-  color: #8A6A4C;
-  background: #FFF1DC;
-  font-size: 10rpx;
-  line-height: 1.4;
-}
-
 .package-item {
   position: relative;
   width: calc(50% - 7rpx);

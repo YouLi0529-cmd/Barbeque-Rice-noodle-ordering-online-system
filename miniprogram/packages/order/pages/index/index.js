@@ -1,4 +1,4 @@
-// packages/order/pages/index/index.js
+// packages/order/pages/covertest/covertest.js
 const app = getApp()
 const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()
@@ -2490,7 +2490,7 @@ Page({
   onShareAppMessage() {
     return {
       title: this.data.shopInfo.name || '餐饮点餐',
-      path: '/packages/order/pages/index/index',
+      path: '/packages/order/pages/covertest/covertest',
       imageUrl: '' // 可以设置分享图片，留空则使用小程序默认图片
     }
   },

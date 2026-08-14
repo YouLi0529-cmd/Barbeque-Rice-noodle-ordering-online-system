@@ -1,4 +1,4 @@
-// packages/order/pages/index/index.js
+// packages/order/pages/covertest/covertest.js
 const app = getApp()
 const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()

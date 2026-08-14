@@ -20,7 +20,10 @@
           placeholder="{{currentContentMode === 'package' ? ui.searchPackagePlaceholder : ui.searchPlaceholder}}"
           placeholder-style="color: rgba(255, 247, 236, 0.52);"
           confirm-type="search"
+          adjust-position="{{false}}"
+          cursor-spacing="0"
           bindinput="onSearchInput"
+          bindblur="onSearchBlur"
           bindconfirm="confirmSearch" />
         <text class="search-clear" wx:if="{{searchKeyword}}" bindtap="clearSearch">x</text>
       </view>
@@ -102,7 +105,6 @@
       </view>
 
       <scroll-view class="package-list" scroll-y>
-        <view class="package-internal-tip">{{ui.packageInternalTip}}</view>
         <view class="package-item {{index % 2 ? 'even' : ''}}" wx:for="{{packages}}" wx:key="_id">
           <view class="package-status {{item.status === 1 ? 'online' : 'offline'}}">
             {{item.status === 1 ? ui.online : ui.offline}}

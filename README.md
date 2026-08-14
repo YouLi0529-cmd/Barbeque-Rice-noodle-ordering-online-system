@@ -75,20 +75,14 @@
 │   └── vant/
 │
 ├── cloudfunctions/
-│   ├── login/
-│   ├── getCategory/
-│   ├── doBuy/
+│   ├── tenantApi/            # 当前业务与打印服务
+│   ├── getCategory/          # 云函数兼容回退
+│   ├── login/                # 云函数兼容回退
+│   ├── sharedCart/           # 云函数兼容回退
+│   ├── orderDraft/           # 云函数兼容回退
+│   ├── doBuy/                # 云函数兼容回退
 │   ├── pay/
-│   ├── pay_success/
-│   ├── get_code/
-│   ├── getPhoneNumber/
-│   ├── getUserList/
-│   ├── printBack/
-│   ├── printManage/
-│   ├── queueManage/
-│   ├── reservationManage/
-│   ├── outdoorManage/
-│   └── updateOrderStatus/
+│   └── pay_success/
 │
 ├── project.config.json
 └── README.md
@@ -126,22 +120,11 @@
 
 ## 云函数
 
-需要在微信开发者工具中上传并部署以下云函数：
+当前业务通过 `tenantApi` 提供，打印机管理也使用其中的 `printService`。需要在微信开发者工具中上传并部署：
 
-- `login`
-- `getCategory`
-- `doBuy`
-- `pay`
-- `pay_success`
-- `get_code`
-- `getPhoneNumber`
-- `getUserList`
-- `printBack`
-- `printManage`
-- `queueManage`
-- `reservationManage`
-- `outdoorManage`
-- `updateOrderStatus`
+- `tenantApi`
+- 当前仍作为兼容回退使用的 `login`、`getCategory`、`sharedCart`、`orderDraft`、`doBuy`
+- 支付相关的 `pay`、`pay_success`
 
 上传方式：右键云函数目录，选择“上传并部署：云端安装依赖”。
 
@@ -177,10 +160,6 @@ cloud.init({
 ### 3. 配置微信支付
 
 `cloudfunctions/pay/index.js` 中的商户号等配置需要替换为你自己的微信支付配置。正式项目中建议通过云函数环境变量或云开发安全配置管理敏感信息。
-
-### 4. 配置打印机
-
-`cloudfunctions/printManage/index.js` 保留打印机管理能力。打印机平台的 `appid`、`appsecret`、用户编号等信息不要写死并提交到仓库，建议使用环境变量或只保存在云函数线上配置中。
 
 ## 典型测试流程
 
