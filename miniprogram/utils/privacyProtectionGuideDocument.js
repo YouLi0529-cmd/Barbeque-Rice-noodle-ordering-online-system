@@ -1,4 +1,4 @@
-const PRIVACY_PROTECTION_GUIDE_PDF_URL = 'https://zhrcloud-d1gsjuhij11024f72-1449718669.tcloudbaseapp.com/legal/privacy-protection-guide-v1.pdf'
+const PRIVACY_PROTECTION_GUIDE_PDF_URL = 'https://zmbbq-d0ggmremua04f027d-1449718669.tcloudbaseapp.com/legal/privacy-protection-guide-v1.pdf'
 
 function openPrivacyProtectionGuideDocument() {
   wx.showLoading({

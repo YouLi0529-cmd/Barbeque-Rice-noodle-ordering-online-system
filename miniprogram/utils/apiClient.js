@@ -5,7 +5,7 @@ const ADMIN_AUTH_TOKEN_KEY = 'adminAuthToken'
 
 // Fill this with the HTTP trigger URL of cloudfunctions/tenantApi after deployment.
 // Example: https://xxxx.service.tcloudbase.com/tenantApi
-const API_BASE_URL = 'https://zhrcloud-d1gsjuhij11024f72-1449718669.ap-shanghai.app.tcloudbase.com/tenantApi'
+const API_BASE_URL = 'https://zmbbq-d0ggmremua04f027d-1449718669.ap-shanghai.app.tcloudbase.com/tenantApi'
 
 function getBaseUrl() {
   return wx.getStorageSync('tenantApiBaseUrl') || API_BASE_URL

@@ -2,6 +2,10 @@ const cloud = require('wx-server-sdk')
 const crypto = require('crypto')
 const https = require('https')
 const { createPrintService } = require('./printService')
+const {
+  DEFAULT_DISH_IMAGE_FILES: RECOVERY_DISH_IMAGE_FILES,
+  DISH_IMAGE_NAME_ALIASES: RECOVERY_DISH_IMAGE_NAME_ALIASES
+} = require('./dishImageManifest')
 
 cloud.init({
   env: cloud.DYNAMIC_CURRENT_ENV
@@ -5138,7 +5142,7 @@ const DEFAULT_DISH_IMAGE_FILES = [
   '齐齐哈尔拌牛肉.jpg'
 ]
 
-const DEFAULT_DISH_IMAGE_BASE_URL = 'cloud://zhrcloud-d1gsjuhij11024f72.7a68-zhrcloud-d1gsjuhij11024f72-1449718669/dish pic'
+const DEFAULT_DISH_IMAGE_BASE_URL = process.env.DISH_IMAGE_BASE_URL || 'cloud://zmbbq-d0ggmremua04f027d.7a6d-zmbbq-d0ggmremua04f027d-1449718669/dish pic/new_pic_728/new_pic_728'
 const DEFAULT_DISH_IMAGE_FILE_ID_PREFIX = DEFAULT_DISH_IMAGE_BASE_URL.replace(/\/dish pic$/, '')
 const DEFAULT_DISH_IMAGE_CDN_HOST = '7a68-zhrcloud-d1gsjuhij11024f72-1449718669.tcb.qcloud.la'
 
@@ -5193,7 +5197,7 @@ function normalizeDishImageEntry(entry, payload = {}) {
     return {
       fileName,
       image,
-      dishNames: DISH_IMAGE_NAME_ALIASES[rawDishName] || [rawDishName]
+      dishNames: RECOVERY_DISH_IMAGE_NAME_ALIASES[rawDishName] || DISH_IMAGE_NAME_ALIASES[rawDishName] || [rawDishName]
     }
   }
 
@@ -5206,7 +5210,7 @@ function normalizeDishImageEntry(entry, payload = {}) {
     image,
     dishNames: Array.isArray(entry.dishNames) && entry.dishNames.length
       ? entry.dishNames.map(name => String(name || '').trim()).filter(Boolean)
-      : (DISH_IMAGE_NAME_ALIASES[rawDishName] || [rawDishName])
+      : (RECOVERY_DISH_IMAGE_NAME_ALIASES[rawDishName] || DISH_IMAGE_NAME_ALIASES[rawDishName] || [rawDishName])
   }
 }
 
@@ -5476,7 +5480,7 @@ async function getDishesForImageMatch(menuType, dishNames = []) {
 async function adminMatchDishImages(payload) {
   const allImages = Array.isArray(payload.images) && payload.images.length
     ? payload.images
-    : DEFAULT_DISH_IMAGE_FILES
+    : RECOVERY_DISH_IMAGE_FILES
   const imageOffset = Math.max(0, Math.floor(Number(payload.imageOffset || payload.offset || 0)))
   const batchSize = Math.min(Math.max(Math.floor(Number(payload.batchSize || payload.limit || 5)), 1), 10)
   const images = allImages.slice(imageOffset, imageOffset + batchSize)

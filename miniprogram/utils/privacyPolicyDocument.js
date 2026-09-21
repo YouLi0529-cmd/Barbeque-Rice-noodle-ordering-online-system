@@ -1,4 +1,4 @@
-const PRIVACY_POLICY_PDF_URL = 'https://zhrcloud-d1gsjuhij11024f72-1449718669.tcloudbaseapp.com/legal/privacy-policy-v1.pdf'
+const PRIVACY_POLICY_PDF_URL = 'https://zmbbq-d0ggmremua04f027d-1449718669.tcloudbaseapp.com/legal/privacy-policy-v1.pdf'
 
 function openPrivacyPolicyDocument() {
   wx.showLoading({
