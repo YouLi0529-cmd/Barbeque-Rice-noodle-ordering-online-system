@@ -233,6 +233,9 @@ const DEFAULT_PRINTERS = [
 ]
 
 const DEFAULT_STATIONS = [
+  // The front-counter station reuses the cashier printer so staff can explicitly
+  // route special dishes or service items to the front desk from dish management.
+  { code: 'front-counter', name: '\u524d\u53f0', printerCode: 'front-counter', isDefault: false },
   { code: 'kitchen', name: '\u540e\u53a8', printerCode: 'kitchen', isDefault: true },
   { code: 'hot-dishes', name: '\u70ed\u83dc', printerCode: 'hot-dishes', isDefault: false },
   { code: 'dessert', name: '\u751c\u54c1', printerCode: 'dessert', isDefault: false }
@@ -1732,9 +1735,9 @@ function createPrintService({ db, _, defaultTenantId }) {
     if (existing && existing.storeId !== id) return { success: false, code: 'STATION_NOT_FOUND', message: 'station not found' }
     const printer = await getDoc('printers', text(input.printerId || existing && existing.printerId))
     if (!printer || printer.storeId !== id) return { success: false, code: 'STATION_PRINTER_REQUIRED', message: 'station printer required' }
-    if (!isKitchenPrinter(printer)) {
-      return { success: false, code: 'STATION_KITCHEN_PRINTER_REQUIRED', message: 'kitchen station can only bind to a kitchen printer' }
-    }
+    // A station may intentionally reuse the cashier printer, for example the
+    // "front counter" option in dish management. Its ticket still follows the
+    // normal station route, while cashier receipts remain configured separately.
     const data = {
       name: text(input.name || existing && existing.name),
       code: text(input.code || existing && existing.code),

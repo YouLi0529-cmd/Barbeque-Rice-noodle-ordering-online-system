@@ -320,6 +320,41 @@ Page({
     return false
   },
 
+  async ensureSharedCartApiAuth(force = false) {
+    if (!apiClient.isEnabled()) return
+    if (!force && apiClient.getAuthToken()) return
+    if (this.sharedCartAuthPromise) return this.sharedCartAuthPromise
+
+    if (force) apiClient.clearAuth()
+    // Scanning a table and confirming diner count only need a temporary WeChat
+    // session for the shared cart. This does not authorize a phone number or
+    // restore the member profile after the visitor has logged out of "My".
+    this.sharedCartAuthPromise = apiClient.login().then(result => {
+      if (!apiClient.getAuthToken()) {
+        throw new Error((result && result.message) || '点单会话初始化失败，请重试')
+      }
+      return result
+    }).finally(() => {
+      this.sharedCartAuthPromise = null
+    })
+
+    return this.sharedCartAuthPromise
+  },
+
+  async callSharedCartApi(action, data = {}) {
+    await this.ensureSharedCartApiAuth()
+    try {
+      return await apiClient.call(action, data)
+    } catch (err) {
+      // A stale local token can occur after the user has left the program for
+      // a while. Refresh it once so confirming diners never exposes login
+      // state to the ordering flow.
+      if (!err || err.code !== 'AUTH_REQUIRED') throw err
+      await this.ensureSharedCartApiAuth(true)
+      return apiClient.call(action, data)
+    }
+  },
+
   selectPeopleOption(e) {
     const count = Math.floor(Number(e.currentTarget.dataset.count || 0))
     if (!count) return
@@ -386,7 +421,7 @@ Page({
 
     try {
       const result = apiClient.isEnabled()
-        ? await apiClient.call('sharedCart.setPeople', {
+        ? await this.callSharedCartApi('sharedCart.setPeople', {
           action: 'setPeople',
           sessionId: this.data.sharedSessionId,
           tableNumber: this.data.tableNumber,
@@ -435,7 +470,7 @@ Page({
     const localCartBeforeJoin = this.data.cartCount > 0 ? { ...this.data.cart } : null
 
     this.sharedCartInitPromise = (apiClient.isEnabled()
-      ? apiClient.call('sharedCart.join', {
+      ? this.callSharedCartApi('sharedCart.join', {
         action: 'join',
         tableNumber: currentTable
       })
@@ -592,7 +627,7 @@ Page({
           const previousCartVersion = Number(this.data.sharedCartVersion || 0)
           let statusResult = null
           try {
-            statusResult = await apiClient.call('sharedCart.status', {
+            statusResult = await this.callSharedCartApi('sharedCart.status', {
               sessionId,
               tableNumber: this.data.tableNumber,
               sharedCartAccessToken: this.data.sharedCartAccessToken
@@ -636,7 +671,7 @@ Page({
         }
 
         const result = apiClient.isEnabled()
-          ? await apiClient.call('sharedCart.get', requestData)
+          ? await this.callSharedCartApi('sharedCart.get', requestData)
           : (await wx.cloud.callFunction({
             name: 'sharedCart',
             data: requestData
@@ -738,7 +773,7 @@ Page({
     if (operations.length === 0) return
 
     const request = apiClient.isEnabled()
-      ? apiClient.call('sharedCart.patch', {
+      ? this.callSharedCartApi('sharedCart.patch', {
         action: 'patch',
         sessionId: this.data.sharedSessionId,
         tableNumber: this.data.tableNumber,
