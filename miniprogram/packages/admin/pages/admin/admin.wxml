@@ -213,7 +213,7 @@
       </view>
       <view class="reservation-detail-footer">
         <view class="detail-btn cancel" bindtap="closeReservationDetailModal">{{ui.cancel}}</view>
-        <view class="detail-btn confirm" bindtap="confirmReservation">
+        <view class="detail-btn confirm" wx:if="{{selectedReservation.status === 'pending'}}" bindtap="confirmReservation">
           {{confirmingReservation ? ui.loading : ui.confirmReservation}}
         </view>
       </view>

@@ -112,25 +112,42 @@ Component({
           saving: true
         })
 
+        const app = getApp()
         const phoneResult = apiClient.isEnabled()
-          ? await apiClient.call('phone.getNumber', { code: e.detail.code })
+          ? await apiClient.call('user.authorizePhone', {
+            code: e.detail.code,
+            avatarUrl: this.data.avatarUrl || '',
+            nickName: String(this.data.nickName || '').trim()
+          })
           : (await wx.cloud.callFunction({
             name: 'getPhoneNumber',
             data: { code: e.detail.code }
           })).result
 
-        if (!phoneResult || !phoneResult.success || !phoneResult.phoneNumber) {
+        if (!phoneResult || !phoneResult.success || !phoneResult.data || !phoneResult.data.user || !phoneResult.data.user.phoneNumber) {
           throw new Error(phoneResult?.message || '获取手机号失败，请重试')
         }
 
-        const phoneNumber = phoneResult.phoneNumber
+        const user = phoneResult.data.user
+        const phoneNumber = user.phoneNumber
         this.setData({
           phoneNumber,
           phoneCode: e.detail.code,
           realPhoneNumber: phoneNumber
         })
 
-        await this.saveUserInfo()
+        app.globalData.userInfo = user
+        wx.showToast({
+          title: '保存成功',
+          icon: 'success'
+        })
+        this.triggerEvent('saved', {
+          avatarUrl: this.data.avatarUrl || '',
+          nickName: user.nickName,
+          phoneNumber,
+          user
+        })
+        this.closeModalTap()
       } catch (err) {
         this.setData({
           saving: false

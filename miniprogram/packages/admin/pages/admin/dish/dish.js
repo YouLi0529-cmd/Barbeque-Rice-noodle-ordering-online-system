@@ -47,10 +47,16 @@ const UI = {
   customSpecTitle: '\u81ea\u5b9a\u4e49\u6807\u9898',
   customSpecOptions: '\u81ea\u5b9a\u4e49\u9009\u9879',
   customSpecNote: '\u81ea\u5b9a\u4e49\u8bf4\u660e',
+  customSpecGroup: '\u81ea\u5b9a\u4e49\u89c4\u683c',
   inputCustomSpecTitle: '\u8bf7\u8f93\u5165\u6807\u9898',
   inputCustomSpecOptions: '\u8bf7\u8f93\u5165\u9009\u9879',
   inputCustomSpecNote: '\u53ef\u9009\u8bf4\u660e\uff0c\u4f1a\u663e\u793a\u5728\u5f39\u7a97\u91cc',
-  customSpecOptionsTip: '\u7528\u987f\u53f7\u5206\u9694\uff0c\u4f8b\u5982\uff1a\u5c11\u82a5\u672b\u3001\u6b63\u5e38\u82a5\u672b',
+  saveSpecTemplate: '\u4fdd\u5b58\u4e3a\u901a\u7528\u6a21\u677f',
+  specTemplateSaved: '\u5df2\u4fdd\u5b58\u4e3a\u901a\u7528\u6a21\u677f',
+  specTemplateExists: '\u901a\u7528\u6a21\u677f\u5df2\u5b58\u5728',
+  deleteSpecTemplate: '\u5220\u9664\u6a21\u677f',
+  specTemplateDeleted: '\u6a21\u677f\u5df2\u5220\u9664',
+  specOptionRequired: '\u8bf7\u81f3\u5c11\u4fdd\u7559\u4e00\u4e2a\u9009\u9879',
   inputCategoryName: '\u8bf7\u8f93\u5165\u5206\u7c7b\u540d\u79f0',
   inputDishName: '\u8bf7\u8f93\u5165\u83dc\u54c1\u540d\u79f0',
   inputPrice: '\u8bf7\u8f93\u5165\u4ef7\u683c',
@@ -432,6 +438,52 @@ function getCustomSpecFields(dish = {}) {
   }
 }
 
+function getCustomOptionGroupDrafts(dish = {}) {
+  const source = Array.isArray(dish.customOptionGroups)
+    ? dish.customOptionGroups
+    : (Array.isArray(dish.optionGroups) ? dish.optionGroups : [])
+
+  return source.map((group, index) => ({
+    id: String(group.id || group._id || `custom-group-${index + 1}`),
+    title: String(group.title || group.name || '').trim(),
+    optionsText: Array.isArray(group.options)
+      ? formatSpecOptionsText(group.options)
+      : String(group.optionsText || '').trim(),
+    note: String(group.note || '').trim()
+  }))
+}
+
+function buildCustomSpecDish(dish = {}) {
+  const customSpecOptionsText = String(dish.customSpecOptionsText || '').trim()
+  const primaryOptions = splitSpecOptionsText(customSpecOptionsText)
+  const customOptionGroups = getCustomOptionGroupDrafts(dish)
+  const optionGroups = customOptionGroups
+    .map((group, index) => ({
+      id: group.id || `custom-group-${index + 1}`,
+      title: String(group.title || '').trim(),
+      options: splitSpecOptionsText(group.optionsText),
+      note: String(group.note || '').trim()
+    }))
+    .filter(group => group.title && group.options.length)
+  const customSpecTitle = String(dish.customSpecTitle || dish.flavorTitle || UI.defaultSpecTitle).trim() || UI.defaultSpecTitle
+  const customSpecNote = String(dish.customSpecNote === undefined ? dish.flavorNote || '' : dish.customSpecNote).trim()
+
+  return {
+    ...dish,
+    needPopup: true,
+    needSpec: true,
+    specTemplate: 'custom',
+    customSpecTitle,
+    customSpecOptionsText,
+    customSpecNote,
+    flavorTitle: customSpecTitle,
+    flavorOptions: primaryOptions.length ? primaryOptions : DEFAULT_SPEC_OPTIONS,
+    flavorNote: customSpecNote,
+    customOptionGroups,
+    optionGroups
+  }
+}
+
 function cloneOptionGroups(optionGroups) {
   return (Array.isArray(optionGroups) ? optionGroups : []).map(group => ({
     ...group,
@@ -448,17 +500,10 @@ function applySpecTemplateToDish(dish = {}, templateValue = 'spicy') {
 
   if (template.value === 'custom') {
     const customFields = getCustomSpecFields(next)
-    const customOptions = splitSpecOptionsText(customFields.customSpecOptionsText)
-    const options = customOptions.length ? customOptions : DEFAULT_SPEC_OPTIONS
-    return {
+    return buildCustomSpecDish({
       ...next,
-      ...customFields,
-      customSpecOptionsText: customFields.customSpecOptionsText,
-      flavorTitle: customFields.customSpecTitle || UI.defaultSpecTitle,
-      flavorOptions: options,
-      flavorNote: customFields.customSpecNote || '',
-      optionGroups: []
-    }
+      ...customFields
+    })
   }
 
   return {
@@ -469,7 +514,8 @@ function applySpecTemplateToDish(dish = {}, templateValue = 'spicy') {
     flavorTitle: template.title,
     flavorOptions: [...template.options],
     flavorNote: template.note || '',
-    optionGroups: cloneOptionGroups(template.optionGroups)
+    optionGroups: cloneOptionGroups(template.optionGroups),
+    customOptionGroups: getCustomOptionGroupDrafts({ optionGroups: template.optionGroups })
   }
 }
 
@@ -493,7 +539,8 @@ function prepareDishSpecForEditor(dish = {}, categoryName = '') {
     flavorTitle: String(next.flavorTitle || UI.defaultSpecTitle).trim() || UI.defaultSpecTitle,
     flavorOptions,
     flavorNote: String(next.flavorNote || '').trim(),
-    optionGroups
+    optionGroups,
+    customOptionGroups: getCustomOptionGroupDrafts(next)
   }
 }
 
@@ -557,11 +604,13 @@ Page({
     showStationDropdown: false,
     specPreviewGroups: [],
     stationOptions: buildStationOptions(),
-    specTemplates: SPEC_TEMPLATES
+    specTemplates: SPEC_TEMPLATES,
+    savedSpecTemplates: []
   },
 
   onLoad() {
     this.loadPrintStations()
+    this.loadSavedSpecTemplates()
     this.loadCategories()
   },
 
@@ -670,6 +719,54 @@ Page({
     } catch (err) {
       console.error('load print stations failed', err)
       return this.data.stationOptions
+    }
+  },
+
+  async loadSavedSpecTemplates() {
+    try {
+      const res = await apiClient.call('admin.collection.list', {
+        collection: 'dishSpecTemplate',
+        orderBy: 'createTime',
+        order: 'desc',
+        limit: 100
+      })
+      const templateRecords = res.data || []
+      const hiddenBuiltInValues = new Set(templateRecords
+        .filter(item => item.status !== 0 && item.kind === 'hiddenBuiltIn')
+        .map(item => String(item.builtInValue || '').trim())
+        .filter(Boolean))
+      const savedSpecTemplates = templateRecords
+        .filter(item => item.kind !== 'hiddenBuiltIn')
+        .filter(item => item.status !== 0)
+        .map(item => {
+          const options = normalizeOptionList(item.options)
+          const title = String(item.title || item.name || UI.defaultSpecTitle).trim() || UI.defaultSpecTitle
+          if (!options.length) return null
+          return {
+            _id: item._id,
+            label: String(item.name || title).trim() || title,
+            value: `saved:${item._id}`,
+            title,
+            options,
+            note: String(item.note || '').trim(),
+            optionGroups: cloneOptionGroups(item.optionGroups),
+            isSavedTemplate: true
+          }
+        })
+        .filter(Boolean)
+      this.setData({
+        savedSpecTemplates,
+        specTemplates: [
+          ...SPEC_TEMPLATES.filter(item => item.value === 'custom' || !hiddenBuiltInValues.has(item.value)),
+          ...savedSpecTemplates
+        ]
+      })
+    } catch (err) {
+      console.error('load saved spec templates failed', err)
+      this.setData({
+        savedSpecTemplates: [],
+        specTemplates: SPEC_TEMPLATES
+      })
     }
   },
 
@@ -1114,10 +1211,30 @@ Page({
 
   selectSpecTemplate(e) {
     const templateValue = e.currentTarget.dataset.template
+    const savedTemplate = this.data.savedSpecTemplates.find(item => item.value === templateValue)
+    if (savedTemplate) {
+      const currentDish = buildCustomSpecDish({
+        ...this.data.currentDish,
+        customSpecTitle: savedTemplate.title,
+        customSpecOptionsText: formatSpecOptionsText(savedTemplate.options),
+        customSpecNote: savedTemplate.note,
+        customOptionGroups: getCustomOptionGroupDrafts({ optionGroups: savedTemplate.optionGroups }),
+        savedSpecTemplateId: savedTemplate._id,
+        selectedSpecTemplateValue: savedTemplate.value
+      })
+      this.setData({
+        currentDish,
+        specPreviewGroups: buildSpecPreviewGroups(currentDish)
+      })
+      return
+    }
+
     const currentDish = applySpecTemplateToDish({
       ...this.data.currentDish,
       needPopup: true,
-      needSpec: true
+      needSpec: true,
+        savedSpecTemplateId: '',
+        selectedSpecTemplateValue: templateValue
     }, templateValue)
 
     this.setData({
@@ -1130,18 +1247,169 @@ Page({
     const field = e.currentTarget.dataset.field
     if (!field) return
 
-    const currentDish = applySpecTemplateToDish({
+    const currentDish = buildCustomSpecDish({
       ...this.data.currentDish,
       [field]: e.detail.value,
-      specTemplate: 'custom',
-      needPopup: true,
-      needSpec: true
-    }, 'custom')
+      savedSpecTemplateId: '',
+      selectedSpecTemplateValue: ''
+    })
 
     this.setData({
       currentDish,
       specPreviewGroups: buildSpecPreviewGroups(currentDish)
     })
+  },
+
+  addCustomSpecGroup() {
+    const customOptionGroups = getCustomOptionGroupDrafts(this.data.currentDish)
+    customOptionGroups.push({
+      id: `custom-group-${Date.now()}`,
+      title: '',
+      optionsText: '',
+      note: ''
+    })
+    const currentDish = buildCustomSpecDish({
+      ...this.data.currentDish,
+      customOptionGroups,
+      savedSpecTemplateId: '',
+      selectedSpecTemplateValue: ''
+    })
+    this.setData({
+      currentDish,
+      specPreviewGroups: buildSpecPreviewGroups(currentDish)
+    })
+  },
+
+  removeCustomSpecGroup() {
+    const customOptionGroups = getCustomOptionGroupDrafts(this.data.currentDish)
+    if (!customOptionGroups.length) return
+    const currentDish = buildCustomSpecDish({
+      ...this.data.currentDish,
+      customOptionGroups: customOptionGroups.slice(0, -1),
+      savedSpecTemplateId: '',
+      selectedSpecTemplateValue: ''
+    })
+    this.setData({
+      currentDish,
+      specPreviewGroups: buildSpecPreviewGroups(currentDish)
+    })
+  },
+
+  onCustomSpecGroupInput(e) {
+    const index = Number(e.currentTarget.dataset.index)
+    const field = e.currentTarget.dataset.field
+    const customOptionGroups = getCustomOptionGroupDrafts(this.data.currentDish)
+    if (!field || !Number.isInteger(index) || index < 0 || index >= customOptionGroups.length) return
+    customOptionGroups[index] = {
+      ...customOptionGroups[index],
+      [field]: e.detail.value
+    }
+    const currentDish = buildCustomSpecDish({
+      ...this.data.currentDish,
+      customOptionGroups,
+      savedSpecTemplateId: '',
+      selectedSpecTemplateValue: ''
+    })
+    this.setData({
+      currentDish,
+      specPreviewGroups: buildSpecPreviewGroups(currentDish)
+    })
+  },
+
+  async saveCustomSpecTemplate() {
+    const currentDish = buildCustomSpecDish(this.data.currentDish)
+    const options = splitSpecOptionsText(currentDish.customSpecOptionsText)
+    if (!options.length) {
+      showToast(UI.specOptionRequired)
+      return
+    }
+
+    const title = currentDish.customSpecTitle
+    const note = currentDish.customSpecNote
+    const exists = this.data.savedSpecTemplates.some(item => (
+      item.title === title &&
+      item.note === note &&
+      isSameOptionList(item.options, options) &&
+      getOptionGroupsSignature(item.optionGroups) === getOptionGroupsSignature(currentDish.optionGroups)
+    ))
+    if (exists) {
+      showToast(UI.specTemplateExists)
+      return
+    }
+
+    try {
+      wx.showLoading({ title: UI.saving })
+      const saveRes = await apiClient.call('admin.collection.save', {
+        collection: 'dishSpecTemplate',
+        item: {
+          name: title,
+          title,
+          options,
+          note,
+          optionGroups: currentDish.optionGroups,
+          status: 1
+        }
+      })
+      await this.loadSavedSpecTemplates()
+      wx.hideLoading()
+      this.setData({
+        currentDish: {
+          ...currentDish,
+          savedSpecTemplateId: saveRes && saveRes.data && saveRes.data._id || '',
+          selectedSpecTemplateValue: saveRes && saveRes.data && saveRes.data._id ? `saved:${saveRes.data._id}` : ''
+        },
+        specPreviewGroups: buildSpecPreviewGroups(currentDish)
+      })
+      showToast(UI.specTemplateSaved, 'success')
+    } catch (err) {
+      wx.hideLoading()
+      console.error('save custom spec template failed', err)
+      showToast(err.message || UI.failed)
+    }
+  },
+
+  async deleteCustomSpecTemplate() {
+    const selectedDish = this.data.currentDish || {}
+    const templateId = String(selectedDish.savedSpecTemplateId || '').trim()
+    const builtInValue = String(selectedDish.selectedSpecTemplateValue || selectedDish.specTemplate || '').trim()
+    const isBuiltInTemplate = !templateId && builtInValue && builtInValue !== 'custom' && SPEC_TEMPLATES.some(item => item.value === builtInValue)
+    if (!templateId && !isBuiltInTemplate) return
+
+    try {
+      wx.showLoading({ title: UI.deleting })
+      if (templateId) {
+        await apiClient.call('admin.collection.delete', {
+          collection: 'dishSpecTemplate',
+          id: templateId
+        })
+      } else {
+        await apiClient.call('admin.collection.save', {
+          collection: 'dishSpecTemplate',
+          item: {
+            name: `hidden:${builtInValue}`,
+            kind: 'hiddenBuiltIn',
+            builtInValue,
+            status: 1
+          }
+        })
+      }
+      await this.loadSavedSpecTemplates()
+      wx.hideLoading()
+      const currentDish = buildCustomSpecDish({
+        ...selectedDish,
+        savedSpecTemplateId: '',
+        selectedSpecTemplateValue: ''
+      })
+      this.setData({
+        currentDish,
+        specPreviewGroups: buildSpecPreviewGroups(currentDish)
+      })
+      showToast(UI.specTemplateDeleted, 'success')
+    } catch (err) {
+      wx.hideLoading()
+      console.error('delete custom spec template failed', err)
+      showToast(err.message || UI.failed)
+    }
   },
 
   chooseDishImage() {

@@ -1049,6 +1049,14 @@ async function createOrder(payload) {
       }
     }
 
+    // A stale client can still carry an old local add-on order ID. Only the
+    // active shared session is allowed to decide whether this is an add-on.
+    const sessionParentOrderId = String(sharedSession.activeOrderRootId || '').trim()
+    if (parentOrderId && parentOrderId !== sessionParentOrderId) {
+      parentOrderId = ''
+      isAddOnOrder = false
+      addOnIndex = 0
+    }
     if (!parentOrderId && sharedSession.activeOrderRootId) {
       parentOrderId = String(sharedSession.activeOrderRootId)
       isAddOnOrder = true
@@ -1467,12 +1475,33 @@ async function getNextUserCode(transaction) {
   return String(next).padStart(5, '0')
 }
 
-async function completeUserProfile(payload) {
-  const auth = await getAuthSession(payload)
+async function getVerifiedPhoneForProfile(payload, auth) {
+  let verifiedPhoneNumber = String(auth && auth.data && auth.data.verifiedPhoneNumber || '').trim()
+  if (verifiedPhoneNumber || !auth || !auth.data || !auth.data._id) {
+    return verifiedPhoneNumber
+  }
+
+  // A warm function instance may still hold the pre-authorization session.
+  // Refresh once from the database before rejecting a just-authorized member.
+  const latestRes = await db.collection('tenantSession').doc(auth.data._id).get()
+  const latestSession = latestRes.data
+  verifiedPhoneNumber = String(latestSession && latestSession.verifiedPhoneNumber || '').trim()
+  if (verifiedPhoneNumber) {
+    auth.data = {
+      ...auth.data,
+      ...latestSession
+    }
+    cacheAuthSession(getTenantId(payload), getAuthToken(payload), auth.data)
+  }
+  return verifiedPhoneNumber
+}
+
+async function completeUserProfile(payload, existingAuth) {
+  const auth = existingAuth || await getAuthSession(payload)
   if (!auth.success) return auth
 
   const openid = auth.data.openid
-  const verifiedPhoneNumber = String(auth.data.verifiedPhoneNumber || '').trim()
+  const verifiedPhoneNumber = await getVerifiedPhoneForProfile(payload, auth)
   const requestedPhoneNumber = String(payload.phoneNumber || '').trim()
   const phoneNumber = verifiedPhoneNumber
   if (!phoneNumber) {
@@ -1707,6 +1736,57 @@ async function getPhoneNumber(payload) {
       message: Number(errCode) === 40029
         ? '手机号授权已过期，请重新点击授权'
         : '获取手机号失败，请重试'
+    }
+  }
+}
+
+async function authorizeUserPhone(payload) {
+  const auth = await getAuthSession(payload)
+  if (!auth.success) return auth
+
+  const code = String(payload.code || '').trim()
+  if (!code) {
+    return {
+      success: false,
+      code: 'MISSING_PHONE_CODE',
+      message: 'missing phone authorization code'
+    }
+  }
+
+  try {
+    const phoneInfo = await exchangeWechatPhoneNumber(code)
+    const phoneNumber = String(phoneInfo.phoneNumber || phoneInfo.purePhoneNumber || '').trim()
+    if (!phoneNumber) {
+      return {
+        success: false,
+        code: 'PHONE_NUMBER_EMPTY',
+        message: 'phone number not found'
+      }
+    }
+
+    const verifiedSession = await updateAuthSession(payload, auth, {
+      verifiedPhoneNumber: phoneNumber,
+      phoneAuthorizedAt: db.serverDate()
+    })
+
+    // Keep the full authorization flow in one HTTP invocation so a different
+    // warm instance cannot read the pre-authorization session in between.
+    return completeUserProfile(payload, {
+      success: true,
+      data: verifiedSession
+    })
+  } catch (err) {
+    const errCode = err && (err.errCode || err.errcode || err.code)
+    console.error('user.authorizePhone failed', {
+      errCode,
+      message: err && err.message
+    })
+    return {
+      success: false,
+      code: 'PHONE_NUMBER_FAILED',
+      message: Number(errCode) === 40029
+        ? 'phone authorization expired, please authorize again'
+        : 'failed to get phone number, please try again'
     }
   }
 }
@@ -2622,7 +2702,7 @@ async function listVisibleTableOrders() {
 }
 
 async function adminListTables() {
-  const [res, tableGroups, tableSessions, reservationRes, boardVersion] = await Promise.all([
+  const [res, tableGroups, tableSessions, reservationRes, boardVersion, activityStamp] = await Promise.all([
     listVisibleTableOrders(),
     listActiveTableGroups(),
     listActiveTableSessions(),
@@ -2631,7 +2711,8 @@ async function adminListTables() {
       .orderBy('createTime', 'desc')
       .limit(100)
       .get(),
-    getAdminTableBoardVersion()
+    getAdminTableBoardVersion(),
+    getAdminTableActivityStamp()
   ])
 
   return {
@@ -2639,19 +2720,25 @@ async function adminListTables() {
     data: {
       sections: buildAdminTableSections(res.data || [], tableGroups, tableSessions),
       reservations: reservationRes.data || [],
-      boardVersion
+      boardVersion,
+      activityStamp
     }
   }
 }
 
 async function adminGetTableBoardStatus(payload) {
-  const boardVersion = await getAdminTableBoardVersion()
+  const [boardVersion, activityStamp] = await Promise.all([
+    getAdminTableBoardVersion(),
+    getAdminTableActivityStamp()
+  ])
   const knownVersion = Math.max(0, Math.floor(Number(payload.boardVersion || 0)))
+  const knownActivityStamp = String(payload.activityStamp || '')
   return {
     success: true,
     data: {
       boardVersion,
-      changed: boardVersion !== knownVersion
+      activityStamp,
+      changed: boardVersion !== knownVersion || (!!activityStamp && activityStamp !== knownActivityStamp)
     }
   }
 }
@@ -4321,25 +4408,15 @@ async function clearSharedCartSessionByTableNumber(tableNumber, finishedAt) {
   const sessionRef = db.collection('tableOrderSession').doc(sessionId)
   const sessionRes = await sessionRef.get()
   if (sessionRes.data) {
-    await sessionRef.update({
-      data: {
-        tableNumber: normalizedTableNumber,
-        status: 'finished',
-        checkoutStatus: 'finished',
-        memberOpenids: [],
-        peopleCount: 0,
-        peopleConfirmed: false,
-        peopleConfirmedAt: null,
-        finishedAt,
-        updateTime: db.serverDate()
-      }
-    })
+    // A cleared or settled table must not leave an add-on context for the next party.
+    await sessionRef.remove()
   }
 
   return {
     tableNumber: normalizedTableNumber,
     sessionId,
-    removed: (res.data || []).length
+    removed: (res.data || []).length,
+    sessionRemoved: !!sessionRes.data
   }
 }
 
@@ -4483,6 +4560,29 @@ async function getAdminTableBoardVersion() {
   }
 }
 
+async function getAdminTableActivityStamp() {
+  try {
+    const [orderCountRes, sessionCountRes] = await Promise.all([
+      db.collection('order')
+        .where({
+          type: 'order',
+          tableCleared: _.neq(true)
+        })
+        .count(),
+      db.collection('tableOrderSession')
+        .where({ status: 'ordering' })
+        .count()
+    ])
+    const orderCount = Math.max(0, Math.floor(Number(orderCountRes && orderCountRes.total || 0)))
+    const sessionCount = Math.max(0, Math.floor(Number(sessionCountRes && sessionCountRes.total || 0)))
+    return `${orderCount}:${sessionCount}`
+  } catch (err) {
+    // The version marker remains the primary signal if a legacy index is absent.
+    console.warn('get admin table activity stamp failed', err)
+    return ''
+  }
+}
+
 async function touchAdminTableBoard() {
   const ref = db.collection('tableOrderSession').doc(ADMIN_TABLE_BOARD_STATE_ID)
   try {
@@ -4589,9 +4689,17 @@ async function joinSharedCart(payload) {
   }
 
   if (oldSession) {
+    const oldRootOrderId = String(oldSession.activeOrderRootId || '').trim()
+    let hasClosedOrderContext = false
+    if (oldRootOrderId) {
+      const oldOrderRes = await db.collection('order').doc(oldRootOrderId).get().catch(() => ({ data: null }))
+      const oldOrder = oldOrderRes.data
+      hasClosedOrderContext = !oldOrder || oldOrder.tableCleared === true || isAdminPaidOrder(oldOrder)
+    }
     const shouldResetSession = oldSession.status === 'finished' ||
       oldSession.checkoutStatus === 'finished' ||
-      !isActiveTableSession(oldSession)
+      !isActiveTableSession(oldSession) ||
+      hasClosedOrderContext
     const updateData = {
       tableNumber,
       status: 'ordering',
@@ -6789,6 +6897,11 @@ const ADMIN_COLLECTIONS = {
     order: 'desc',
     searchFields: ['name', 'phone', 'status']
   },
+  dishSpecTemplate: {
+    orderBy: 'createTime',
+    order: 'desc',
+    searchFields: ['name', 'title']
+  },
   feedback: {
     orderBy: 'createTime',
     order: 'desc',
@@ -6957,6 +7070,7 @@ async function adminListInfoCenter(payload) {
 
 async function adminCollectionSave(payload) {
   const config = getAdminCollectionConfig(payload.collection)
+  await ensureCollection(config.key)
   const item = payload.item || payload.data || {}
   const id = String(item._id || payload.id || '').trim()
   const data = {
@@ -7368,6 +7482,7 @@ async function handleAction(action, payload) {
   if (action === 'auth.login') return loginByWechatCode(payload)
   if (action === 'user.me') return getCurrentUser(payload)
   if (action === 'user.completeProfile') return completeUserProfile(payload)
+  if (action === 'user.authorizePhone') return authorizeUserPhone(payload)
   if (action === 'user.updateAccount') return updateUserAccount(payload)
   if (action === 'user.revokeAuthorization') return revokeUserAuthorization(payload)
   if (action === 'phone.getNumber') return getPhoneNumber(payload)

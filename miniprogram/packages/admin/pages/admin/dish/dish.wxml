@@ -231,14 +231,26 @@
               <view
                 wx:for="{{specTemplates}}"
                 wx:key="value"
-                class="spec-template-chip {{currentDish.specTemplate === item.value ? 'active' : ''}}"
+                class="spec-template-chip {{(item.isSavedTemplate && currentDish.savedSpecTemplateId === item._id) || (!item.isSavedTemplate && currentDish.specTemplate === item.value && !(item.value === 'custom' && currentDish.savedSpecTemplateId)) ? 'active' : ''}}"
                 data-template="{{item.value}}"
                 bindtap="selectSpecTemplate"
               >{{item.label}}</view>
             </view>
           </view>
+          <view class="spec-built-in-actions" wx:if="{{currentDish.specTemplate && currentDish.specTemplate !== 'custom'}}">
+            <view class="spec-save-template delete" bindtap="deleteCustomSpecTemplate">{{ui.deleteSpecTemplate}}</view>
+          </view>
           <view class="spec-custom-editor" wx:if="{{currentDish.specTemplate === 'custom'}}">
-            <view class="form-row">
+            <view class="spec-custom-actions">
+              <view class="spec-option-stepper">
+                <text>{{ui.customSpecGroup}}</text>
+                <view class="spec-option-stepper-btn" bindtap="removeCustomSpecGroup">−</view>
+                <view class="spec-option-stepper-btn" bindtap="addCustomSpecGroup">+</view>
+              </view>
+              <view wx:if="{{currentDish.savedSpecTemplateId}}" class="spec-save-template delete" bindtap="deleteCustomSpecTemplate">{{ui.deleteSpecTemplate}}</view>
+              <view wx:else class="spec-save-template" bindtap="saveCustomSpecTemplate">{{ui.saveSpecTemplate}}</view>
+            </view>
+            <view class="form-row spec-custom-row">
               <view class="form-item half">
                 <view class="form-label">{{ui.customSpecTitle}}</view>
                 <input class="form-input" placeholder="{{ui.inputCustomSpecTitle}}" value="{{currentDish.customSpecTitle}}" data-field="customSpecTitle" bindinput="onCustomSpecInput" />
@@ -248,10 +260,26 @@
                 <input class="form-input" placeholder="{{ui.inputCustomSpecOptions}}" value="{{currentDish.customSpecOptionsText}}" data-field="customSpecOptionsText" bindinput="onCustomSpecInput" />
               </view>
             </view>
-            <view class="form-tip">{{ui.customSpecOptionsTip}}</view>
-            <view class="form-item">
+            <view class="form-item spec-custom-note-item">
               <view class="form-label">{{ui.customSpecNote}}</view>
               <input class="form-input" placeholder="{{ui.inputCustomSpecNote}}" value="{{currentDish.customSpecNote}}" data-field="customSpecNote" bindinput="onCustomSpecInput" />
+            </view>
+            <view class="spec-custom-group" wx:for="{{currentDish.customOptionGroups}}" wx:for-item="group" wx:for-index="groupIndex">
+              <view class="spec-custom-group-title">{{ui.specGroup}}</view>
+              <view class="form-row spec-custom-row">
+                <view class="form-item half">
+                  <view class="form-label">{{ui.customSpecTitle}}</view>
+                  <input class="form-input" placeholder="{{ui.inputCustomSpecTitle}}" value="{{group.title}}" data-index="{{groupIndex}}" data-field="title" bindinput="onCustomSpecGroupInput" />
+                </view>
+                <view class="form-item half">
+                  <view class="form-label">{{ui.customSpecOptions}}</view>
+                  <input class="form-input" placeholder="{{ui.inputCustomSpecOptions}}" value="{{group.optionsText}}" data-index="{{groupIndex}}" data-field="optionsText" bindinput="onCustomSpecGroupInput" />
+                </view>
+              </view>
+              <view class="form-item spec-custom-note-item">
+                <view class="form-label">{{ui.customSpecNote}}</view>
+                <input class="form-input" placeholder="{{ui.inputCustomSpecNote}}" value="{{group.note}}" data-index="{{groupIndex}}" data-field="note" bindinput="onCustomSpecGroupInput" />
+              </view>
             </view>
           </view>
           <view class="spec-preview-divider"></view>

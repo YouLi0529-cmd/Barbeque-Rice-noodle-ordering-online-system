@@ -2372,6 +2372,13 @@ Page({
         return null
       }
 
+      if (!session.sharedSessionId ||
+        String(session.sharedSessionId) !== String(this.data.sharedSessionId || '') ||
+        !this.data.sharedOrderRootId ||
+        String(session.rootOrderId) !== String(this.data.sharedOrderRootId)) {
+        return null
+      }
+
       return session
     } catch (err) {
       console.error('读取当前用餐订单失败', err)

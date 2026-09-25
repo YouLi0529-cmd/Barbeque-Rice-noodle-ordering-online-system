@@ -41,7 +41,7 @@ const ADMIN_TEXT = {
   printerTitle: '\u6253\u5370\u673a\u7ba1\u7406',
   feedbackTitle: '\u610f\u89c1\u6536\u96c6',
   reservationModalTitle: '\u65b0\u9884\u7ea6',
-  reservationEmpty: '\u6682\u65e0\u65b0\u9884\u7ea6',
+  reservationEmpty: '\u6682\u65e0\u9884\u7ea6\u8bb0\u5f55',
   reservationRefresh: '\u5237\u65b0',
   addReservation: '\u6dfb\u52a0\u9884\u7ea6',
   manualReservationTitle: '\u6dfb\u52a0\u9884\u7ea6',
@@ -288,12 +288,13 @@ Page({
     try {
       const res = await apiClient.call('admin.collection.list', {
         collection: 'reservation',
-        filters: { status: 'pending' },
         orderBy: 'createTime',
         order: 'desc',
         limit: 100
       })
-      const reservationList = (res.data || []).map(formatReservation)
+      const reservationList = (res.data || [])
+        .filter(item => ['pending', 'confirmed'].includes(String(item.status || 'pending')))
+        .map(formatReservation)
       this.setData({
         reservationList,
         reservationLoading: false

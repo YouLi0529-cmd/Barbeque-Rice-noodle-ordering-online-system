@@ -243,6 +243,7 @@ Page({
   onLoad() {
     this.rawTables = getBaseTableSections()
     this.tableBoardVersion = 0
+    this.tableBoardActivityStamp = ''
     this.tableBoardStatusSupported = true
     this.tableBoardRefreshInFlight = false
     this.syncTransferState()
@@ -271,7 +272,7 @@ Page({
     if (this.timer) return
     this.timer = setInterval(() => {
       this.refreshTableBoard(true)
-    }, 15000)
+    }, 10000)
     this.clockTimer = setInterval(() => {
       this.refreshTables()
     }, 60000)
@@ -301,12 +302,14 @@ Page({
       const hasReservations = !!(res && res.data && Array.isArray(res.data.reservations))
       const reservations = hasReservations ? res.data.reservations : []
       const boardVersion = Number(res && res.data && res.data.boardVersion)
+      const activityStamp = String(res && res.data && res.data.activityStamp || '')
 
       if (sections.length > 0) {
         this.rawTables = sections
         this.refreshTables()
       }
       if (Number.isFinite(boardVersion)) this.tableBoardVersion = boardVersion
+      if (activityStamp) this.tableBoardActivityStamp = activityStamp
       if (hasReservations) {
         this.applyReservationReminders(reservations)
       } else {
@@ -338,11 +341,14 @@ Page({
       }
 
       const res = await apiClient.call('admin.table.status', {
-        boardVersion: this.tableBoardVersion
+        boardVersion: this.tableBoardVersion,
+        activityStamp: this.tableBoardActivityStamp
       })
       const status = res && res.data ? res.data : {}
       const boardVersion = Number(status.boardVersion)
+      const activityStamp = String(status.activityStamp || '')
       if (Number.isFinite(boardVersion)) this.tableBoardVersion = boardVersion
+      if (activityStamp) this.tableBoardActivityStamp = activityStamp
       if (status.changed || !Number.isFinite(boardVersion)) {
         await this.loadTables(silent)
       }

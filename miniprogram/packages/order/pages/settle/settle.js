@@ -116,7 +116,9 @@ Page({
       session.orderScene === orderScene &&
       (orderScene === 'camping' || (
         String(session.tableNumber || '') &&
-        String(session.tableNumber || '') === String(cartData.tableNumber || '')
+        String(session.tableNumber || '') === String(cartData.tableNumber || '') &&
+        String(session.sharedSessionId || '') === String(cartData.sharedSessionId || '') &&
+        String(session.rootOrderId || '') === String(cartData.sharedOrderContext && cartData.sharedOrderContext.rootOrderId || '')
       ))
 
     if (localSessionMatches) {
@@ -156,6 +158,7 @@ Page({
       orderScene: this.data.orderScene,
       orderType: this.data.orderType,
       tableNumber: this.data.orderScene === 'camping' ? '' : this.data.tableNumber,
+      sharedSessionId: this.data.orderScene === 'camping' ? '' : this.data.sharedSessionId,
       cards: submittedCards,
       addOnCount: Math.max(this.data.addOnIndex || 0, submittedCards.length - 1, 0),
       updateTime: Date.now()

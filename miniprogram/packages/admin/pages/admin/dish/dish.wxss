@@ -592,11 +592,102 @@
   border-color: rgba(154, 100, 42, 0.36);
 }
 
+.spec-built-in-actions {
+  margin-top: 10rpx;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .spec-custom-editor {
   margin-top: 14rpx;
   padding: 14rpx;
   border-radius: 16rpx;
   background: rgba(255, 255, 255, 0.62);
+}
+
+.spec-custom-actions {
+  min-height: 44rpx;
+  margin-bottom: 10rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.spec-option-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  color: rgba(58, 36, 24, 0.68);
+  font-size: 21rpx;
+  font-weight: 900;
+}
+
+.spec-option-stepper-btn {
+  width: 34rpx;
+  height: 34rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10rpx;
+  color: #6F451F;
+  background: #FFF7EC;
+  border: 1rpx solid rgba(201, 154, 74, 0.36);
+  font-size: 28rpx;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.spec-save-template {
+  min-height: 34rpx;
+  padding: 0 12rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10rpx;
+  color: #6F451F;
+  background: rgba(241, 196, 107, 0.32);
+  border: 1rpx solid rgba(201, 154, 74, 0.36);
+  font-size: 20rpx;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.spec-save-template.delete {
+  color: #FFFFFF;
+  background: #C84B3D;
+  border-color: rgba(142, 43, 34, 0.5);
+}
+
+.spec-custom-editor .form-item {
+  margin-top: 10rpx;
+}
+
+.spec-custom-editor .form-label {
+  margin-bottom: 6rpx;
+  font-size: 20rpx;
+}
+
+.spec-custom-editor .form-input {
+  height: 56rpx;
+  padding: 0 14rpx;
+  font-size: 22rpx;
+}
+
+.spec-custom-row {
+  gap: 12rpx;
+}
+
+.spec-custom-group {
+  margin-top: 14rpx;
+  padding-top: 12rpx;
+  border-top: 1rpx solid rgba(58, 36, 24, 0.08);
+}
+
+.spec-custom-group-title {
+  color: rgba(58, 36, 24, 0.52);
+  font-size: 19rpx;
+  font-weight: 900;
 }
 
 .spec-preview-divider {
@@ -1095,6 +1186,59 @@ page {
   margin-top: 7rpx;
   padding: 7rpx;
   border-radius: 8rpx;
+}
+
+.spec-custom-actions {
+  min-height: 24rpx;
+  margin-bottom: 5rpx;
+  gap: 6rpx;
+}
+
+.spec-option-stepper {
+  gap: 4rpx;
+  font-size: 10rpx;
+}
+
+.spec-option-stepper-btn {
+  width: 20rpx;
+  height: 20rpx;
+  border-radius: 5rpx;
+  font-size: 15rpx;
+}
+
+.spec-save-template {
+  min-height: 20rpx;
+  padding: 0 7rpx;
+  border-radius: 5rpx;
+  font-size: 10rpx;
+}
+
+.spec-custom-editor .form-item {
+  margin-top: 5rpx;
+}
+
+.spec-custom-editor .form-label {
+  margin-bottom: 3rpx;
+  font-size: 10rpx;
+}
+
+.spec-custom-editor .form-input {
+  height: 32rpx;
+  padding: 0 8rpx;
+  font-size: 11rpx;
+}
+
+.spec-custom-row {
+  gap: 6rpx;
+}
+
+.spec-custom-group {
+  margin-top: 7rpx;
+  padding-top: 6rpx;
+}
+
+.spec-custom-group-title {
+  font-size: 10rpx;
 }
 
 .spec-preview-divider {
