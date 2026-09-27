@@ -23,11 +23,13 @@ class MainActivity : AppCompatActivity() {
     super.onCreate(savedInstanceState)
     prefs = AgentPreferences(this)
     render()
+    ensureAgentServiceRunning()
   }
 
   override fun onResume() {
     super.onResume()
     renderStatus()
+    ensureAgentServiceRunning()
   }
 
   private fun render() {
@@ -42,10 +44,6 @@ class MainActivity : AppCompatActivity() {
     container.addView(Button(this).apply {
       text = if (prefs.registered) "重新配置 / 注册" else "注册打印代理"
       setOnClickListener { openRegistrationDialog() }
-    })
-    container.addView(Button(this).apply {
-      text = "启动打印服务"
-      setOnClickListener { startAgentService() }
     })
     container.addView(Button(this).apply {
       text = "停止打印服务"
@@ -109,5 +107,9 @@ class MainActivity : AppCompatActivity() {
       return
     }
     ContextCompat.startForegroundService(this, Intent(this, PrintAgentService::class.java))
+  }
+
+  private fun ensureAgentServiceRunning() {
+    if (prefs.registered) startAgentService()
   }
 }
