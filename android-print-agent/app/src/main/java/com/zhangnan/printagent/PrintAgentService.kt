@@ -16,15 +16,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 class PrintAgentService : Service() {
@@ -33,9 +36,13 @@ class PrintAgentService : Service() {
   private lateinit var jobs: JobStore
   private var worker: Job? = null
   private var socket: WebSocket? = null
+  private val jobWakeups = Channel<Unit>(Channel.CONFLATED)
   private val client = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
   private var printers = emptyMap<String, PrinterConfig>()
   private var refreshHealthAt = 0L
+  @Volatile private var socketOpen = false
+  @Volatile private var socketConnecting = false
+  @Volatile private var socketReconnectScheduled = false
 
   override fun onCreate() {
     super.onCreate()
@@ -67,6 +74,7 @@ class PrintAgentService : Service() {
   }
 
   private fun startWorker() {
+    if (worker?.isActive == true) return
     openWebSocketIfConfigured()
     worker = scope.launch {
       val api = AgentApi(prefs.apiUrl, prefs.tenantId)
@@ -85,7 +93,11 @@ class PrintAgentService : Service() {
           }
           val job = api.claim(prefs.agentId, prefs.agentToken)
           if (job != null) executeJob(api, job)
-          else delay(POLL_INTERVAL_MS)
+          else {
+            // A WebSocket notification wakes this wait immediately. The timeout
+            // keeps the existing HTTP polling path as a reliable fallback.
+            withTimeoutOrNull(POLL_INTERVAL_MS) { jobWakeups.receive() }
+          }
         } catch (error: Exception) {
           safeLog(api, "agent_connection_error", error.message ?: "network error", level = "error")
           delay(RECONNECT_INTERVAL_MS)
@@ -166,24 +178,59 @@ class PrintAgentService : Service() {
 
   private fun openWebSocketIfConfigured() {
     val wsUrl = prefs.websocketUrl
-    if (wsUrl.isBlank()) return
-    socket?.close(1000, "reconnect")
+    if (wsUrl.isBlank() || socketOpen || socketConnecting) return
+    socketConnecting = true
     socket = client.newWebSocket(Request.Builder().url(wsUrl).build(), object : WebSocketListener() {
       override fun onOpen(webSocket: WebSocket, response: Response) {
-        webSocket.send("{\"agentId\":\"${prefs.agentId}\",\"tenantId\":\"${prefs.tenantId}\"}")
+        if (socket !== webSocket) {
+          webSocket.close(1000, "stale connection")
+          return
+        }
+        socketConnecting = false
+        socketOpen = true
+        webSocket.send(JSONObject()
+          .put("type", "hello")
+          .put("agentId", prefs.agentId)
+          .put("agentToken", prefs.agentToken)
+          .put("tenantId", prefs.tenantId)
+          .toString())
       }
 
       override fun onMessage(webSocket: WebSocket, text: String) {
-        // The HTTP poller remains authoritative. A WebSocket notification only wakes it quickly.
-        worker?.cancel()
-        worker = null
-        startWorker()
+        val type = try { JSONObject(text).optString("type") } catch (_: Exception) { "" }
+        if (type == "print_job_available") {
+          // The HTTP claim remains authoritative; this signal only removes the
+          // five-second wait when a new job is queued.
+          jobWakeups.trySend(Unit)
+        }
       }
 
       override fun onFailure(webSocket: WebSocket, throwable: Throwable, response: Response?) {
-        // HTTP polling continues as the required fallback when the socket is unavailable.
+        markSocketClosed(webSocket)
+      }
+
+      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+        markSocketClosed(webSocket)
       }
     })
+  }
+
+  private fun markSocketClosed(webSocket: WebSocket) {
+    if (socket !== webSocket) return
+    socket = null
+    socketOpen = false
+    socketConnecting = false
+    scheduleWebSocketReconnect()
+  }
+
+  private fun scheduleWebSocketReconnect() {
+    if (prefs.websocketUrl.isBlank() || socketReconnectScheduled) return
+    socketReconnectScheduled = true
+    scope.launch {
+      delay(RECONNECT_INTERVAL_MS)
+      socketReconnectScheduled = false
+      if (worker?.isActive == true) openWebSocketIfConfigured()
+    }
   }
 
   private fun createChannel() {
@@ -194,6 +241,9 @@ class PrintAgentService : Service() {
   }
 
   override fun onDestroy() {
+    socketOpen = false
+    socketConnecting = false
+    socketReconnectScheduled = false
     socket?.close(1000, "service stopped")
     scope.cancel()
     super.onDestroy()

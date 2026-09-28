@@ -45,6 +45,12 @@ class MainActivity : AppCompatActivity() {
       text = if (prefs.registered) "重新配置 / 注册" else "注册打印代理"
       setOnClickListener { openRegistrationDialog() }
     })
+    if (prefs.registered) {
+      container.addView(Button(this).apply {
+        text = "更新 WebSocket 地址"
+        setOnClickListener { openWebSocketDialog() }
+      })
+    }
     container.addView(Button(this).apply {
       text = "停止打印服务"
       setOnClickListener { stopService(Intent(this@MainActivity, PrintAgentService::class.java)) }
@@ -99,6 +105,24 @@ class MainActivity : AppCompatActivity() {
         withContext(Dispatchers.Main) { AlertDialog.Builder(this@MainActivity).setMessage(error.message ?: "注册失败").setPositiveButton("确定", null).show() }
       }
     }
+  }
+
+  private fun openWebSocketDialog() {
+    val websocket = EditText(this).apply {
+      hint = "wss://.../ws，留空则只使用轮询"
+      setText(prefs.websocketUrl)
+    }
+    AlertDialog.Builder(this)
+      .setTitle("更新 WebSocket 地址")
+      .setView(websocket)
+      .setNegativeButton("取消", null)
+      .setPositiveButton("保存") { _, _ ->
+        prefs.updateWebsocketUrl(websocket.text.toString())
+        stopService(Intent(this, PrintAgentService::class.java))
+        startAgentService()
+        renderStatus()
+      }
+      .show()
   }
 
   private fun startAgentService() {

@@ -77,6 +77,13 @@ const UI = {
   urgeConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u91cd\u65b0\u53d1\u9001\u7ed9\u540e\u53a8\u6253\u5370\u5417',
   refundConfirmTitle: '\u786e\u8ba4\u9000\u83dc',
   refundConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u4ece\u8ba2\u5355\u4e2d\u79fb\u9664\u5417',
+  refundQuantityTitle: '\u9000\u83dc\u6570\u91cf',
+  refundQuantityHint: '\u672c\u684c\u540c\u83dc\u54c1\u5408\u8ba1\uff0c\u6700\u591a\u53ef\u9000',
+  refundQuantityUnit: '\u4efd',
+  refundQuantityPlaceholder: '\u8bf7\u8f93\u5165\u9000\u83dc\u6570\u91cf',
+  refundQuantityInvalid: '\u8bf7\u8f93\u5165 1 \u5230\u53ef\u9000\u6570\u91cf\u4e4b\u95f4\u7684\u6574\u6570',
+  refundSameDishOnly: '\u4e00\u6b21\u53ea\u80fd\u9000\u540c\u4e00\u79cd\u83dc\u54c1',
+  refundUnavailable: '\u6ca1\u6709\u53ef\u9000\u7684\u83dc\u54c1',
   sendSuccess: '\u5df2\u53d1\u9001\u540e\u53a8',
   checkoutSuccess: '\u5df2\u7ed3\u8d26',
   checkoutConfirmTitle: '\u786e\u8ba4\u7ed3\u8d26',
@@ -396,6 +403,11 @@ Page({
     editDishTitle: '',
     editDishOptionsInput: '',
     editDishRemark: '',
+    showRefundDialog: false,
+    refundDishTitle: '',
+    refundMaxCount: 0,
+    refundQuantity: '1',
+    submittingRefund: false,
     checkingOut: false,
     printingPrebill: false
   },
@@ -1049,7 +1061,7 @@ Page({
       return
     }
     if (action === UI.refundDish) {
-      await this.refundSelectedDish()
+      this.openRefundDishDialog()
       return
     }
     if (action === UI.giftDish) {
@@ -1270,7 +1282,42 @@ Page({
     }
   },
 
-  async refundSelectedDish() {
+  getRefundDishKey(dish) {
+    const source = dish || {}
+    const dishIdentity = String(source.dishId || source.id || source.dishName || source.name || '').trim()
+    const tags = (Array.isArray(source.tags) ? source.tags : [])
+      .map(item => String(item || '').trim())
+      .filter(Boolean)
+      .sort()
+      .join('|')
+    const remark = String(source.remark || source.note || '').trim()
+    const price = getNumber(source.price)
+    const giftState = source.isGift === true || source.giftDish === true ? 'gift' : 'sale'
+    return [dishIdentity, tags, remark, price, giftState].join('\u0001')
+  },
+
+  getRefundCandidates(referenceDish) {
+    const referenceKey = this.getRefundDishKey(referenceDish)
+    const candidates = []
+
+    ;(this.data.billGroups || []).forEach((group, groupIndex) => {
+      if (group.isPaid === true) return
+      ;(group.goods || []).forEach((dish, dishIndex) => {
+        const count = Math.floor(Number(dish && dish.count || 0))
+        if (count <= 0 || this.getRefundDishKey(dish) !== referenceKey) return
+        candidates.push({
+          orderId: group.id,
+          dishIndex,
+          count,
+          groupIndex
+        })
+      })
+    })
+
+    return candidates
+  },
+
+  openRefundDishDialog() {
     const selectedItems = this.getSelectedDishItems()
     if (selectedItems.length === 0) {
       wx.showToast({
@@ -1280,32 +1327,116 @@ Page({
       return
     }
 
-    const confirmed = await new Promise(resolve => {
-      wx.showModal({
-        title: UI.refundConfirmTitle,
-        content: selectedItems.length > 1
-          ? `\u786e\u5b9a\u5c06\u9009\u4e2d\u7684${selectedItems.length}\u4e2a\u83dc\u54c1\u4ece\u8ba2\u5355\u4e2d\u79fb\u9664\u5417`
-          : UI.refundConfirmContent,
-        confirmText: UI.refundDish,
-        cancelText: '\u53d6\u6d88',
-        success: res => resolve(res.confirm === true),
-        fail: () => resolve(false)
+    const selectedDetails = selectedItems
+      .map(item => this.getDishByRecord(item))
+      .filter(Boolean)
+    const referenceDish = selectedDetails[0] && selectedDetails[0].dish
+    if (!referenceDish) {
+      wx.showToast({
+        title: UI.refundUnavailable,
+        icon: 'none'
       })
+      return
+    }
+
+    const referenceKey = this.getRefundDishKey(referenceDish)
+    const hasDifferentDish = selectedDetails.some(item => this.getRefundDishKey(item.dish) !== referenceKey)
+    if (hasDifferentDish) {
+      wx.showToast({
+        title: UI.refundSameDishOnly,
+        icon: 'none'
+      })
+      return
+    }
+
+    const candidates = this.getRefundCandidates(referenceDish)
+    const refundMaxCount = candidates.reduce((sum, item) => sum + item.count, 0)
+    if (refundMaxCount <= 0) {
+      wx.showToast({
+        title: UI.refundUnavailable,
+        icon: 'none'
+      })
+      return
+    }
+
+    this.refundCandidates = candidates
+    this.setData({
+      showRefundDialog: true,
+      refundDishTitle: referenceDish.dishName || referenceDish.name || '',
+      refundMaxCount,
+      refundQuantity: '1'
     })
-    if (!confirmed) return
+  },
+
+  closeRefundDishDialog() {
+    if (this.data.submittingRefund) return
+    this.refundCandidates = []
+    this.setData({
+      showRefundDialog: false,
+      refundDishTitle: '',
+      refundMaxCount: 0,
+      refundQuantity: '1'
+    })
+  },
+
+  stopRefundDishDialogTap() {},
+
+  onRefundQuantityInput(event) {
+    this.setData({
+      refundQuantity: event.detail.value
+    })
+  },
+
+  async confirmRefundDishDialog() {
+    if (this.data.submittingRefund) return
+    const refundQuantity = Number(this.data.refundQuantity)
+    const refundMaxCount = Number(this.data.refundMaxCount || 0)
+    if (!Number.isInteger(refundQuantity) || refundQuantity < 1 || refundQuantity > refundMaxCount) {
+      wx.showToast({
+        title: UI.refundQuantityInvalid,
+        icon: 'none'
+      })
+      return
+    }
+
+    let remaining = refundQuantity
+    const items = []
+    ;(this.refundCandidates || []).forEach(candidate => {
+      if (remaining <= 0) return
+      const count = Math.min(candidate.count, remaining)
+      if (count <= 0) return
+      items.push({
+        orderId: candidate.orderId,
+        dishIndex: candidate.dishIndex,
+        count
+      })
+      remaining -= count
+    })
+
+    if (remaining > 0 || items.length === 0) {
+      wx.showToast({
+        title: UI.refundQuantityInvalid,
+        icon: 'none'
+      })
+      return
+    }
 
     try {
+      this.setData({ submittingRefund: true })
       await apiClient.call('admin.table.refundDishes', {
-        items: selectedItems.map(item => ({
-          orderId: item.groupId,
-          dishIndex: item.dishIndex
-        }))
+        items
       })
       wx.showToast({
-        title: UI.refundSuccess,
+        title: `${refundQuantity}\u4efd${UI.refundSuccess}`,
         icon: 'success'
       })
+      this.refundCandidates = []
       this.setData({
+        submittingRefund: false,
+        showRefundDialog: false,
+        refundDishTitle: '',
+        refundMaxCount: 0,
+        refundQuantity: '1',
         selectedDishRowId: '',
         selectedDishName: '',
         selectedDishIndex: -1,
@@ -1317,6 +1448,7 @@ Page({
       await this.loadDetail(true)
     } catch (err) {
       console.error('refund selected dish failed', err)
+      this.setData({ submittingRefund: false })
       wx.showToast({
         title: err.message || '\u9000\u83dc\u5931\u8d25',
         icon: 'none'

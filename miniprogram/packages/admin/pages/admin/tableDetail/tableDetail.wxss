@@ -641,6 +641,7 @@ page {
 .discount-mask,
 .people-mask,
 .edit-dish-mask,
+.refund-dish-mask,
 .merge-mask {
   position: fixed;
   left: 0;
@@ -673,6 +674,15 @@ page {
   box-sizing: border-box;
 }
 
+.refund-dish-dialog {
+  width: 300rpx;
+  padding: 14rpx;
+  border-radius: 14rpx;
+  background: #FFFFFF;
+  box-shadow: 0 12rpx 28rpx rgba(58, 36, 24, 0.22);
+  box-sizing: border-box;
+}
+
 .discount-title,
 .people-title {
   color: #2C1A12;
@@ -688,6 +698,13 @@ page {
   text-align: center;
 }
 
+.refund-dish-title {
+  color: #2C1A12;
+  font-size: 14rpx;
+  font-weight: 900;
+  text-align: center;
+}
+
 .edit-dish-name {
   margin-top: 5rpx;
   color: rgba(58, 36, 24, 0.58);
@@ -697,6 +714,25 @@ page {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.refund-dish-name {
+  margin-top: 5rpx;
+  color: rgba(58, 36, 24, 0.7);
+  font-size: 10rpx;
+  font-weight: 900;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refund-dish-hint {
+  margin-top: 4rpx;
+  color: rgba(58, 36, 24, 0.48);
+  font-size: 8rpx;
+  font-weight: 800;
+  text-align: center;
 }
 
 .edit-dish-form {
@@ -738,6 +774,18 @@ page {
   box-sizing: border-box;
 }
 
+.refund-dish-input {
+  height: 30rpx;
+  margin-top: 10rpx;
+  padding: 0 9rpx;
+  border-radius: 8rpx;
+  background: #FFF7EC;
+  color: #2C1A12;
+  font-size: 11rpx;
+  font-weight: 900;
+  box-sizing: border-box;
+}
+
 .discount-actions,
 .people-actions {
   margin-top: 14rpx;
@@ -747,6 +795,13 @@ page {
 }
 
 .edit-dish-actions {
+  margin-top: 12rpx;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8rpx;
+}
+
+.refund-dish-actions {
   margin-top: 12rpx;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -774,6 +829,16 @@ page {
   font-weight: 900;
 }
 
+.refund-dish-action {
+  height: 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8rpx;
+  font-size: 10rpx;
+  font-weight: 900;
+}
+
 .discount-action.cancel,
 .people-action.cancel {
   color: #6B4B34;
@@ -781,6 +846,11 @@ page {
 }
 
 .edit-dish-action.cancel {
+  color: #6B4B34;
+  background: #FFF7EC;
+}
+
+.refund-dish-action.cancel {
   color: #6B4B34;
   background: #FFF7EC;
 }
@@ -794,6 +864,15 @@ page {
 .edit-dish-action.confirm {
   color: #FFF7EC;
   background: #B15B18;
+}
+
+.refund-dish-action.confirm {
+  color: #FFF7EC;
+  background: #B15B18;
+}
+
+.refund-dish-action-disabled {
+  opacity: 0.56;
 }
 
 .merge-dialog {

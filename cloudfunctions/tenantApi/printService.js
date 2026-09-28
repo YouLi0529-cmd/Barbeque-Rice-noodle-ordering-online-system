@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const https = require('https')
 
 const PRINT_COLLECTIONS = [
   'printers',
@@ -29,6 +30,7 @@ const ACTIVE_JOB_STATUS = [JOB_STATUS.queued, JOB_STATUS.claimed, JOB_STATUS.sen
 const ONLINE_WINDOW_MS = 90 * 1000
 const PRINTER_HEALTH_WINDOW_MS = 2 * 60 * 1000
 const ARCHIVE_AFTER_DAYS = 90
+const PRINT_PUSH_TIMEOUT_MS = 800
 
 const KITCHEN_TICKET_TYPES = new Set([
   'kitchen_order',
@@ -45,6 +47,54 @@ function isEmptyValue(value) {
   if (typeof value === 'string') return value.trim() === ''
   if (Array.isArray(value)) return value.length === 0
   return false
+}
+
+function notifyPrintPushGateway(job) {
+  const endpoint = String(process.env.PRINT_PUSH_GATEWAY_URL || '').trim()
+  const secret = String(process.env.PRINT_PUSH_GATEWAY_SECRET || '').trim()
+  if (!endpoint || !secret || !job || !job.storeId) return Promise.resolve({ skipped: true })
+
+  let target
+  try {
+    target = new URL(endpoint)
+  } catch (_) {
+    return Promise.resolve({ skipped: true })
+  }
+  if (target.protocol !== 'https:') return Promise.resolve({ skipped: true })
+
+  const body = JSON.stringify({
+    storeId: job.storeId,
+    jobId: job._id,
+    printerId: job.printerId || '',
+    ticketType: job.ticketType || ''
+  })
+
+  return new Promise((resolve, reject) => {
+    const request = https.request({
+      hostname: target.hostname,
+      port: target.port || 443,
+      path: `${target.pathname}${target.search}`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'X-Print-Push-Secret': secret
+      }
+    }, response => {
+      response.resume()
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        resolve({ delivered: true })
+        return
+      }
+      reject(new Error(`print push gateway http ${response.statusCode}`))
+    })
+    request.setTimeout(PRINT_PUSH_TIMEOUT_MS, () => {
+      request.destroy(new Error('print push gateway timeout'))
+    })
+    request.on('error', reject)
+    request.write(body)
+    request.end()
+  })
 }
 
 function valueOf(item, keys) {
@@ -1279,6 +1329,13 @@ function createPrintService({ db, _, defaultTenantId }) {
       error: ''
     }
     await db.collection('printJobs').doc(jobId).set({ data: documentData(job) })
+    try {
+      // This only wakes an already-connected tablet. Claiming the job remains
+      // authenticated and transactional through the tenant API.
+      await notifyPrintPushGateway(job)
+    } catch (error) {
+      console.warn('print push gateway notify failed', error.message || error)
+    }
     return { job, created: true }
   }
 
@@ -2372,6 +2429,26 @@ function createPrintService({ db, _, defaultTenantId }) {
     return { success: true }
   }
 
+  async function agentWebsocketAuth(payload) {
+    const agent = await authenticateAgent(payload)
+    if (!agent) return { success: false, code: 'AGENT_AUTH_REQUIRED', message: 'invalid agent token' }
+    await db.collection('printerAgents').doc(agent._id).update({
+      data: {
+        status: 'online',
+        lastSeenAt: now(),
+        updateTime: now()
+      }
+    })
+    return {
+      success: true,
+      data: {
+        agentId: agent._id,
+        storeId: agent.storeId,
+        name: agent.name || ''
+      }
+    }
+  }
+
   async function agentBootstrap(payload) {
     const agent = await authenticateAgent(payload)
     if (!agent) return { success: false, code: 'AGENT_AUTH_REQUIRED', message: 'invalid agent token' }
@@ -2680,6 +2757,7 @@ function createPrintService({ db, _, defaultTenantId }) {
   async function handleAgentAction(action, payload) {
     if (action === 'print.agent.register') return agentRegister(payload)
     if (action === 'print.agent.heartbeat') return agentHeartbeat(payload)
+    if (action === 'print.agent.websocketAuth') return agentWebsocketAuth(payload)
     if (action === 'print.agent.bootstrap') return agentBootstrap(payload)
     if (action === 'print.agent.claim') return agentClaim(payload)
     if (action === 'print.agent.start') return agentStart(payload)

@@ -298,6 +298,27 @@ async function exchangeWechatPhoneNumber(code) {
   return data.phone_info || data.phoneInfo || {}
 }
 
+function getPhoneAuthorizationFailure(err) {
+  const rawCode = err && (err.errCode || err.errcode || err.code)
+  const errCode = Number(rawCode)
+  const messageByCode = {
+    40001: '\u624b\u673a\u53f7\u670d\u52a1\u51ed\u8bc1\u5df2\u5931\u6548\uff0c\u8bf7\u8054\u7cfb\u5546\u5bb6\u68c0\u67e5\u914d\u7f6e',
+    40013: '\u5c0f\u7a0b\u5e8f\u914d\u7f6e\u4e0d\u5339\u914d\uff0c\u8bf7\u8054\u7cfb\u5546\u5bb6',
+    40029: '\u624b\u673a\u53f7\u6388\u6743\u5df2\u8fc7\u671f\uff0c\u8bf7\u91cd\u65b0\u70b9\u51fb\u6388\u6743',
+    40125: '\u5c0f\u7a0b\u5e8f AppID \u6216\u670d\u52a1\u5bc6\u94a5\u914d\u7f6e\u5f02\u5e38',
+    42001: '\u5fae\u4fe1\u670d\u52a1\u51ed\u8bc1\u5df2\u8fc7\u671f\uff0c\u8bf7\u91cd\u8bd5',
+    45011: '\u64cd\u4f5c\u8fc7\u4e8e\u9891\u7e41\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5',
+    48001: '\u5f53\u524d\u5c0f\u7a0b\u5e8f\u6682\u672a\u5f00\u901a\u624b\u673a\u53f7\u6388\u6743',
+    61003: '\u5f53\u524d\u5c0f\u7a0b\u5e8f\u7f3a\u5c11\u624b\u673a\u53f7\u63a5\u53e3\u6743\u9650'
+  }
+
+  return {
+    errCode: Number.isFinite(errCode) ? errCode : 0,
+    providerMessage: String(err && err.message || ''),
+    message: messageByCode[errCode] || '\u83b7\u53d6\u624b\u673a\u53f7\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5'
+  }
+}
+
 function buildResponse(payload, statusCode = 200) {
   return {
     statusCode,
@@ -732,6 +753,31 @@ async function getAuthSession(payload) {
   }
 }
 
+async function refreshAuthSessionProfile(payload, auth) {
+  if (!auth || !auth.success || !auth.data || auth.data.userId || !auth.data._id) {
+    return auth
+  }
+
+  // Phone authorization can update the session in a different warm function
+  // instance. When the cached version still has no userId, refresh once before
+  // treating the visitor as an unprofiled user.
+  const latestRes = await db.collection('tenantSession').doc(auth.data._id).get()
+  const latestSession = latestRes.data
+  if (!latestSession || isAuthSessionExpired(latestSession)) {
+    return auth
+  }
+
+  const refreshedAuth = {
+    success: true,
+    data: {
+      ...auth.data,
+      ...latestSession
+    }
+  }
+  cacheAuthSession(getTenantId(payload), getAuthToken(payload), refreshedAuth.data)
+  return refreshedAuth
+}
+
 function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100
 }
@@ -801,8 +847,9 @@ async function getCurrentMember(auth) {
 }
 
 async function requireCurrentMember(payload) {
-  const auth = await getAuthSession(payload)
+  let auth = await getAuthSession(payload)
   if (!auth.success) return auth
+  auth = await refreshAuthSessionProfile(payload, auth)
 
   const user = await getCurrentMember(auth)
   if (!user) {
@@ -1007,8 +1054,9 @@ async function buildServerOrderGoods(transaction, orderGoods, options = {}) {
 }
 
 async function createOrder(payload) {
-  const auth = await getAuthSession(payload)
+  let auth = await getAuthSession(payload)
   if (!auth.success) return auth
+  auth = await refreshAuthSessionProfile(payload, auth)
 
   const openid = auth.data.openid
   const orderScene = payload.orderScene === 'camping' || payload.orderType === 'camping'
@@ -1122,7 +1170,13 @@ async function createOrder(payload) {
       parentOrderId: isAddOnOrder ? parentOrderId : '',
       rootOrderId,
       addOnIndex: isAddOnOrder ? addOnIndex : 0,
-      orderCardTitle: isAddOnOrder ? `加菜单${addOnIndex}` : (payload.orderCardTitle || '首单'),
+      // The client can retain an old add-on card title after a table has been
+      // cleared or a shared-cart session is recreated. The server-side add-on
+      // decision above is authoritative, so a new dine-in root order is always
+      // named as the first order.
+      orderCardTitle: isAddOnOrder
+        ? `加菜单${addOnIndex}`
+        : (orderScene === 'dineIn' ? '首单' : (payload.orderCardTitle || '首单')),
       goods: priceResult.goods,
       totalPrice: priceResult.totalPrice,
       finalPrice: priceResult.finalPrice,
@@ -1293,8 +1347,9 @@ async function adminCreateOfflineOrder(payload) {
 }
 
 async function getCurrentUser(payload) {
-  const auth = await getAuthSession(payload)
+  let auth = await getAuthSession(payload)
   if (!auth.success) return auth
+  auth = await refreshAuthSessionProfile(payload, auth)
 
   return {
     success: true,
@@ -1724,18 +1779,20 @@ async function getPhoneNumber(payload) {
       phoneNumber
     }
   } catch (err) {
-    const errCode = err && (err.errCode || err.errcode || err.code)
+    const failure = getPhoneAuthorizationFailure(err)
     console.error('phone.getNumber failed', {
-      errCode,
+      errCode: failure.errCode,
       message: err && err.message
     })
 
     return {
       success: false,
       code: 'PHONE_NUMBER_FAILED',
-      message: Number(errCode) === 40029
-        ? '手机号授权已过期，请重新点击授权'
-        : '获取手机号失败，请重试'
+      message: failure.message,
+      data: {
+        wechatErrCode: failure.errCode,
+        wechatMessage: failure.providerMessage
+      }
     }
   }
 }
@@ -1776,17 +1833,19 @@ async function authorizeUserPhone(payload) {
       data: verifiedSession
     })
   } catch (err) {
-    const errCode = err && (err.errCode || err.errcode || err.code)
+    const failure = getPhoneAuthorizationFailure(err)
     console.error('user.authorizePhone failed', {
-      errCode,
+      errCode: failure.errCode,
       message: err && err.message
     })
     return {
       success: false,
       code: 'PHONE_NUMBER_FAILED',
-      message: Number(errCode) === 40029
-        ? 'phone authorization expired, please authorize again'
-        : 'failed to get phone number, please try again'
+      message: failure.message,
+      data: {
+        wechatErrCode: failure.errCode,
+        wechatMessage: failure.providerMessage
+      }
     }
   }
 }
@@ -2345,6 +2404,192 @@ function isAdminPaidOrder(order) {
   )
 }
 
+const BUSINESS_STATS_RANGE_KEYS = ['today', '7d', '14d', '1m', '3m']
+
+function normalizeBusinessStatsRange(value) {
+  const range = String(value || '').trim()
+  return BUSINESS_STATS_RANGE_KEYS.includes(range) ? range : 'today'
+}
+
+function getBusinessStatsRangeStart(range, now = new Date()) {
+  const normalized = normalizeBusinessStatsRange(range)
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+
+  if (normalized === '7d') start.setDate(start.getDate() - 6)
+  if (normalized === '14d') start.setDate(start.getDate() - 13)
+  if (normalized === '1m') start.setMonth(start.getMonth() - 1)
+  if (normalized === '3m') start.setMonth(start.getMonth() - 3)
+
+  return start
+}
+
+function getBusinessStatsPaidTime(order = {}) {
+  return getTimeValue(
+    order.checkoutAt ||
+    order.paidAt ||
+    order.payTime ||
+    order.finishTime ||
+    order.completedAt ||
+    order.updateTime
+  )
+}
+
+function getBusinessStatsGroupKey(order = {}) {
+  const scene = isCampingOrder(order) ? 'camping' : 'dineIn'
+  const tableGroupId = String(order.tableGroupId || '').trim()
+  if (scene === 'dineIn' && tableGroupId) return `table-group:${tableGroupId}`
+  return `${scene}:${String(order.rootOrderId || order._id || '')}`
+}
+
+function getBusinessStatsGroupRevenue(orders = []) {
+  const storedAmounts = orders
+    .map(order => {
+      const value = order.checkoutReceivable !== undefined && order.checkoutReceivable !== ''
+        ? order.checkoutReceivable
+        : order.receivedAmount
+      return Number(value)
+    })
+    .filter(amount => Number.isFinite(amount) && amount >= 0)
+
+  if (storedAmounts.length > 0) {
+    // A table checkout stores the same group receivable on every add-on card.
+    return roundMoney(Math.max(...storedAmounts))
+  }
+
+  const total = roundMoney(orders.reduce((sum, order) => {
+    return sum + Number(order.finalPrice || order.totalPrice || 0)
+  }, 0))
+  const discountOrder = orders.find(order => {
+    return (order.discountValue !== undefined && order.discountValue !== '') ||
+      (order.directReduceValue !== undefined && order.directReduceValue !== '') ||
+      order.discountType
+  }) || {}
+  const discountType = String(discountOrder.discountType || '')
+  const discountValue = Number(discountOrder.discountValue)
+  const directReduceValue = Number(discountOrder.directReduceValue)
+  const afterDiscount = (discountType === 'discount' || discountType === 'reduce') &&
+    Number.isFinite(discountValue) && discountValue >= 0 && discountValue <= 10
+    ? roundMoney(total * discountValue / 10)
+    : total
+
+  return Number.isFinite(directReduceValue) && directReduceValue >= 0
+    ? roundMoney(Math.max(0, afterDiscount - directReduceValue))
+    : afterDiscount
+}
+
+function buildBusinessStatsSnapshot(orders = [], range) {
+  const startAt = getBusinessStatsRangeStart(range).getTime()
+  const groupMap = {}
+
+  orders.forEach(order => {
+    if (!order || !isAdminPaidOrder(order) || order.deleted === true) return
+    const paidAt = getBusinessStatsPaidTime(order)
+    if (!paidAt || paidAt < startAt) return
+
+    const key = getBusinessStatsGroupKey(order)
+    if (!key || key.endsWith(':')) return
+    if (!groupMap[key]) {
+      groupMap[key] = {
+        key,
+        scene: isCampingOrder(order) ? 'camping' : 'dineIn',
+        paidAt,
+        orders: []
+      }
+    }
+    groupMap[key].paidAt = Math.max(groupMap[key].paidAt, paidAt)
+    groupMap[key].orders.push(order)
+  })
+
+  const dishMap = {}
+  const groups = Object.keys(groupMap).map(key => groupMap[key])
+  const revenue = roundMoney(groups.reduce((sum, group) => {
+    group.orders.forEach(order => {
+      ;(Array.isArray(order.goods) ? order.goods : []).forEach(item => {
+        const count = Math.max(0, Number(item && item.count || 0))
+        if (!count) return
+        const name = String(item.name || item.dishName || '\u672a\u547d\u540d\u83dc\u54c1').trim() || '\u672a\u547d\u540d\u83dc\u54c1'
+        const price = Number(item.finalPrice != null ? item.finalPrice : (item.price != null ? item.price : item.originalPrice)) || 0
+        const categoryName = String(item.categoryName || order.categoryName || '').trim()
+        const dishKey = String(item.dishId || item._id || `${name}|${price}|${categoryName}`)
+        if (!dishMap[dishKey]) {
+          dishMap[dishKey] = {
+            id: dishKey,
+            name,
+            categoryName,
+            quantity: 0,
+            salesAmount: 0
+          }
+        }
+        dishMap[dishKey].quantity += count
+        dishMap[dishKey].salesAmount = roundMoney(dishMap[dishKey].salesAmount + price * count)
+      })
+    })
+    return sum + getBusinessStatsGroupRevenue(group.orders)
+  }, 0))
+
+  const dishes = Object.keys(dishMap)
+    .map(key => dishMap[key])
+    .sort((left, right) => {
+      if (right.quantity !== left.quantity) return right.quantity - left.quantity
+      if (right.salesAmount !== left.salesAmount) return right.salesAmount - left.salesAmount
+      return left.name.localeCompare(right.name)
+    })
+
+  return {
+    range: normalizeBusinessStatsRange(range),
+    startAt,
+    revenue,
+    settledTableCount: groups.filter(group => group.scene === 'dineIn').length,
+    settledOutdoorOrderCount: groups.filter(group => group.scene === 'camping').length,
+    dishes
+  }
+}
+
+async function adminGetBusinessStats(payload) {
+  const revenueRange = normalizeBusinessStatsRange(payload.revenueRange)
+  const dishRange = normalizeBusinessStatsRange(payload.dishRange)
+  const earliestStart = Math.min(
+    getBusinessStatsRangeStart(revenueRange).getTime(),
+    getBusinessStatsRangeStart(dishRange).getTime()
+  )
+  const tenantId = getTenantId(payload)
+
+  await ensureCollection('order')
+  const query = {
+    type: 'order',
+    storeId: tenantId,
+    status: _.in(['paid', 'completed']),
+    checkoutAt: _.gte(new Date(earliestStart)),
+    deleted: _.neq(true)
+  }
+  const pageSize = 100
+  const maxOrders = 1000
+  const orders = []
+
+  for (let page = 0; page < maxOrders / pageSize; page += 1) {
+    const res = await db.collection('order')
+      .where(query)
+      .orderBy('checkoutAt', 'desc')
+      .skip(page * pageSize)
+      .limit(pageSize)
+      .get()
+    const pageData = res.data || []
+    orders.push(...pageData)
+    if (pageData.length < pageSize) break
+  }
+
+  return {
+    success: true,
+    data: {
+      revenue: buildBusinessStatsSnapshot(orders, revenueRange),
+      dishes: buildBusinessStatsSnapshot(orders, dishRange),
+      fetchedOrderCount: orders.length,
+      isTruncated: orders.length === maxOrders
+    }
+  }
+}
+
 function isAdminPreparingOrder(order) {
   const status = String(order && order.status || '')
   return order && (
@@ -2634,6 +2879,11 @@ function getAdminOrderTitle(order, index) {
   const rawTitle = String(order.orderCardTitle || '').trim()
   const addOnIndex = Number(order.addOnIndex || index)
 
+  // Older clients could submit a root order with a stale "加菜单" title even
+  // though the backend had correctly rejected the stale parent order ID.
+  if (order && order.isAddOnOrder !== true && (/^加菜单\d+$/i.test(rawTitle) || /^Add-on\s+\d+/i.test(rawTitle))) {
+    return '首单'
+  }
   if (rawTitle === 'First order' || rawTitle === '第一单') return '首单'
   if (/^Add-on\s+\d+/i.test(rawTitle)) {
     const match = rawTitle.match(/\d+/)
@@ -2660,6 +2910,7 @@ function buildAdminBillGroups(orders) {
       rootOrderId: order.rootOrderId || order._id,
       title: getAdminOrderTitle(order, index),
       status: order.status || '',
+      isPaid: isAdminPaidOrder(order),
       statusText: getAdminOrderStatusText(order),
       createTime: order.createTime,
       createTimeValue: getTimeValue(order.createTime),
@@ -3877,23 +4128,118 @@ async function adminUrgeKitchenItems(payload) {
     }
   }
 }
-async function refundOrderDishes(orderId, dishIndexes, payload = {}) {
+function buildRefundRequests(dishRequests, goods) {
+  const requests = {}
+  const invalidIndexes = {}
+  const source = Array.isArray(dishRequests) ? dishRequests : []
+
+  source.forEach(request => {
+    const isObject = request && typeof request === 'object'
+    const index = Math.floor(Number(isObject ? (request.dishIndex !== undefined ? request.dishIndex : request.index) : request))
+    if (!Number.isInteger(index) || index < 0) return
+
+    const hasExplicitCount = isObject && (
+      Object.prototype.hasOwnProperty.call(request, 'count') ||
+      Object.prototype.hasOwnProperty.call(request, 'refundCount') ||
+      Object.prototype.hasOwnProperty.call(request, 'quantity')
+    )
+    const rawCount = request && typeof request === 'object'
+      ? (request.count !== undefined ? request.count : request.refundCount !== undefined ? request.refundCount : request.quantity)
+      : undefined
+    const count = hasExplicitCount
+      ? Number(rawCount)
+      : Math.floor(Number(goods[index] && goods[index].count || 0))
+
+    if (!Number.isInteger(count) || count < 1) {
+      invalidIndexes[index] = true
+      return
+    }
+    requests[index] = Number(requests[index] || 0) + count
+  })
+
+  const indexes = Object.keys(requests)
+    .map(value => Math.floor(Number(value)))
+    .filter(index => Number.isInteger(index) && index >= 0)
+    .sort((a, b) => a - b)
+
+  const invalidCountIndex = Object.keys(invalidIndexes)
+    .map(value => Math.floor(Number(value)))
+    .find(index => Number.isInteger(index) && index >= 0)
+  if (invalidCountIndex !== undefined) {
+    return {
+      success: false,
+      code: 'REFUND_COUNT_INVALID',
+      message: 'refund count invalid'
+    }
+  }
+
+  if (indexes.length === 0) {
+    return {
+      success: false,
+      code: 'DISH_INDEX_REQUIRED',
+      message: 'dish index required'
+    }
+  }
+
+  const missingIndex = indexes.find(index => !goods[index])
+  if (missingIndex !== undefined) {
+    return {
+      success: false,
+      code: 'DISH_NOT_FOUND',
+      message: 'dish not found'
+    }
+  }
+
+  const invalidRequestIndex = indexes.find(index => !Number.isInteger(requests[index]) || requests[index] < 1)
+  if (invalidRequestIndex !== undefined) {
+    return {
+      success: false,
+      code: 'REFUND_COUNT_INVALID',
+      message: 'refund count invalid'
+    }
+  }
+
+  const excessiveIndex = indexes.find(index => requests[index] > Math.floor(Number(goods[index].count || 0)))
+  if (excessiveIndex !== undefined) {
+    return {
+      success: false,
+      code: 'REFUND_COUNT_EXCEEDED',
+      message: 'refund count exceeds ordered quantity'
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      indexes,
+      requests
+    }
+  }
+}
+
+function getDishSubtotal(item, count) {
+  if (item && item.subtotal !== undefined) {
+    const originalCount = Math.floor(Number(item.count || 0))
+    if (originalCount > 0) {
+      return roundMoney(Number(item.subtotal || 0) * count / originalCount)
+    }
+  }
+  return roundMoney(Number(item && item.price || 0) * count)
+}
+
+function getDishOriginalSubtotal(item, count) {
+  if (!item || item.originalSubtotal === undefined) return undefined
+  const originalCount = Math.floor(Number(item.count || 0))
+  if (originalCount <= 0) return undefined
+  return roundMoney(Number(item.originalSubtotal || 0) * count / originalCount)
+}
+
+async function refundOrderDishes(orderId, dishRequests, payload = {}) {
   if (!orderId) {
     return {
       success: false,
       code: 'ORDER_ID_REQUIRED',
       message: 'order id required'
-    }
-  }
-  const validIndexes = Array.from(new Set((dishIndexes || []).map(index => Math.floor(Number(index)))))
-    .filter(index => Number.isInteger(index) && index >= 0)
-    .sort((a, b) => a - b)
-
-  if (validIndexes.length === 0) {
-    return {
-      success: false,
-      code: 'DISH_INDEX_REQUIRED',
-      message: 'dish index required'
     }
   }
 
@@ -3915,20 +4261,46 @@ async function refundOrderDishes(orderId, dishIndexes, payload = {}) {
   }
 
   const goods = Array.isArray(order.goods) ? order.goods : []
-  const missingIndex = validIndexes.find(index => !goods[index])
-  if (missingIndex !== undefined) {
-    return {
-      success: false,
-      code: 'DISH_NOT_FOUND',
-      message: 'dish not found'
-    }
-  }
+  const requestResult = buildRefundRequests(dishRequests, goods)
+  if (!requestResult.success) return requestResult
 
-  const indexSet = new Set(validIndexes)
-  const removedItems = goods
-    .map((item, index) => ({ item, index }))
-    .filter(entry => indexSet.has(entry.index))
-  const nextGoods = goods.filter((_, index) => !indexSet.has(index))
+  const { indexes: validIndexes, requests } = requestResult.data
+  const refundTime = new Date()
+  const removedItems = []
+  const nextGoods = goods.reduce((result, item, index) => {
+    const refundCount = requests[index] || 0
+    if (refundCount <= 0) {
+      result.push(item)
+      return result
+    }
+
+    const originalCount = Math.floor(Number(item.count || 0))
+    const remainingCount = originalCount - refundCount
+    const refundedItem = {
+      ...item,
+      count: refundCount,
+      subtotal: getDishSubtotal(item, refundCount)
+    }
+    const refundedOriginalSubtotal = getDishOriginalSubtotal(item, refundCount)
+    if (refundedOriginalSubtotal !== undefined) {
+      refundedItem.originalSubtotal = refundedOriginalSubtotal
+    }
+    removedItems.push({ item: refundedItem, index, count: refundCount })
+
+    if (remainingCount > 0) {
+      const nextItem = {
+        ...item,
+        count: remainingCount,
+        subtotal: getDishSubtotal(item, remainingCount)
+      }
+      const nextOriginalSubtotal = getDishOriginalSubtotal(item, remainingCount)
+      if (nextOriginalSubtotal !== undefined) {
+        nextItem.originalSubtotal = nextOriginalSubtotal
+      }
+      result.push(nextItem)
+    }
+    return result
+  }, [])
   const totalPrice = roundMoney(nextGoods.reduce((sum, item) => {
     const count = Number(item.count || 0)
     const subtotal = item.subtotal !== undefined
@@ -3942,11 +4314,9 @@ async function refundOrderDishes(orderId, dishIndexes, payload = {}) {
     dishIndex: entry.index,
     dishId: entry.item.dishId || '',
     dishName: entry.item.dishName || entry.item.name || '',
-    count: Number(entry.item.count || 0),
-    subtotal: roundMoney(entry.item.subtotal !== undefined
-      ? entry.item.subtotal
-      : Number(entry.item.price || 0) * Number(entry.item.count || 0)),
-    createTime: new Date()
+    count: entry.count,
+    subtotal: roundMoney(entry.item.subtotal || 0),
+    createTime: refundTime
   }))
   const updateData = {
     goods: nextGoods,
@@ -3976,7 +4346,7 @@ async function refundOrderDishes(orderId, dishIndexes, payload = {}) {
       order,
       dishEntries: refundEntries,
       kind: 'refund',
-      eventKey: `refund:${orderId}:${validIndexes.join(',')}`,
+      eventKey: `refund:${orderId}:${refundTime.getTime()}:${validIndexes.map(index => `${index}x${requests[index]}`).join(',')}`,
       reason: String(payload.refundReason || '').trim()
     })
     refundPrintJobs = (kitchenResult.results || []).map(result => result.jobId).filter(Boolean)
@@ -4000,6 +4370,7 @@ async function refundOrderDishes(orderId, dishIndexes, payload = {}) {
       orderId,
       removed: removedItems.map(entry => entry.item),
       removedCount: removedItems.length,
+      removedQuantity: removedItems.reduce((sum, entry) => sum + Number(entry.count || 0), 0),
       totalPrice,
       remainingCount: nextGoods.reduce((sum, item) => sum + Number(item.count || 0), 0),
       refundPrintJobs,
@@ -4011,7 +4382,16 @@ async function refundOrderDishes(orderId, dishIndexes, payload = {}) {
 async function adminRefundDish(payload) {
   const orderId = String(payload.orderId || payload.groupId || '').trim()
   const dishIndex = Math.floor(Number(payload.dishIndex))
-  return refundOrderDishes(orderId, [dishIndex], payload)
+  const hasExplicitCount = Object.prototype.hasOwnProperty.call(payload || {}, 'count') ||
+    Object.prototype.hasOwnProperty.call(payload || {}, 'refundCount') ||
+    Object.prototype.hasOwnProperty.call(payload || {}, 'quantity')
+  const request = hasExplicitCount
+    ? {
+      dishIndex,
+      count: payload.count !== undefined ? payload.count : payload.refundCount !== undefined ? payload.refundCount : payload.quantity
+    }
+    : dishIndex
+  return refundOrderDishes(orderId, [request], payload)
 }
 
 async function adminRefundDishes(payload) {
@@ -4023,7 +4403,17 @@ async function adminRefundDishes(payload) {
     const dishIndex = Math.floor(Number(item && item.dishIndex))
     if (!orderId || !Number.isInteger(dishIndex) || dishIndex < 0) return
     if (!groupedItems[orderId]) groupedItems[orderId] = []
-    groupedItems[orderId].push(dishIndex)
+    const hasExplicitCount = item && (
+      Object.prototype.hasOwnProperty.call(item, 'count') ||
+      Object.prototype.hasOwnProperty.call(item, 'refundCount') ||
+      Object.prototype.hasOwnProperty.call(item, 'quantity')
+    )
+    groupedItems[orderId].push(hasExplicitCount
+      ? {
+        dishIndex,
+        count: item.count !== undefined ? item.count : item.refundCount !== undefined ? item.refundCount : item.quantity
+      }
+      : dishIndex)
   })
 
   const orderIds = Object.keys(groupedItems)
@@ -4047,6 +4437,7 @@ async function adminRefundDishes(payload) {
     data: {
       updatedOrders: results.length,
       removedCount: results.reduce((sum, item) => sum + Number(item.removedCount || 0), 0),
+      removedQuantity: results.reduce((sum, item) => sum + Number(item.removedQuantity || 0), 0),
       results
     }
   }
@@ -7114,10 +7505,20 @@ async function adminCollectionUpdate(payload) {
     }
   }
 
+  const incomingData = cleanAdminData(payload.data || {})
+  const data = {
+    ...incomingData,
+    updateTime: db.serverDate()
+  }
+  const marksOrderPaid = config.key === 'order' &&
+    (incomingData.payStatus === true || incomingData.pay_status === true || incomingData.status === 'paid' || incomingData.status === 'completed')
+  if (marksOrderPaid && incomingData.checkoutAt === undefined) {
+    data.checkoutAt = db.serverDate()
+  }
+
   await db.collection(config.key).doc(id).update({
     data: {
-      ...cleanAdminData(payload.data || {}),
-      updateTime: db.serverDate()
+      ...data
     }
   })
 
@@ -7465,6 +7866,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.refundDishes') return completeAdminTableMutation(adminRefundDishes(payload))
   if (action === 'admin.table.giftDishes') return completeAdminTableMutation(adminGiftDishes(payload))
   if (action === 'admin.table.updateDish') return completeAdminTableMutation(adminUpdateTableDish(payload))
+  if (action === 'admin.business.stats') return adminGetBusinessStats(payload)
   if (action === 'admin.notification.list') return adminListInfoCenter(payload)
   if (action === 'admin.collection.list') return adminCollectionList(payload)
   if (action === 'admin.collection.save') return completeReservationMutation(adminCollectionSave(payload), payload)

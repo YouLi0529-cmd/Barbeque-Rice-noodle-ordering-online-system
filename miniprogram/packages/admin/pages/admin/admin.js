@@ -31,6 +31,7 @@ const ADMIN_TEXT = {
   heroTitle: '\u5f20\u5357\u70e4\u8089\u540e\u53f0',
   coreSection: '\u6838\u5fc3\u4e1a\u52a1',
   orderTitle: '\u684c\u53f0\u7ba1\u7406',
+  businessStatsTitle: '\u8425\u4e1a\u7edf\u8ba1',
   dishTitle: '\u83dc\u54c1\u7ba1\u7406',
   reservationTitle: '\u9884\u7ea6\u7ba1\u7406',
   outdoorTitle: '\u6237\u5916\u8ba2\u5355',
@@ -255,6 +256,10 @@ Page({
 
   goToOrder() {
     wx.navigateTo({ url: `${ADMIN_ROOT}/table/table` })
+  },
+
+  goToBusinessStats() {
+    wx.navigateTo({ url: `${ADMIN_ROOT}/business/business` })
   },
 
   goToTableCode() {

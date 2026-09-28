@@ -39,6 +39,10 @@ class AgentPreferences(context: Context) {
       .apply()
   }
 
+  fun updateWebsocketUrl(ws: String) {
+    store.edit().putString("websocket_url", ws.trim()).apply()
+  }
+
   fun clearRegistration() {
     store.edit().remove("agent_id").remove("agent_token").apply()
   }

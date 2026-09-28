@@ -254,6 +254,25 @@
       </view>
     </view>
   </view>
+  <view class="refund-dish-mask" wx:if="{{showRefundDialog}}" catchtap="closeRefundDishDialog">
+    <view class="refund-dish-dialog" catchtap="stopRefundDishDialogTap">
+      <view class="refund-dish-title">{{ui.refundQuantityTitle}}</view>
+      <view class="refund-dish-name">{{refundDishTitle}}</view>
+      <view class="refund-dish-hint">{{ui.refundQuantityHint}} {{refundMaxCount}} {{ui.refundQuantityUnit}}</view>
+      <input
+        class="refund-dish-input"
+        type="number"
+        maxlength="4"
+        value="{{refundQuantity}}"
+        placeholder="{{ui.refundQuantityPlaceholder}}"
+        bindinput="onRefundQuantityInput"
+      />
+      <view class="refund-dish-actions">
+        <view class="refund-dish-action cancel" bindtap="closeRefundDishDialog">{{ui.discountCancel}}</view>
+        <view class="refund-dish-action confirm {{submittingRefund ? 'refund-dish-action-disabled' : ''}}" bindtap="confirmRefundDishDialog">{{submittingRefund ? ui.loading : ui.refundDish}}</view>
+      </view>
+    </view>
+  </view>
   <view class="merge-mask" wx:if="{{showMergeDialog}}" catchtap="closeMergeDialog">
     <view class="merge-dialog" catchtap="stopMergeDialogTap">
       <view class="merge-head">

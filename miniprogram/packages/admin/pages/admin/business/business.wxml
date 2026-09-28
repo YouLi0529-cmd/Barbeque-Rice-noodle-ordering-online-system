@@ -1,0 +1,70 @@
+<view class="business-page">
+  <view class="business-head">
+    <view class="business-title">{{ui.title}}</view>
+    <view class="business-refresh" bindtap="refreshStats">{{refreshing ? '...' : ui.refresh}}</view>
+  </view>
+
+  <scroll-view class="business-scroll" scroll-y enable-flex>
+    <view class="business-summary">
+      <view class="summary-card revenue-card">
+        <view class="summary-head">
+          <view class="summary-label">{{ui.revenue}}</view>
+          <scroll-view class="range-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+            <view class="range-row">
+              <view
+                wx:for="{{rangeOptions}}"
+                wx:key="key"
+                class="range-option {{revenueRange === item.key ? 'active' : ''}}"
+                data-value="{{item.key}}"
+                bindtap="selectRevenueRange">{{item.label}}</view>
+            </view>
+          </scroll-view>
+        </view>
+        <view class="revenue-value"><text class="money-symbol">{{ui.currency}}</text>{{revenueText}}</view>
+      </view>
+
+      <view class="summary-card table-card">
+        <view class="summary-label">{{ui.settledTables}}</view>
+        <view class="table-value">{{settledTableCount}}</view>
+      </view>
+    </view>
+
+    <view class="dish-section">
+      <view class="dish-section-head">
+        <view class="dish-section-title">{{ui.dishSales}}</view>
+        <scroll-view class="range-scroll dish-range-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+          <view class="range-row">
+            <view
+              wx:for="{{rangeOptions}}"
+              wx:key="key"
+              class="range-option {{dishRange === item.key ? 'active' : ''}}"
+              data-value="{{item.key}}"
+              bindtap="selectDishRange">{{item.label}}</view>
+          </view>
+        </scroll-view>
+      </view>
+
+      <view class="dish-table" wx:if="{{dishList.length > 0}}">
+        <view class="dish-row dish-row-head">
+          <view class="dish-rank"></view>
+          <view class="dish-name">{{ui.dish}}</view>
+          <view class="dish-category">{{ui.category}}</view>
+          <view class="dish-quantity">{{ui.soldQuantity}}</view>
+          <view class="dish-amount">{{ui.salesAmount}}</view>
+        </view>
+        <view class="dish-row" wx:for="{{dishList}}" wx:key="id">
+          <view class="dish-rank">{{item.rank}}</view>
+          <view class="dish-name">{{item.name}}</view>
+          <view class="dish-category">{{item.categoryText}}</view>
+          <view class="dish-quantity">{{item.quantityText}}</view>
+          <view class="dish-amount">{{ui.currency}}{{item.salesAmountText}}</view>
+        </view>
+      </view>
+      <view class="stats-empty" wx:else>{{loading ? '...' : ui.empty}}</view>
+      <view class="stats-note" wx:if="{{isTruncated}}">{{ui.truncated}}</view>
+      <view class="stats-error" wx:if="{{loadError}}">{{loadError}}</view>
+    </view>
+  </scroll-view>
+
+  <admin-info-center id="admin-info-center"></admin-info-center>
+</view>

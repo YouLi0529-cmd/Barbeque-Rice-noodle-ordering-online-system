@@ -33,6 +33,7 @@
       "pages": [
         "pages/admin/admin",
         "pages/admin/table/table",
+        "pages/admin/business/business",
         "pages/admin/tableDetail/tableDetail",
         "pages/admin/waiterOrder/waiterOrder",
         "pages/admin/order/order",

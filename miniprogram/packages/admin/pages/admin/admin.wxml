@@ -17,6 +17,9 @@
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToOrder">
           <view class="card-title">{{ui.orderTitle}}</view>
         </view>
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToBusinessStats">
+          <view class="card-title">{{ui.businessStatsTitle}}</view>
+        </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToDish">
           <view class="card-title">{{ui.dishTitle}}</view>
         </view>
