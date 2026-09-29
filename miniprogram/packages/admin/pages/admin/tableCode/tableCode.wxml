@@ -1,4 +1,4 @@
-<view class="table-code-page">
+<view class="table-code-page" capture-bind:tap="onAdminTap">
   <view class="table-code-header">
     <view class="page-title">{{ui.title}}</view>
   </view>

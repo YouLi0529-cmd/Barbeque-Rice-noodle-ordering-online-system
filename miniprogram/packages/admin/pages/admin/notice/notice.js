@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const adminSound = require('../../../utils/adminSound')
 
 const COLLECTION = 'notice'
 const UI = {
@@ -95,6 +96,10 @@ function buildForm(source = {}) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     ui: UI,
     list: [],

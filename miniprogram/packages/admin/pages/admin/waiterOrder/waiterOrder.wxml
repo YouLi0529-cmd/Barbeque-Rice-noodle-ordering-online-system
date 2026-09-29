@@ -1,4 +1,4 @@
-<view class="waiter-page">
+<view class="waiter-page" capture-bind:tap="onAdminTap">
   <view class="topbar">
     <view class="table-title">{{areaName}}{{tableNumber}}号桌</view>
     <view class="mode-pill">{{modeText}}</view>

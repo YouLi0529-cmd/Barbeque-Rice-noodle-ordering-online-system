@@ -53,7 +53,7 @@ page {
 .business-summary {
   padding: 16rpx 24rpx 12rpx;
   display: grid;
-  grid-template-columns: minmax(0, 2.3fr) minmax(110rpx, 1fr);
+  grid-template-columns: minmax(0, 2.3fr) minmax(110rpx, 1fr) minmax(110rpx, 1fr);
   gap: 14rpx;
   box-sizing: border-box;
 }
@@ -76,6 +76,10 @@ page {
   background: #FFF4D9;
 }
 
+.arrival-card {
+  background: #EEF8F0;
+}
+
 .summary-head {
   min-height: 24rpx;
   display: flex;
@@ -92,32 +96,37 @@ page {
   font-weight: 900;
 }
 
-.range-scroll {
-  width: 250rpx;
+.range-control {
+  width: 280rpx;
   flex: none;
-  white-space: nowrap;
-}
-
-.range-row {
-  display: inline-flex;
+  height: 24rpx;
   align-items: center;
-  gap: 5rpx;
-  padding-right: 2rpx;
+  display: flex;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1rpx solid rgba(58, 36, 24, 0.18);
+  border-radius: 4rpx;
 }
 
 .range-option {
+  min-width: 0;
   height: 22rpx;
-  padding: 0 8rpx;
-  display: inline-flex;
+  flex: 1;
+  padding: 0 3rpx;
+  display: flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  border: 1rpx solid rgba(58, 36, 24, 0.16);
-  border-radius: 4rpx;
+  border-right: 1rpx solid rgba(58, 36, 24, 0.14);
   color: #7B5946;
   background: rgba(255, 255, 255, 0.72);
   font-size: 9rpx;
   font-weight: 800;
+  white-space: nowrap;
+}
+
+.range-option:last-child {
+  border-right: 0;
 }
 
 .range-option.active {
@@ -147,6 +156,19 @@ page {
   font-weight: 900;
 }
 
+.arrival-value {
+  margin-top: 24rpx;
+  color: #24753A;
+  font-size: 32rpx;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.arrival-unit {
+  margin-left: 3rpx;
+  font-size: 13rpx;
+}
+
 .dish-section {
   margin: 0 24rpx 22rpx;
   padding: 14rpx 16rpx 16rpx;
@@ -164,8 +186,74 @@ page {
   gap: 12rpx;
 }
 
-.dish-range-scroll {
-  width: 250rpx;
+.dish-filter-controls {
+  min-width: 0;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8rpx;
+}
+
+.dish-sort-control {
+  height: 24rpx;
+  display: flex;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1rpx solid rgba(58, 36, 24, 0.18);
+  border-radius: 4rpx;
+}
+
+.dish-sort-option {
+  min-width: 0;
+  height: 22rpx;
+  padding: 0 8rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-right: 1rpx solid rgba(58, 36, 24, 0.14);
+  color: #7B5946;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 9rpx;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.dish-sort-option:last-child {
+  border-right: 0;
+}
+
+.dish-sort-option.active {
+  color: #FFFFFF;
+  background: #6A4530;
+}
+
+.dish-range-control {
+  width: 280rpx;
+}
+
+.dish-search-wrap {
+  height: 30rpx;
+  margin-top: 10rpx;
+  padding: 0 10rpx;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  border: 1rpx solid rgba(58, 36, 24, 0.16);
+  border-radius: 4rpx;
+  background: #FFFDF8;
+}
+
+.dish-search-input {
+  width: 100%;
+  min-width: 0;
+  color: #3A2418;
+  font-size: 10rpx;
+}
+
+.dish-search-placeholder {
+  color: #A78A78;
 }
 
 .dish-table {
@@ -255,7 +343,7 @@ page {
 
 @media (max-width: 600px) {
   .business-summary {
-    grid-template-columns: minmax(0, 1.7fr) minmax(90rpx, 1fr);
+    grid-template-columns: minmax(0, 1.7fr) minmax(90rpx, 1fr) minmax(90rpx, 1fr);
     gap: 9rpx;
     padding: 12rpx 14rpx 9rpx;
   }
@@ -264,9 +352,24 @@ page {
     margin: 0 14rpx 16rpx;
   }
 
-  .range-scroll,
-  .dish-range-scroll {
-    width: 190rpx;
+  .range-control,
+  .dish-range-control {
+    width: 216rpx;
+  }
+
+  .dish-section-head {
+    flex-wrap: wrap;
+    gap: 8rpx;
+  }
+
+  .dish-filter-controls {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+
+  .dish-sort-option {
+    padding: 0 6rpx;
   }
 
   .dish-row {

@@ -1,5 +1,5 @@
 <!-- packages/admin/pages/admin/admin.wxml -->
-<view class="admin-page">
+<view class="admin-page" capture-bind:tap="onAdminTap">
   <view class="admin-page-shade"></view>
   <view class="admin-watermark">{{ui.heroTitle}}</view>
 
@@ -19,6 +19,9 @@
         </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToBusinessStats">
           <view class="card-title">{{ui.businessStatsTitle}}</view>
+        </view>
+        <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToSettlement">
+          <view class="card-title">{{ui.settlementTitle}}</view>
         </view>
         <view class="admin-menu-card" hover-class="admin-menu-card-pressed" hover-stay-time="120" bindtap="goToDish">
           <view class="card-title">{{ui.dishTitle}}</view>

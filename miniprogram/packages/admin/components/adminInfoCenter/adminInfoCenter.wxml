@@ -1,6 +1,6 @@
 <block wx:if="{{visible}}">
   <view class="info-panel-mask" wx:if="{{panelOpen}}" catchtap="closePanel"></view>
-  <view class="admin-info-center">
+  <view class="admin-info-center" capture-bind:tap="onAdminTap">
     <view class="info-fab" bindtap="togglePanel">
       <text class="info-fab-mark">i</text>
       <view class="info-badge" wx:if="{{unreadCount > 0}}">{{unreadBadge}}</view>

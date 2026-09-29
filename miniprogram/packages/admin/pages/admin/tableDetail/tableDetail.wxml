@@ -1,5 +1,5 @@
 <!-- packages/admin/pages/admin/tableDetail/tableDetail.wxml -->
-<view class="detail-page">
+<view class="detail-page" capture-bind:tap="onAdminTap">
   <view class="main-layout">
     <view class="bill-shell">
       <view class="order-panel">

@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const adminSound = require('../../../utils/adminSound')
 
 const MAX_IMAGE_SIZE = 1024 * 1024
 
@@ -92,6 +93,10 @@ function uploadContactImageFile(filePath) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     shopInfoId: '',
     contactPhone: '',

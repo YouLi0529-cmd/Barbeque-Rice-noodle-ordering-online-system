@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const adminSound = require('../../../utils/adminSound')
 
 const UI = {
   batchManage: '\u6279\u91cf\u5220\u9664',
@@ -27,6 +28,10 @@ function formatFeedback(item = {}) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     ui: UI,
     list: [],

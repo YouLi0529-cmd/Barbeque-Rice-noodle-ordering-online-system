@@ -1,4 +1,4 @@
-<view class="business-page">
+<view class="business-page" capture-bind:tap="onAdminTap">
   <view class="business-head">
     <view class="business-title">{{ui.title}}</view>
     <view class="business-refresh" bindtap="refreshStats">{{refreshing ? '...' : ui.refresh}}</view>
@@ -9,16 +9,14 @@
       <view class="summary-card revenue-card">
         <view class="summary-head">
           <view class="summary-label">{{ui.revenue}}</view>
-          <scroll-view class="range-scroll" scroll-x enhanced show-scrollbar="{{false}}">
-            <view class="range-row">
-              <view
-                wx:for="{{rangeOptions}}"
-                wx:key="key"
-                class="range-option {{revenueRange === item.key ? 'active' : ''}}"
-                data-value="{{item.key}}"
-                bindtap="selectRevenueRange">{{item.label}}</view>
-            </view>
-          </scroll-view>
+          <view class="range-control">
+            <view
+              wx:for="{{rangeOptions}}"
+              wx:key="key"
+              class="range-option {{revenueRange === item.key ? 'active' : ''}}"
+              data-value="{{item.key}}"
+              bindtap="selectRevenueRange">{{item.label}}</view>
+          </view>
         </view>
         <view class="revenue-value"><text class="money-symbol">{{ui.currency}}</text>{{revenueText}}</view>
       </view>
@@ -27,13 +25,26 @@
         <view class="summary-label">{{ui.settledTables}}</view>
         <view class="table-value">{{settledTableCount}}</view>
       </view>
+
+      <view class="summary-card arrival-card">
+        <view class="summary-label">{{ui.arrivalPeople}}</view>
+        <view class="arrival-value">{{arrivalPeopleCount}}<text class="arrival-unit">{{ui.peopleUnit}}</text></view>
+      </view>
     </view>
 
     <view class="dish-section">
       <view class="dish-section-head">
         <view class="dish-section-title">{{ui.dishSales}}</view>
-        <scroll-view class="range-scroll dish-range-scroll" scroll-x enhanced show-scrollbar="{{false}}">
-          <view class="range-row">
+        <view class="dish-filter-controls">
+          <view class="dish-sort-control">
+            <view
+              wx:for="{{dishSortOptions}}"
+              wx:key="key"
+              class="dish-sort-option {{dishSort === item.key ? 'active' : ''}}"
+              data-value="{{item.key}}"
+              bindtap="selectDishSort">{{item.label}}</view>
+          </view>
+          <view class="range-control dish-range-control">
             <view
               wx:for="{{rangeOptions}}"
               wx:key="key"
@@ -41,7 +52,17 @@
               data-value="{{item.key}}"
               bindtap="selectDishRange">{{item.label}}</view>
           </view>
-        </scroll-view>
+        </view>
+      </view>
+
+      <view class="dish-search-wrap">
+        <input
+          class="dish-search-input"
+          type="text"
+          value="{{dishSearch}}"
+          placeholder="{{ui.searchDish}}"
+          placeholder-class="dish-search-placeholder"
+          bindinput="onDishSearchInput" />
       </view>
 
       <view class="dish-table" wx:if="{{dishList.length > 0}}">
@@ -60,7 +81,7 @@
           <view class="dish-amount">{{ui.currency}}{{item.salesAmountText}}</view>
         </view>
       </view>
-      <view class="stats-empty" wx:else>{{loading ? '...' : ui.empty}}</view>
+      <view class="stats-empty" wx:else>{{loading ? '...' : (dishSearch ? ui.searchEmpty : ui.empty)}}</view>
       <view class="stats-note" wx:if="{{isTruncated}}">{{ui.truncated}}</view>
       <view class="stats-error" wx:if="{{loadError}}">{{loadError}}</view>
     </view>

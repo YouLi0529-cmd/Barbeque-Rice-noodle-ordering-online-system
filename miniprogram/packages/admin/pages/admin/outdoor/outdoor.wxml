@@ -1,5 +1,5 @@
 <!-- packages/admin/pages/admin/outdoor/outdoor.wxml -->
-<view class="outdoor-page">
+<view class="outdoor-page" capture-bind:tap="onAdminTap">
   <view class="outdoor-left">
     <view class="outdoor-tools">
       <input class="search-input" placeholder="{{ui.searchPlaceholder}}" value="{{keyword}}" bindinput="onSearchInput" confirm-type="search" bindconfirm="doSearch" />

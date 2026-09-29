@@ -1,4 +1,4 @@
-<view class="shop-info-page">
+<view class="shop-info-page" capture-bind:tap="onAdminTap">
   <view class="top-bar">
     <view class="page-title">联系我设置</view>
     <view class="back-btn" bindtap="goBack">返回</view>

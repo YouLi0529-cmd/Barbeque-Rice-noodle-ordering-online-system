@@ -1,5 +1,5 @@
 <!-- admin simple collection page -->
-<view class="admin-simple-page">
+<view class="admin-simple-page" capture-bind:tap="onAdminTap">
   <view class="admin-simple-header">
     <view class="admin-simple-title">{{ui.title}}</view>
     <view class="admin-simple-actions">

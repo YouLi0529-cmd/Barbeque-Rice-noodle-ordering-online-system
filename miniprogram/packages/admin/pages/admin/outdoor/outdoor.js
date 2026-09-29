@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const adminSound = require('../../../utils/adminSound')
 
 const UI = {
   title: '\u6237\u5916\u8ba2\u5355',
@@ -11,7 +12,7 @@ const UI = {
   selectTip: '\u8bf7\u5728\u5de6\u4fa7\u9009\u62e9\u4e00\u4e2a\u8ba2\u5355',
   moneySymbol: '\uffe5',
   loading: '\u52a0\u8f7d\u4e2d',
-  sendKitchen: '\u53d1\u9001\u540e\u53a8',
+  sendKitchen: '\u518d\u53d1\u9001',
   sentToKitchen: '\u5df2\u53d1\u9001',
   orderActions: '\u8ba2\u5355\u64cd\u4f5c',
   payTitle: '\u652f\u4ed8\u7ed3\u7b97',
@@ -44,9 +45,9 @@ const UI = {
   directReduceInvalid: '\u76f4\u51cf\u91d1\u989d\u4e0d\u80fd\u8d85\u8fc7\u6298\u540e\u91d1\u989d',
   noSelectedGoods: '\u8bf7\u5148\u9009\u62e9\u83dc\u54c1',
   noSelectedKitchenGoods: '\u8bf7\u5148\u9009\u62e9\u8981\u53d1\u9001\u7684\u83dc\u54c1',
-  sendKitchenConfirmTitle: '\u53d1\u9001\u540e\u53a8',
-  sendKitchenConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u53d1\u9001\u5230\u540e\u53a8\u5417',
-  sendSuccess: '\u5df2\u53d1\u9001',
+  sendKitchenConfirmTitle: '\u518d\u53d1\u9001',
+  sendKitchenConfirmContent: '\u786e\u5b9a\u91cd\u65b0\u53d1\u9001\u9009\u4e2d\u83dc\u54c1\u5230\u540e\u53a8\u5417',
+  sendSuccess: '\u5df2\u91cd\u65b0\u53d1\u9001',
   sendFailed: '\u53d1\u9001\u5931\u8d25',
   kitchenPrintFailed: '\u540e\u53a8\u6253\u5370\u5f02\u5e38',
   failedDishesPrefix: '\u5931\u8d25\u83dc\u54c1\uff1a',
@@ -78,7 +79,8 @@ const STATUS_TEXT = {
   saved: '\u5df2\u4fdd\u5b58',
   waiting_pay: '\u5df2\u63d0\u4ea4',
   submitted: '\u5df2\u63d0\u4ea4',
-  preparing: '\u914d\u83dc\u4e2d',
+  pending_prepare: '\u5df2\u53d1\u9001',
+  preparing: '\u5df2\u53d1\u9001',
   ready_pickup: '\u5f85\u81ea\u53d6',
   completed: '\u5df2\u5b8c\u6210',
   paid: '\u5df2\u652f\u4ed8',
@@ -268,6 +270,7 @@ function getStatusClass(order) {
   const statusText = getStatusText(order)
   if (statusText === STATUS_TEXT.paid || order.status === 'completed') return 'paid'
   if (statusText === STATUS_TEXT.submitted || order.status === 'submitted' || order.status === 'waiting_pay') return 'submitted'
+  if (statusText === STATUS_TEXT.pending_prepare || statusText === STATUS_TEXT.preparing || order.status === 'pending_prepare' || order.status === 'preparing') return 'preparing'
   return String(order.status || '').replace(/[^a-zA-Z0-9_-]/g, '') || 'pending'
 }
 
@@ -461,6 +464,10 @@ function formatOrderItem(order) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     ui: UI,
     list: [],
@@ -1001,7 +1008,7 @@ Page({
       wx.showModal({
         title: UI.sendKitchenConfirmTitle,
         content: selectedRefs.length > 1
-          ? `\u786e\u5b9a\u53d1\u9001\u9009\u4e2d\u7684${selectedRefs.length}\u4e2a\u83dc\u54c1\u5230\u540e\u53a8\u5417`
+          ? `\u786e\u5b9a\u91cd\u65b0\u53d1\u9001\u9009\u4e2d\u7684${selectedRefs.length}\u4e2a\u83dc\u54c1\u5230\u540e\u53a8\u5417`
           : UI.sendKitchenConfirmContent,
         confirmText: UI.sendKitchen,
         cancelText: '\u53d6\u6d88',
@@ -1015,6 +1022,7 @@ Page({
     try {
       this.setData({ sendingKitchen: true })
       const res = await apiClient.call('admin.order.sendKitchenItems', {
+        forceResend: true,
         items: selectedRefs.map(item => ({
           orderId: item.sourceOrderId,
           dishIndex: item.sourceIndex

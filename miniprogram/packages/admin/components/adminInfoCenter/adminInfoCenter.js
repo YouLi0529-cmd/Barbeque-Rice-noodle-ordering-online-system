@@ -1,4 +1,5 @@
 const apiClient = require('../../../../utils/apiClient')
+const adminSound = require('../../utils/adminSound')
 
 const DISMISSED_STORAGE_KEY = 'adminInfoCenterDismissed'
 const POLL_INTERVAL = 30000
@@ -124,6 +125,10 @@ Component({
   },
 
   methods: {
+    onAdminTap(event) {
+      adminSound.playClick(event)
+    },
+
     startPolling() {
       this.stopPolling()
       this.pollTimer = setInterval(() => {
@@ -252,6 +257,11 @@ Component({
 
       messages.sort((left, right) => Number(right.timeValue || 0) - Number(left.timeValue || 0))
       const unreadCount = messages.length
+      const nextMessageKeys = new Set(messages.map(item => `${item.id}:${item.version}`))
+      const hasNewMessage = this.notificationsLoaded === true && Array.from(nextMessageKeys)
+        .some(key => !this.notificationMessageKeys || !this.notificationMessageKeys.has(key))
+      this.notificationMessageKeys = nextMessageKeys
+      this.notificationsLoaded = true
       this.setData({
         messages,
         unreadCount,
@@ -261,6 +271,7 @@ Component({
           : ''
       })
       this.triggerEvent('notificationschange', { pendingReservationCount })
+      if (hasNewMessage) adminSound.playNotification()
     },
 
     selectMessage(event) {

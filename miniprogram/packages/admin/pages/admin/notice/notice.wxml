@@ -1,4 +1,4 @@
-<view class="notice-admin-page">
+<view class="notice-admin-page" capture-bind:tap="onAdminTap">
   <view class="top-bar">
     <view class="title-block">
       <view class="page-title">{{ui.title}}</view>

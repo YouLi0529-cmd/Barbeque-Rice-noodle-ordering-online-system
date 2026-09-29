@@ -1,4 +1,4 @@
-<view class="print-page {{settingsDetailMode ? 'settings-detail-mode' : ''}}">
+<view class="print-page {{settingsDetailMode ? 'settings-detail-mode' : ''}}" capture-bind:tap="onAdminTap">
   <view wx:if="{{!settingsDetailMode}}" class="page-head">
     <view class="page-title">打印中心</view>
   </view>

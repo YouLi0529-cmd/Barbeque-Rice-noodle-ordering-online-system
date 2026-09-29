@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const adminSound = require('../../../utils/adminSound')
 
 const UI = {
   title: '\u684c\u7801\u7ba1\u7406',
@@ -66,6 +67,10 @@ function getMissingTables(sections = []) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     ui: UI,
     sections: buildSections(),

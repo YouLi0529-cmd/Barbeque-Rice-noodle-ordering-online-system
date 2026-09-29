@@ -1,4 +1,5 @@
 const apiClient = require('../../../utils/apiClient')
+const adminSound = require('./adminSound')
 
 const BASE_UI = {
   searchPlaceholder: '\u641c\u7d22',
@@ -77,6 +78,10 @@ function createCollectionPage(config) {
   const defaultForm = createDefaultForm(fields)
 
   return {
+    onAdminTap(event) {
+      adminSound.playClick(event)
+    },
+
     data: {
       ui: {
         ...BASE_UI,

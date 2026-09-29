@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const adminSound = require('../../../utils/adminSound')
 
 const TABLE_PAGE = '/packages/admin/pages/admin/table/table'
 
@@ -58,14 +59,14 @@ const UI = {
   printPrebill: '\u6253\u5370\u9884\u7ed3\u5355',
   prebillPrintSuccess: '\u9884\u7ed3\u5355\u5df2\u53d1\u9001',
   prebillPrintFailed: '\u9884\u7ed3\u5355\u6253\u5370\u5931\u8d25',
-  sendKitchen: '\u53d1\u9001\u540e\u53a8',
+  sendKitchen: '\u518d\u53d1\u9001',
   sentToKitchen: '\u5df2\u53d1\u9001',
   refundSuccess: '\u5df2\u9000\u83dc',
   giftSuccess: '\u5df2\u8d60\u83dc',
   giftConfirmTitle: '\u786e\u8ba4\u8d60\u83dc',
   giftConfirmContent: '\u786e\u5b9a\u5c06\u9009\u4e2d\u83dc\u54c1\u5728\u672c\u6b21\u8ba2\u5355\u4e2d\u6309 0 \u5143\u7ed3\u7b97\u5417',
-  sendKitchenConfirmTitle: '\u53d1\u9001\u540e\u53a8',
-  sendKitchenConfirmContent: '\u786e\u5b9a\u53d1\u9001\u9009\u4e2d\u83dc\u54c1\u5230\u540e\u53a8\u5417',
+  sendKitchenConfirmTitle: '\u518d\u53d1\u9001',
+  sendKitchenConfirmContent: '\u786e\u5b9a\u91cd\u65b0\u53d1\u9001\u9009\u4e2d\u83dc\u54c1\u5230\u540e\u53a8\u5417',
   kitchenPrintFailed: '\u540e\u53a8\u6253\u5370\u5f02\u5e38',
   failedDishesPrefix: '\u5931\u8d25\u83dc\u54c1\uff1a',
   retryFailedKitchen: '\u91cd\u8bd5\u5931\u8d25\u83dc\u54c1',
@@ -84,7 +85,7 @@ const UI = {
   refundQuantityInvalid: '\u8bf7\u8f93\u5165 1 \u5230\u53ef\u9000\u6570\u91cf\u4e4b\u95f4\u7684\u6574\u6570',
   refundSameDishOnly: '\u4e00\u6b21\u53ea\u80fd\u9000\u540c\u4e00\u79cd\u83dc\u54c1',
   refundUnavailable: '\u6ca1\u6709\u53ef\u9000\u7684\u83dc\u54c1',
-  sendSuccess: '\u5df2\u53d1\u9001\u540e\u53a8',
+  sendSuccess: '\u5df2\u91cd\u65b0\u53d1\u9001',
   checkoutSuccess: '\u5df2\u7ed3\u8d26',
   checkoutConfirmTitle: '\u786e\u8ba4\u7ed3\u8d26',
   checkoutConfirmContent: '\u786e\u8ba4\u4ed8\u6b3e\u5b8c\u6210\u5e76\u7ed3\u675f\u8be5\u5355\u5417',
@@ -127,7 +128,7 @@ const STATUS = {
     className: 'status-submitted'
   },
   preparing: {
-    text: '\u5236\u4f5c\u4e2d',
+    text: '\u5df2\u53d1\u9001',
     className: 'status-preparing'
   },
   paid: {
@@ -360,6 +361,10 @@ function formatMergeTableSections(sections, currentTable, selectedMap = {}) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     ui: UI,
     table: {},
@@ -1592,7 +1597,7 @@ Page({
       wx.showModal({
         title: UI.sendKitchenConfirmTitle,
         content: selectedItems.length > 1
-          ? `\u786e\u5b9a\u53d1\u9001\u9009\u4e2d\u7684${selectedItems.length}\u4e2a\u83dc\u54c1\u5230\u540e\u53a8\u5417`
+          ? `\u786e\u5b9a\u91cd\u65b0\u53d1\u9001\u9009\u4e2d\u7684${selectedItems.length}\u4e2a\u83dc\u54c1\u5230\u540e\u53a8\u5417`
           : UI.sendKitchenConfirmContent,
         confirmText: UI.sendKitchen,
         cancelText: '\u53d6\u6d88',
@@ -1605,6 +1610,7 @@ Page({
     try {
       this.setData({ sendingKitchen: true })
       const res = await apiClient.call('admin.table.sendKitchenItems', {
+        forceResend: true,
         items: selectedItems.map(item => ({
           orderId: item.groupId,
           dishIndex: item.dishIndex

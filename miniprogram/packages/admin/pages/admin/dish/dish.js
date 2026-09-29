@@ -1,5 +1,6 @@
 // packages/admin/pages/admin/dish/dish.js
 const apiClient = require('../../../../../utils/apiClient')
+const adminSound = require('../../../utils/adminSound')
 
 const UI = {
   pageTitle: '\u83dc\u54c1\u7ba1\u7406',
@@ -569,6 +570,10 @@ function buildSpecPreviewGroups(dish = {}) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     ui: UI,
     managementTabs: [

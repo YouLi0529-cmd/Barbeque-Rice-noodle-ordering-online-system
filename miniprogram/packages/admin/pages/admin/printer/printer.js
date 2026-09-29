@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const adminSound = require('../../../utils/adminSound')
 
 const TAB_ITEMS = [
   { key: 'dashboard', label: '打印中心' },
@@ -144,6 +145,10 @@ function getTemplateFieldName(fields, index) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     tabs: TAB_ITEMS,
     settingsTabs: SETTINGS_TAB_ITEMS,

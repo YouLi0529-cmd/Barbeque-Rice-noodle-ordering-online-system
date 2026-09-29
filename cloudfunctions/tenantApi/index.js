@@ -1247,6 +1247,29 @@ async function createOrder(payload) {
     })
   }
 
+  if (result && result.success && result.order) {
+    const dishIndexes = (Array.isArray(result.order.goods) ? result.order.goods : [])
+      .map((item, index) => index)
+    if (dishIndexes.length > 0) {
+      try {
+        const kitchenResult = await sendOrderDishesToKitchen(result.orderId, dishIndexes, {
+          // The order document is already durable. A stable key protects this
+          // automatic dispatch from duplicated client retries.
+          eventKey: `auto-submit:${result.orderId}`
+        })
+        result.kitchenDispatch = kitchenResult.success
+          ? kitchenResult.data
+          : { hasDispatchFailure: true, error: kitchenResult.message || 'kitchen dispatch failed' }
+      } catch (err) {
+        console.error('auto dispatch order to kitchen failed', err)
+        result.kitchenDispatch = {
+          hasDispatchFailure: true,
+          error: err.message || 'kitchen dispatch failed'
+        }
+      }
+    }
+  }
+
   return result
 }
 
@@ -2404,7 +2427,7 @@ function isAdminPaidOrder(order) {
   )
 }
 
-const BUSINESS_STATS_RANGE_KEYS = ['today', '7d', '14d', '1m', '3m']
+const BUSINESS_STATS_RANGE_KEYS = ['today', 'yesterday', '7d', '14d', '1m', '3m']
 
 function normalizeBusinessStatsRange(value) {
   const range = String(value || '').trim()
@@ -2416,12 +2439,20 @@ function getBusinessStatsRangeStart(range, now = new Date()) {
   const start = new Date(now)
   start.setHours(0, 0, 0, 0)
 
+  if (normalized === 'yesterday') start.setDate(start.getDate() - 1)
   if (normalized === '7d') start.setDate(start.getDate() - 6)
   if (normalized === '14d') start.setDate(start.getDate() - 13)
   if (normalized === '1m') start.setMonth(start.getMonth() - 1)
   if (normalized === '3m') start.setMonth(start.getMonth() - 3)
 
   return start
+}
+
+function getBusinessStatsRangeEnd(range, now = new Date()) {
+  if (normalizeBusinessStatsRange(range) !== 'yesterday') return 0
+  const end = new Date(now)
+  end.setHours(0, 0, 0, 0)
+  return end.getTime()
 }
 
 function getBusinessStatsPaidTime(order = {}) {
@@ -2433,6 +2464,131 @@ function getBusinessStatsPaidTime(order = {}) {
     order.completedAt ||
     order.updateTime
   )
+}
+
+function isDineInArrivalOrder(order = {}) {
+  if (!order || order.type !== 'order' || order.deleted === true) return false
+  if (isCampingOrder(order)) return false
+  return !!getOrderTableRef(order)
+}
+
+function getArrivalOrderKey(order = {}) {
+  const tableGroupId = String(order.tableGroupId || '').trim()
+  if (tableGroupId) return `table-group:${tableGroupId}`
+  const rootOrderId = String(order.rootOrderId || order._id || '').trim()
+  return rootOrderId ? `order:${rootOrderId}` : ''
+}
+
+function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'today', now = new Date()) {
+  const startAt = getBusinessStatsRangeStart(range, now).getTime()
+  const endAt = getBusinessStatsRangeEnd(range, now)
+  const groups = {}
+  const rootOrderGroupKeys = {}
+
+  ;(orders || []).forEach(order => {
+    if (!isDineInArrivalOrder(order)) return
+    const arrivedAt = getTimeValue(order.createTime)
+    if (!arrivedAt || arrivedAt < startAt || (endAt && arrivedAt >= endAt)) return
+
+    const groupKey = getArrivalOrderKey(order)
+    if (!groupKey) return
+    const rootOrderId = String(order.rootOrderId || order._id || '').trim()
+    if (rootOrderId) rootOrderGroupKeys[rootOrderId] = groupKey
+    if (!groups[groupKey]) {
+      groups[groupKey] = { peopleCount: 0, arrivedAt }
+    }
+    groups[groupKey].peopleCount = Math.max(
+      groups[groupKey].peopleCount,
+      Math.max(0, Math.floor(Number(order.peopleCount || 0)))
+    )
+  })
+
+  ;(tableSessions || []).forEach(session => {
+    if (!session || session.peopleConfirmed !== true) return
+    const tableRef = getOrderTableRef({ tableNumber: session.tableNumber })
+    if (!tableRef) return
+    const arrivedAt = getTimeValue(session.peopleConfirmedAt || session.createTime || session.updateTime)
+    if (!arrivedAt || arrivedAt < startAt || (endAt && arrivedAt >= endAt)) return
+
+    const rootOrderId = String(session.activeOrderRootId || '').trim()
+    const groupKey = rootOrderId
+      ? (rootOrderGroupKeys[rootOrderId] || `order:${rootOrderId}`)
+      : `session:${String(session._id || session.tableNumber || '').trim()}`
+    if (!groupKey) return
+    if (!groups[groupKey]) {
+      groups[groupKey] = { peopleCount: 0, arrivedAt }
+    }
+    groups[groupKey].peopleCount = Math.max(
+      groups[groupKey].peopleCount,
+      Math.max(0, Math.floor(Number(session.peopleCount || 0)))
+    )
+  })
+
+  return {
+    startAt,
+    endAt,
+    peopleCount: Object.keys(groups).reduce((total, key) => total + Number(groups[key].peopleCount || 0), 0),
+    tableCount: Object.keys(groups).length
+  }
+}
+
+async function listDineInArrivalOrders(range = 'today', now = new Date()) {
+  const startAt = getBusinessStatsRangeStart(range, now)
+  const endAt = getBusinessStatsRangeEnd(range, now)
+  try {
+    const res = await db.collection('order')
+      .where({ type: 'order', createTime: _.gte(startAt) })
+      .orderBy('createTime', 'asc')
+      .limit(500)
+      .get()
+    return (res.data || []).filter(order => {
+      const arrivedAt = getTimeValue(order.createTime)
+      return arrivedAt >= startAt.getTime() && (!endAt || arrivedAt < endAt)
+    })
+  } catch (err) {
+    // Keep the merchant board available in environments without this compound index.
+    console.warn('list dine-in arrival orders fallback', err)
+    try {
+      const res = await db.collection('order')
+        .where({ type: 'order' })
+        .orderBy('createTime', 'desc')
+        .limit(500)
+        .get()
+      return (res.data || []).filter(order => {
+        const arrivedAt = getTimeValue(order.createTime)
+        return arrivedAt >= startAt.getTime() && (!endAt || arrivedAt < endAt)
+      })
+    } catch (fallbackErr) {
+      console.warn('list dine-in arrival orders failed', fallbackErr)
+      return []
+    }
+  }
+}
+
+async function listConfirmedTableSessions(range = 'today', now = new Date()) {
+  const startAt = getBusinessStatsRangeStart(range, now).getTime()
+  const endAt = getBusinessStatsRangeEnd(range, now)
+  try {
+    const res = await db.collection('tableOrderSession')
+      .where({ peopleConfirmed: true })
+      .limit(200)
+      .get()
+    return (res.data || []).filter(session => {
+      const arrivedAt = getTimeValue(session.peopleConfirmedAt || session.createTime || session.updateTime)
+      return arrivedAt >= startAt && (!endAt || arrivedAt < endAt)
+    })
+  } catch (err) {
+    console.warn('list confirmed table sessions failed', err)
+    return []
+  }
+}
+
+async function getTableArrivalSnapshot(range = 'today', now = new Date()) {
+  const [orders, tableSessions] = await Promise.all([
+    listDineInArrivalOrders(range, now),
+    listConfirmedTableSessions(range, now)
+  ])
+  return buildTableArrivalSnapshot(orders, tableSessions, range, now)
 }
 
 function getBusinessStatsGroupKey(order = {}) {
@@ -2480,12 +2636,13 @@ function getBusinessStatsGroupRevenue(orders = []) {
 
 function buildBusinessStatsSnapshot(orders = [], range) {
   const startAt = getBusinessStatsRangeStart(range).getTime()
+  const endAt = getBusinessStatsRangeEnd(range)
   const groupMap = {}
 
   orders.forEach(order => {
     if (!order || !isAdminPaidOrder(order) || order.deleted === true) return
     const paidAt = getBusinessStatsPaidTime(order)
-    if (!paidAt || paidAt < startAt) return
+    if (!paidAt || paidAt < startAt || (endAt && paidAt >= endAt)) return
 
     const key = getBusinessStatsGroupKey(order)
     if (!key || key.endsWith(':')) return
@@ -2539,6 +2696,7 @@ function buildBusinessStatsSnapshot(orders = [], range) {
   return {
     range: normalizeBusinessStatsRange(range),
     startAt,
+    endAt,
     revenue,
     settledTableCount: groups.filter(group => group.scene === 'dineIn').length,
     settledOutdoorOrderCount: groups.filter(group => group.scene === 'camping').length,
@@ -2566,6 +2724,7 @@ async function adminGetBusinessStats(payload) {
   const pageSize = 100
   const maxOrders = 1000
   const orders = []
+  const arrivalPromise = getTableArrivalSnapshot(revenueRange)
 
   for (let page = 0; page < maxOrders / pageSize; page += 1) {
     const res = await db.collection('order')
@@ -2578,15 +2737,247 @@ async function adminGetBusinessStats(payload) {
     orders.push(...pageData)
     if (pageData.length < pageSize) break
   }
+  const arrival = await arrivalPromise
 
   return {
     success: true,
     data: {
       revenue: buildBusinessStatsSnapshot(orders, revenueRange),
       dishes: buildBusinessStatsSnapshot(orders, dishRange),
+      arrival,
       fetchedOrderCount: orders.length,
       isTruncated: orders.length === maxOrders
     }
+  }
+}
+
+const SETTLEMENT_HISTORY_DAYS = 60
+
+function getSettlementDateRange(value, now = new Date()) {
+  const raw = String(value || '').trim()
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+
+  const start = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  if (start.getFullYear() !== Number(match[1]) || start.getMonth() !== Number(match[2]) - 1 || start.getDate() !== Number(match[3])) {
+    return null
+  }
+  start.setHours(0, 0, 0, 0)
+
+  const today = new Date(now)
+  today.setHours(0, 0, 0, 0)
+  const earliest = new Date(today)
+  earliest.setDate(earliest.getDate() - (SETTLEMENT_HISTORY_DAYS - 1))
+  if (start.getTime() < earliest.getTime() || start.getTime() > today.getTime()) return null
+
+  const end = new Date(start)
+  end.setDate(end.getDate() + 1)
+  return {
+    value: raw,
+    start,
+    end
+  }
+}
+
+function getSettlementTableText(orders = []) {
+  const lead = orders[0] || {}
+  if (isCampingOrder(lead)) return '户外自取'
+  const tables = getMergedTablesFromOrders(orders)
+  if (tables.length > 0) return getMergedTableText(tables)
+  const tableText = String(lead.tableNumber || '').trim()
+  return tableText ? `${tableText}号桌` : '未记录桌号'
+}
+
+function getSettlementPaymentText(orders = []) {
+  const paymentMethod = String((orders.find(order => order.paymentMethod || order.payMethod) || {}).paymentMethod ||
+    (orders.find(order => order.payMethod) || {}).payMethod || '').trim()
+  const paymentTexts = {
+    cash: '现金',
+    credit: '挂账',
+    wechat: '微信',
+    alipay: '支付宝',
+    wechat_alipay: '微信/支付宝'
+  }
+  return paymentTexts[paymentMethod] || paymentMethod || '未记录'
+}
+
+function getSettlementGroupTotal(orders = []) {
+  const storedTotals = orders
+    .map(order => Number(order.checkoutTotalPrice))
+    .filter(value => Number.isFinite(value) && value >= 0)
+  if (storedTotals.length > 0) return roundMoney(Math.max(...storedTotals))
+  return roundMoney(orders.reduce((sum, order) => sum + Number(order.finalPrice || order.totalPrice || 0), 0))
+}
+
+function getSettlementDiscount(orders = []) {
+  const checkout = orders.find(order => {
+    return order.checkoutDiscountType ||
+      (order.checkoutDiscountValue !== undefined && order.checkoutDiscountValue !== '') ||
+      (order.checkoutDirectReduceValue !== undefined && order.checkoutDirectReduceValue !== '')
+  }) || {}
+  const discountType = String(checkout.checkoutDiscountType || '').trim()
+  const discountValue = Number(checkout.checkoutDiscountValue)
+  const directReduceValue = Number(checkout.checkoutDirectReduceValue)
+  return {
+    discountText: discountType === 'discount' && Number.isFinite(discountValue)
+      ? `${discountValue}折`
+      : '',
+    directReduceText: Number.isFinite(directReduceValue) && directReduceValue > 0
+      ? String(roundMoney(directReduceValue))
+      : ''
+  }
+}
+
+function buildSettlementGroups(orders = []) {
+  const groups = {}
+  ;(orders || []).forEach(order => {
+    if (!order || !isAdminPaidOrder(order) || order.deleted === true) return
+    const key = getBusinessStatsGroupKey(order)
+    if (!key || key.endsWith(':')) return
+    if (!groups[key]) groups[key] = []
+    groups[key].push(order)
+  })
+  return groups
+}
+
+function getSettlementPeopleCount(orders = []) {
+  return Math.max(0, ...orders.map(order => Math.floor(Number(order.peopleCount || 0))).filter(Number.isFinite))
+}
+
+function buildSettlementRecord(key, orders = []) {
+  const paidAt = Math.max(...orders.map(order => getBusinessStatsPaidTime(order)).filter(Boolean), 0)
+  const discount = getSettlementDiscount(orders)
+  const receivable = getBusinessStatsGroupRevenue(orders)
+  const scene = isCampingOrder(orders[0]) ? 'camping' : 'dineIn'
+  const peopleCount = getSettlementPeopleCount(orders)
+  return {
+    id: key,
+    scene,
+    sceneText: scene === 'camping' ? '户外自取' : '堂食',
+    tableText: getSettlementTableText(orders),
+    paidAt,
+    peopleCount,
+    peopleText: peopleCount > 0 ? `${peopleCount}人` : '未记录',
+    totalPrice: getSettlementGroupTotal(orders),
+    receivable,
+    paymentText: getSettlementPaymentText(orders),
+    discountText: discount.discountText,
+    directReduceText: discount.directReduceText,
+    orderCount: orders.length
+  }
+}
+
+function buildSettlementRecordDetail(key, orders = []) {
+  const record = buildSettlementRecord(key, orders)
+  const orderGroups = orders
+    .slice()
+    .sort((left, right) => {
+      const leftOrder = left.isAddOnOrder ? Math.max(1, Number(left.addOnIndex || 1)) : 0
+      const rightOrder = right.isAddOnOrder ? Math.max(1, Number(right.addOnIndex || 1)) : 0
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder
+      return getTimeValue(left.createTime) - getTimeValue(right.createTime)
+    })
+    .map((order, index) => {
+      const goods = formatAdminGoods(order.goods).map(item => ({
+        dishName: item.dishName || '未命名菜品',
+        count: item.count,
+        subtotal: item.subtotal
+      }))
+      return {
+        id: order._id,
+        title: getAdminOrderTitle(order, index),
+        goods,
+        totalPrice: roundMoney(order.finalPrice || order.totalPrice || 0)
+      }
+    })
+  return {
+    ...record,
+    orderGroups
+  }
+}
+
+async function listSettledOrdersByDate(tenantId, dateRange) {
+  await ensureCollection('order')
+  const query = {
+    type: 'order',
+    storeId: tenantId,
+    status: _.in(['paid', 'completed']),
+    checkoutAt: _.gte(dateRange.start),
+    deleted: _.neq(true)
+  }
+  try {
+    const res = await db.collection('order')
+      .where(query)
+      .orderBy('checkoutAt', 'asc')
+      .limit(500)
+      .get()
+    return (res.data || []).filter(order => {
+      const paidAt = getBusinessStatsPaidTime(order)
+      return paidAt >= dateRange.start.getTime() && paidAt < dateRange.end.getTime()
+    })
+  } catch (err) {
+    console.warn('list settled orders by date fallback', err)
+    const res = await db.collection('order')
+      .where({ type: 'order', storeId: tenantId })
+      .orderBy('checkoutAt', 'desc')
+      .limit(500)
+      .get()
+    return (res.data || []).filter(order => {
+      const paidAt = getBusinessStatsPaidTime(order)
+      return isAdminPaidOrder(order) && order.deleted !== true &&
+        paidAt >= dateRange.start.getTime() && paidAt < dateRange.end.getTime()
+    })
+  }
+}
+
+async function adminListSettlementRecords(payload) {
+  const dateRange = getSettlementDateRange(payload.date)
+  if (!dateRange) {
+    return {
+      success: false,
+      code: 'SETTLEMENT_DATE_INVALID',
+      message: 'settlement date must be within the latest 60 days'
+    }
+  }
+  const orders = await listSettledOrdersByDate(getTenantId(payload), dateRange)
+  const groups = buildSettlementGroups(orders)
+  const records = Object.keys(groups)
+    .map(key => buildSettlementRecord(key, groups[key]))
+    .sort((left, right) => right.paidAt - left.paidAt)
+  return {
+    success: true,
+    data: {
+      date: dateRange.value,
+      records,
+      total: records.length,
+      isTruncated: orders.length >= 500
+    }
+  }
+}
+
+async function adminGetSettlementRecord(payload) {
+  const dateRange = getSettlementDateRange(payload.date)
+  const recordId = String(payload.recordId || '').trim()
+  if (!dateRange || !recordId) {
+    return {
+      success: false,
+      code: 'SETTLEMENT_RECORD_REQUIRED',
+      message: 'settlement record is required'
+    }
+  }
+  const orders = await listSettledOrdersByDate(getTenantId(payload), dateRange)
+  const groups = buildSettlementGroups(orders)
+  const groupOrders = groups[recordId]
+  if (!groupOrders || groupOrders.length === 0) {
+    return {
+      success: false,
+      code: 'SETTLEMENT_RECORD_NOT_FOUND',
+      message: 'settlement record not found'
+    }
+  }
+  return {
+    success: true,
+    data: buildSettlementRecordDetail(recordId, groupOrders)
   }
 }
 
@@ -2746,7 +3137,7 @@ function buildAdminTableSections(orders, tableGroups = [], tableSessions = []) {
 function getAdminOrderStatusText(order) {
   if (hasKitchenPrintFailure(order)) return '\u540e\u53a8\u6253\u5370\u5f02\u5e38'
   if (isAdminPaidOrder(order)) return '已支付'
-  if (isAdminPreparingOrder(order)) return '制作中'
+  if (isAdminPreparingOrder(order)) return '\u5df2\u53d1\u9001'
   return '已提交'
 }
 
@@ -2926,7 +3317,7 @@ function buildAdminBillGroups(orders) {
       hasKitchenPrintFailure: hasKitchenPrintFailure(order),
       kitchenFailedDishes,
       frontDeskConfirmed: order.frontDeskConfirmed === true,
-      // Payment confirmation and kitchen dispatch are separate front-desk actions.
+      // Payment and kitchen dispatch remain independent operations.
       canSendKitchen: isKitchenPrintableOrder(order)
     }
   })
@@ -2953,7 +3344,7 @@ async function listVisibleTableOrders() {
 }
 
 async function adminListTables() {
-  const [res, tableGroups, tableSessions, reservationRes, boardVersion, activityStamp] = await Promise.all([
+  const [res, tableGroups, tableSessions, reservationRes, boardVersion, activityStamp, todayArrival] = await Promise.all([
     listVisibleTableOrders(),
     listActiveTableGroups(),
     listActiveTableSessions(),
@@ -2963,7 +3354,8 @@ async function adminListTables() {
       .limit(100)
       .get(),
     getAdminTableBoardVersion(),
-    getAdminTableActivityStamp()
+    getAdminTableActivityStamp(),
+    getTableArrivalSnapshot('today')
   ])
 
   return {
@@ -2972,7 +3364,8 @@ async function adminListTables() {
       sections: buildAdminTableSections(res.data || [], tableGroups, tableSessions),
       reservations: reservationRes.data || [],
       boardVersion,
-      activityStamp
+      activityStamp,
+      todayArrival
     }
   }
 }
@@ -3780,7 +4173,7 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes, options = {}) {
     const skipped = dispatch.status === 'skipped'
     return {
       ...item,
-      kitchenSent: queued || printed || skipped,
+      kitchenSent: queued || printed,
       kitchenStatus: printed ? 'printed' : (queued ? 'queued' : (skipped ? 'not_required' : 'failed')),
       kitchenSentAt: queued || printed ? sendTime : item.kitchenSentAt || null,
       kitchenPrintedAt: printed ? sendTime : item.kitchenPrintedAt || null,
@@ -3811,12 +4204,21 @@ async function sendOrderDishesToKitchen(orderId, dishIndexes, options = {}) {
     }
   })
 
+  // A table is marked as sent only after every selected dish has entered the
+  // print pipeline. Failed jobs remain visible to the operator as unsent.
+  const fullyDispatched = allSent && !hasDispatchFailure
+  const nextStatus = isAdminPaidOrder(order)
+    ? order.status
+    : (fullyDispatched ? 'pending_prepare' : (order.status || 'submitted'))
+
   await db.collection('order').doc(orderId).update({
     data: {
       goods: nextGoods,
       // Do not overwrite a completed payment status when a paid order is re-sent to the kitchen.
-      status: isAdminPaidOrder(order) ? order.status : 'pending_prepare',
-      frontDeskConfirmed: true,
+      status: nextStatus,
+      frontDeskConfirmed: isAdminPaidOrder(order)
+        ? order.frontDeskConfirmed === true
+        : (fullyDispatched || order.frontDeskConfirmed === true),
       kitchenPrinted: allPrinted,
       kitchenPrintStatus: hasDispatchFailure ? 'partial_failed' : (allPrinted ? 'printed' : 'queued'),
       kitchenLogs: [
@@ -3863,7 +4265,10 @@ async function adminSendKitchenItems(payload) {
 
   const results = []
   for (const orderId of orderIds) {
-    const result = await sendOrderDishesToKitchen(orderId, groupedItems[orderId])
+    const eventKey = payload.forceResend === true
+      ? `manual-resend:${Date.now()}:${orderId}:${groupedItems[orderId].join(',')}`
+      : ''
+    const result = await sendOrderDishesToKitchen(orderId, groupedItems[orderId], { eventKey })
     if (!result.success) {
       return result
     }
@@ -7391,7 +7796,7 @@ async function adminListInfoCenter(payload) {
     db.collection('order')
       .where({
         type: 'order',
-        status: 'submitted',
+        status: _.in(['submitted', 'pending_prepare', 'preparing']),
         deleted: _.neq(true)
       })
       .orderBy('createTime', 'desc')
@@ -7814,6 +8219,8 @@ async function handleAction(action, payload) {
     action.indexOf('admin.tableCode.') === 0 ||
     action.indexOf('admin.merchantCode.') === 0 ||
     action.indexOf('admin.order.') === 0 ||
+    action.indexOf('admin.business.') === 0 ||
+    action.indexOf('admin.settlement.') === 0 ||
     action.indexOf('admin.notification.') === 0 ||
     action.indexOf('admin.collection.') === 0 ||
     action.indexOf('admin.shop.') === 0 ||
@@ -7867,6 +8274,8 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.giftDishes') return completeAdminTableMutation(adminGiftDishes(payload))
   if (action === 'admin.table.updateDish') return completeAdminTableMutation(adminUpdateTableDish(payload))
   if (action === 'admin.business.stats') return adminGetBusinessStats(payload)
+  if (action === 'admin.settlement.list') return adminListSettlementRecords(payload)
+  if (action === 'admin.settlement.detail') return adminGetSettlementRecord(payload)
   if (action === 'admin.notification.list') return adminListInfoCenter(payload)
   if (action === 'admin.collection.list') return adminCollectionList(payload)
   if (action === 'admin.collection.save') return completeReservationMutation(adminCollectionSave(payload), payload)

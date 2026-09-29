@@ -1,5 +1,5 @@
 <!-- packages/admin/pages/admin/table/table.wxml -->
-<view class="table-page">
+<view class="table-page" capture-bind:tap="onAdminTap">
   <view class="transfer-banner" wx:if="{{transferMode}}">
     <view class="transfer-copy">
       <text class="transfer-title">{{ui.transferTitle}}</text>
@@ -53,6 +53,12 @@
   </view>
 
   <scroll-view class="table-board {{transferMode || mergeMode ? 'table-board-transfer' : ''}} {{reservationReminders.length > 0 && !transferMode && !mergeMode ? 'table-board-reservation' : ''}}" scroll-y bindtap="clearTableSelection">
+    <view class="table-board-top">
+      <view class="today-arrival-chip">
+        <text class="today-arrival-label">{{ui.todayArrival}}</text>
+        <text class="today-arrival-value">{{todayArrivalCount}}{{ui.peopleUnit}}</text>
+      </view>
+    </view>
     <view class="table-section" wx:for="{{tableSections}}" wx:for-item="section" wx:key="areaKey">
       <view class="section-title">{{section.areaName}}</view>
       <view class="table-section-body">

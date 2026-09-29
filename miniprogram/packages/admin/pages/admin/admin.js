@@ -1,5 +1,6 @@
 // packages/admin/pages/admin/admin.js
 const apiClient = require('../../../../utils/apiClient')
+const adminSound = require('../../utils/adminSound')
 
 const ADMIN_ROOT = '/packages/admin/pages/admin'
 const RESERVATION_TIME_OPTIONS = ['11:00', '11:30', '12:00', '18:00', '19:00']
@@ -32,6 +33,7 @@ const ADMIN_TEXT = {
   coreSection: '\u6838\u5fc3\u4e1a\u52a1',
   orderTitle: '\u684c\u53f0\u7ba1\u7406',
   businessStatsTitle: '\u8425\u4e1a\u7edf\u8ba1',
+  settlementTitle: '\u7ed3\u7b97\u8bb0\u5f55',
   dishTitle: '\u83dc\u54c1\u7ba1\u7406',
   reservationTitle: '\u9884\u7ea6\u7ba1\u7406',
   outdoorTitle: '\u6237\u5916\u8ba2\u5355',
@@ -102,6 +104,10 @@ function formatReservation(item = {}) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     ui: ADMIN_TEXT,
     authChecked: false,
@@ -260,6 +266,10 @@ Page({
 
   goToBusinessStats() {
     wx.navigateTo({ url: `${ADMIN_ROOT}/business/business` })
+  },
+
+  goToSettlement() {
+    wx.navigateTo({ url: `${ADMIN_ROOT}/order/order` })
   },
 
   goToTableCode() {

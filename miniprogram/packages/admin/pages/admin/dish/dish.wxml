@@ -1,5 +1,5 @@
 <!-- packages/admin/pages/admin/dish/dish.wxml -->
-<view class="page">
+<view class="page" capture-bind:tap="onAdminTap">
   <view class="top-bar">
     <view class="title-search">
       <view class="page-title">{{ui.pageTitle}}</view>

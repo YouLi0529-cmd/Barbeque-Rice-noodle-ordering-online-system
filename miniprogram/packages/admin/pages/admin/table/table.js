@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const adminSound = require('../../../utils/adminSound')
 
 const UI = {
   title: '\u684c\u53f0\u7ba1\u7406',
@@ -45,7 +46,9 @@ const UI = {
   clearConfirmPrefix: '\u786e\u5b9a\u5c06',
   clearConfirmSuffix: '\u6062\u590d\u4e3a\u7a7a\u684c\u5e76\u6e05\u9664\u62fc\u684c\u5173\u7cfb\u5417',
   clearSuccess: '\u5df2\u6e05\u53f0',
-  clearFailed: '\u6e05\u53f0\u5931\u8d25'
+  clearFailed: '\u6e05\u53f0\u5931\u8d25',
+  todayArrival: '\u4eca\u65e5\u5230\u5e97',
+  peopleUnit: '\u4eba'
 }
 
 const TABLE_DETAIL_PAGE = '/packages/admin/pages/admin/tableDetail/tableDetail'
@@ -60,7 +63,7 @@ const STATUS = {
     className: 'status-submitted'
   },
   preparing: {
-    text: '\u5236\u4f5c\u4e2d',
+    text: '\u5df2\u53d1\u9001',
     className: 'status-preparing'
   },
   paid: {
@@ -213,6 +216,10 @@ function formatReservationReminder(item = {}) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     ui: UI,
     loading: false,
@@ -237,7 +244,8 @@ Page({
     selectedReservationReminderIds: [],
     selectedTableMap: {},
     selectedTableCount: 0,
-    clearingTable: false
+    clearingTable: false,
+    todayArrivalCount: 0
   },
 
   onLoad() {
@@ -303,11 +311,15 @@ Page({
       const reservations = hasReservations ? res.data.reservations : []
       const boardVersion = Number(res && res.data && res.data.boardVersion)
       const activityStamp = String(res && res.data && res.data.activityStamp || '')
+      const todayArrivalCount = Math.max(0, Math.floor(Number(
+        res && res.data && res.data.todayArrival && res.data.todayArrival.peopleCount || 0
+      )))
 
       if (sections.length > 0) {
         this.rawTables = sections
         this.refreshTables()
       }
+      this.setData({ todayArrivalCount })
       if (Number.isFinite(boardVersion)) this.tableBoardVersion = boardVersion
       if (activityStamp) this.tableBoardActivityStamp = activityStamp
       if (hasReservations) {

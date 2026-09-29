@@ -239,6 +239,39 @@ page {
   padding-top: 10rpx;
 }
 
+.table-board-top {
+  height: 26rpx;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  box-sizing: border-box;
+}
+
+.today-arrival-chip {
+  height: 22rpx;
+  padding: 0 9rpx;
+  display: inline-flex;
+  align-items: center;
+  gap: 6rpx;
+  box-sizing: border-box;
+  border: 1rpx solid rgba(75, 157, 100, 0.26);
+  border-radius: 5rpx;
+  color: #32683F;
+  background: #EEF8F0;
+  box-shadow: 0 3rpx 8rpx rgba(58, 36, 24, 0.06);
+}
+
+.today-arrival-label {
+  font-size: 9rpx;
+  font-weight: 800;
+}
+
+.today-arrival-value {
+  color: #24753A;
+  font-size: 11rpx;
+  font-weight: 900;
+}
+
 .table-section {
   margin-bottom: 8rpx;
 }

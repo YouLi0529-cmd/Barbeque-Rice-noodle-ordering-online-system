@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const adminSound = require('../../../utils/adminSound')
 
 const CACHE_KEY = 'adminWaiterMenuCacheV2'
 const CACHE_TTL = 10 * 60 * 1000
@@ -25,6 +26,10 @@ function buildPackageSummary(items = []) {
 }
 
 Page({
+  onAdminTap(event) {
+    adminSound.playClick(event)
+  },
+
   data: {
     areaKey: 'normal', areaName: '', tableNumber: '', peopleCount: 1,
     mode: 'add', modeText: '服务员加菜',

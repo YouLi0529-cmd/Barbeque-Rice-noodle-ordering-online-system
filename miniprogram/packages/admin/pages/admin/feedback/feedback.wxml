@@ -1,4 +1,4 @@
-<view class="feedback-admin-page">
+<view class="feedback-admin-page" capture-bind:tap="onAdminTap">
   <view class="top-bar">
     <view class="page-title">意见收集</view>
     <view class="top-actions">
