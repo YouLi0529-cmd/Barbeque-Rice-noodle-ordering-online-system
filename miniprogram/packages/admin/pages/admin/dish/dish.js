@@ -27,6 +27,7 @@ const UI = {
   categoryName: '\u5206\u7c7b\u540d\u79f0',
   dishCategory: '\u6240\u5c5e\u5206\u7c7b',
   dishName: '\u83dc\u54c1\u540d\u79f0',
+  kitchenPrintName: '后厨打印菜名',
   price: '\u552e\u4ef7',
   originalPrice: '\u539f\u4ef7',
   unit: '\u5355\u4f4d',
@@ -60,6 +61,8 @@ const UI = {
   specOptionRequired: '\u8bf7\u81f3\u5c11\u4fdd\u7559\u4e00\u4e2a\u9009\u9879',
   inputCategoryName: '\u8bf7\u8f93\u5165\u5206\u7c7b\u540d\u79f0',
   inputDishName: '\u8bf7\u8f93\u5165\u83dc\u54c1\u540d\u79f0',
+  inputKitchenPrintName: '可选，不填时后厨小票使用原菜名',
+  kitchenPrintNameTip: '仅后厨制作、加菜、催菜、退菜小票使用；顾客端与结账小票仍显示原菜名',
   inputPrice: '\u8bf7\u8f93\u5165\u4ef7\u683c',
   inputUnit: '\u4f8b\u5982\uff1a\u4efd',
   inputDescription: '\u8bf7\u8f93\u5165\u63cf\u8ff0',
@@ -114,6 +117,7 @@ const DEFAULT_CATEGORY = {
 const DEFAULT_DISH = {
   _id: '',
   name: '',
+  kitchenPrintName: '',
   price: '',
   originalPrice: '',
   description: '',
@@ -1159,7 +1163,7 @@ Page({
   },
 
   closeDishCategoryDropdown() {
-    this.setData({ showCategoryDropdown: false })
+    if (this.data.showCategoryDropdown) this.setData({ showCategoryDropdown: false })
   },
 
   selectDishCategory(e) {

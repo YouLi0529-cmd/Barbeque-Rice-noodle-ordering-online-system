@@ -58,6 +58,11 @@
         <text class="today-arrival-label">{{ui.todayArrival}}</text>
         <text class="today-arrival-value">{{todayArrivalCount}}{{ui.peopleUnit}}</text>
       </view>
+      <view class="unsettled-total-chip">
+        <text class="today-arrival-label">{{ui.unsettledTotal}}</text>
+        <text class="unsettled-total-value">¥{{unsettledTotalText}}</text>
+      </view>
+      <view class="dish-search-button" catchtap="openDishSearch">{{ui.searchDish}}</view>
     </view>
     <view class="table-section" wx:for="{{tableSections}}" wx:for-item="section" wx:key="areaKey">
       <view class="section-title">{{section.areaName}}</view>
@@ -115,5 +120,26 @@
     class="clear-table-btn {{selectedTableCount > 0 ? 'selected' : ''}}"
     bindtap="confirmClearTable"
   >{{ui.clearTable}}{{selectedTableCount > 0 ? ' (' + selectedTableCount + ')' : ''}}</view>
+  <view class="dish-search-mask" wx:if="{{showDishSearch}}" catchtap="closeDishSearch">
+    <view class="dish-search-dialog" catchtap="stopPropagation">
+      <view class="dish-search-title">{{ui.searchDishTitle}}</view>
+      <view class="dish-search-controls">
+        <input class="dish-search-input" value="{{dishSearchQuery}}" placeholder="{{ui.searchDishPlaceholder}}" confirm-type="search" bindinput="onDishSearchInput" bindconfirm="searchOpenTableDishes" />
+        <view class="dish-search-submit" catchtap="searchOpenTableDishes">{{searchingDish ? '…' : ui.searchDish}}</view>
+      </view>
+      <scroll-view class="dish-search-results" scroll-y>
+        <view class="dish-search-empty" wx:if="{{!dishSearchQuery}}">{{ui.searchDishEmpty}}</view>
+        <view class="dish-search-empty" wx:elif="{{!searchingDish && dishSearchResults.length === 0}}">{{ui.searchDishNoResults}}</view>
+        <view class="dish-search-result" wx:for="{{dishSearchResults}}" wx:key="id" catchtap="openDishSearchTable" data-area-key="{{item.areaKey}}" data-area="{{item.areaName}}" data-table="{{item.tableNumber}}">
+          <view class="dish-search-result-main">
+            <text class="dish-search-result-table">{{item.tableText}}</text>
+            <text class="dish-search-result-name">{{item.dishName}} ×{{item.count}}</text>
+          </view>
+          <text class="dish-search-result-time">{{item.orderTimeText}}</text>
+        </view>
+      </scroll-view>
+      <view class="dish-search-close" catchtap="closeDishSearch">关闭</view>
+    </view>
+  </view>
 </view>
 <admin-info-center />

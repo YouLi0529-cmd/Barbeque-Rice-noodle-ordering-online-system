@@ -154,7 +154,7 @@ function mergeKitchenDishes(entries = []) {
     }
     groups.set(signature, {
       dishId,
-      dishName: valueOf(item, ['dishName', 'name']),
+      dishName: valueOf(item, ['kitchenPrintName', 'dishName', 'name']),
       specification,
       method,
       taste,
@@ -350,6 +350,7 @@ const CASHIER_TICKETS = [
   { ticketType: 'checkout', name: '\u7ed3\u8d26\u5355' },
   { ticketType: 'refund', name: '\u9000\u5355' }
 ]
+const FRONT_COUNTER_TICKETS = new Set(['customer_order', 'checkout'])
 
 const TEMPLATE_DEFINITIONS = [
   ...CASHIER_TICKETS.map(item => ({ ...item, scope: 'cashier', paperWidth: 58 })),
@@ -868,10 +869,6 @@ function createPrintService({ db, _, defaultTenantId }) {
       }
     }
 
-    // Existing stores may have independently edited settlement templates. Keep the
-    // prebill layout aligned with the checkout layout while preserving each title.
-    const checkoutTemplate = await getDoc('receiptTemplates', stableId('template', `${id}:checkout`))
-    await syncSettlementTemplateLayout(id, checkoutTemplate, 'settlement-layout-initial-sync')
   }
 
   async function getActor() {
@@ -1005,6 +1002,9 @@ function createPrintService({ db, _, defaultTenantId }) {
     if (key === 'totalPrice' && value !== undefined && value !== null && value !== '') {
       return data.compactMoney ? formatCompactMoney(value) : `\uffe5${Number(value || 0).toFixed(2)}`
     }
+    if (key === 'totalCount' && value !== undefined && value !== null && value !== '') {
+      return `共${Number(value || 0)}份`
+    }
     if (key === 'orderTime' && value !== undefined && value !== null && value !== '') {
       const orderTime = String(value)
       return orderTime.startsWith('\u4e0b\u5355\u65f6\u95f4\uff1a') ? orderTime : `\u4e0b\u5355\u65f6\u95f4\uff1a${orderTime}`
@@ -1050,7 +1050,7 @@ function createPrintService({ db, _, defaultTenantId }) {
  }
 
   function formatCashierMoneyRow(label, amount, paperWidth) {
-    const lineWidth = Number(paperWidth || 58) >= 80 ? 48 : 32
+    const lineWidth = Number(paperWidth || 58) >= 76 ? 48 : 32
     const left = String(label || '')
     const right = formatCompactMoney(amount)
     const gap = Math.max(1, lineWidth - ticketTextWidth(left) - ticketTextWidth(right))
@@ -1121,12 +1121,14 @@ function createPrintService({ db, _, defaultTenantId }) {
     const lines = []
     const fields = Array.isArray(template.fields) ? template.fields : []
     fields.forEach(field => {
-      const value = getTicketValue(field.key, data)
+      const content = field.key === 'dishes' ? '' : text(field.content)
+      const value = content || getTicketValue(field.key, data)
       if (isEmptyValue(value)) return
       if (field.blankBefore) lines.push({ kind: 'blank' })
       lines.push({
         kind: field.key === 'dishes' ? 'dishes' : 'text',
         key: field.key,
+        customContent: !!content,
         text: String(value),
         size: field.size || 'normal',
         align: field.align || 'left',
@@ -1159,7 +1161,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     const printTime = `\u6253\u5370\u65f6\u95f4\uff1a${formatPrintTime(timestamp)}`
     return {
       ...source,
-      lines: lines.map(line => line && line.key === 'printTime'
+      lines: lines.map(line => line && line.key === 'printTime' && !line.customContent
         ? { ...line, text: printTime }
         : line)
     }
@@ -1192,86 +1194,16 @@ function createPrintService({ db, _, defaultTenantId }) {
     return { bindScope, stationId, printerId }
   }
 
-  function settlementPeerTicketType(ticketType) {
-    if (ticketType === 'checkout') return 'prebill'
-    if (ticketType === 'prebill') return 'checkout'
-    return ''
-  }
-
-  async function syncSettlementTemplateLayout(id, sourceTemplate, reason = 'settlement-layout-sync') {
-    if (!sourceTemplate || !isSettlementTicket(sourceTemplate.ticketType)) return null
-
-    const peerTicketType = settlementPeerTicketType(sourceTemplate.ticketType)
-    const definition = TEMPLATE_DEFINITIONS.find(item => item.ticketType === peerTicketType)
-    if (!definition) return null
-
-    const binding = {
-      bindScope: text(sourceTemplate.bindScope || 'global'),
-      stationId: text(sourceTemplate.stationId),
-      printerId: text(sourceTemplate.printerId)
-    }
-    const peerTemplateId = templateIdFor(id, peerTicketType, binding)
-    const existing = await getDoc('receiptTemplates', peerTemplateId)
-    const fields = normalizeTemplateFields(sourceTemplate.fields)
-    if (!fields.length) return existing
-
-    const sameLayout = existing
-      && JSON.stringify(existing.fields || []) === JSON.stringify(fields)
-      && Number(existing.paperWidth || 0) === Number(sourceTemplate.paperWidth || 0)
-      && text(existing.bindScope || 'global') === binding.bindScope
-      && text(existing.stationId) === binding.stationId
-      && text(existing.printerId) === binding.printerId
-    if (sameLayout) return existing
-
-    if (existing) {
-      await db.collection('receiptTemplateVersions').add({
-        data: {
-          storeId: id,
-          templateId: peerTemplateId,
-          ticketType: peerTicketType,
-          version: existing.version || 1,
-          fields: existing.fields || [],
-          createTime: now(),
-          reason
-        }
-      })
-    }
-
-    const data = documentData({
-      ...(existing || defaultTemplate(definition)),
-      _id: peerTemplateId,
-      storeId: id,
-      ticketType: peerTicketType,
-      // Keep the peer ticket's own title. Only its layout follows the source ticket.
-      name: text(existing && existing.name || definition.name),
-      scope: definition.scope,
-      fields,
-      paperWidth: Number(sourceTemplate.paperWidth) || definition.paperWidth,
-      bindScope: binding.bindScope,
-      stationId: binding.stationId,
-      printerId: binding.printerId,
-      cashierSummaryVersion: 5,
-      orderRemarkRemovedVersion: 1,
-      settlementLayoutSyncVersion: 1,
-      version: existing ? number(existing.version, 1, 1) + 1 : 1,
-      createTime: existing && existing.createTime || now(),
-      updateTime: now()
-    })
-    await db.collection('receiptTemplates').doc(peerTemplateId).set({ data })
-    await audit(id, 'template.settlement-layout.sync', 'receiptTemplate', peerTemplateId, existing || {}, data)
-    return { _id: peerTemplateId, ...data }
-  }
-
   async function findTemplate(id, ticketType, context = {}) {
     const templates = await listDocs('receiptTemplates', { storeId: id })
     const candidates = templates.filter(item => item.ticketType === ticketType)
     const printerId = text(context.printerId)
     const stationId = text(context.stationId)
-    const printerTemplate = candidates.find(item => item.bindScope === 'printer' && item.printerId === printerId)
+    const printerTemplate = printerId && (candidates.find(item => item._id === templateIdFor(id, ticketType, { bindScope: 'printer', printerId })) || candidates.find(item => item.bindScope === 'printer' && item.printerId === printerId))
     if (printerTemplate) return printerTemplate
-    const stationTemplate = candidates.find(item => item.bindScope === 'station' && item.stationId === stationId)
+    const stationTemplate = stationId && (candidates.find(item => item._id === templateIdFor(id, ticketType, { bindScope: 'station', stationId })) || candidates.find(item => item.bindScope === 'station' && item.stationId === stationId))
     if (stationTemplate) return stationTemplate
-    const globalTemplate = candidates.find(item => !item.bindScope || item.bindScope === 'global')
+    const globalTemplate = candidates.find(item => item._id === templateIdFor(id, ticketType)) || candidates.find(item => !item.bindScope || item.bindScope === 'global')
     if (globalTemplate) return globalTemplate
     const definition = TEMPLATE_DEFINITIONS.find(item => item.ticketType === ticketType)
     return definition ? defaultTemplate(definition) : defaultTemplate(TEMPLATE_DEFINITIONS[0])
@@ -1416,7 +1348,10 @@ function createPrintService({ db, _, defaultTenantId }) {
       }
       const station = configuredStation || getStationByCode(stationMap, id, plan.stationCode) || fallback
       if (!groups[station._id]) groups[station._id] = []
-      groups[station._id].push(entry)
+      const kitchenPrintName = text(dishMap[dishId] && dishMap[dishId].kitchenPrintName)
+      groups[station._id].push(kitchenPrintName
+        ? { ...entry, item: { ...item, kitchenPrintName } }
+        : entry)
       if (!configuredStation && !plan.stationCode) {
         alertWrites.push({ entry, station })
       }
@@ -1460,23 +1395,24 @@ function createPrintService({ db, _, defaultTenantId }) {
       const type = kitchenTicketType(kind, order)
       const template = await findTemplate(id, type, { stationId: station._id, printerId: printer._id })
       const title = kitchenTicketTitle(type)
-     const dishes = mergeKitchenDishes(entries)
-     const ticketData = {
-       title,
+      const dishes = mergeKitchenDishes(entries)
+      const ticketData = {
+        title: template.name || title,
         tableNumber: kitchenTableNumberText(order),
         orderType: kitchenOrderTypeText(order),
         peopleCount: kitchenPeopleCountText(order),
-       orderNumber: order.orderNumber || order._id,
-        orderTime: new Date(order.createTime || now()).toLocaleString('zh-CN', { hour12: false }),
+        orderNumber: order.orderNumber || order._id,
+        orderTime: formatPrintTime(order.createTime || now()),
         printTime: '\u6253\u5370\u65f6\u95f4\uff1a\u7b49\u5f85\u53d1\u9001',
-       dishes
-     }
+        dishes,
+        totalCount: dishes.reduce((sum, dish) => sum + Number(dish.count || 0), 0)
+      }
       const jobResult = await createJob(id, {
         printer,
         stationId: station._id,
         stationName: station.name,
         ticketType: type,
-        ticketName: title,
+        ticketName: template.name || title,
         orderId: order._id,
         orderNumber: ticketData.orderNumber,
         tableNumber: ticketData.tableNumber,
@@ -1516,11 +1452,18 @@ function createPrintService({ db, _, defaultTenantId }) {
     const configs = await listDocs('cashierPrintConfigs', { storeId: id })
     const config = configs.find(item => item.ticketType === ticketType)
     if (!config || config.enabled === false) return { jobs: [], skipped: true }
-    const printer = await getDoc('printers', config.printerId)
+    const frontStation = FRONT_COUNTER_TICKETS.has(ticketType)
+      ? await getDoc('printStations', stableId('station', `${id}:front-counter`))
+      : null
+    if (FRONT_COUNTER_TICKETS.has(ticketType) && (!frontStation || frontStation.status === false)) {
+      return { jobs: [], skipped: true, reason: 'front-counter station unavailable' }
+    }
+    const printer = await getDoc('printers', frontStation ? frontStation.printerId : config.printerId)
     if (!printer || printer.status === false) return { jobs: [], skipped: true, reason: 'cashier printer unavailable' }
     const sortedOrders = (orders || []).slice().sort((a, b) => new Date(a.createTime || 0).getTime() - new Date(b.createTime || 0).getTime())
     const first = sortedOrders[0] || {}
-    const useCashierDishTable = ticketType === 'checkout' || ticketType === 'prebill'
+    const peopleCount = sortedOrders.reduce((count, order) => Math.max(count, Number(order.peopleCount || 0)), 0)
+    const useCashierDishTable = ticketType === 'checkout' || ticketType === 'prebill' || ticketType === 'customer_order'
     const dishEntries = sortedOrders.reduce((list, order) => {
       return list.concat((Array.isArray(order.goods) ? order.goods : []).map((item, index) => ({ index: `${order._id || ''}-${index}`, item })))
     }, [])
@@ -1531,7 +1474,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     const settlementTicketData = useCashierDishTable
       ? buildCashierSettlementTicketData(checkoutSummary, fallbackOrderAmount, printer.paperWidth)
       : {}
-    const template = await findTemplate(id, ticketType)
+    const template = await findTemplate(id, ticketType, { printerId: printer._id })
     const jobResult = await createJob(id, {
       printer,
       ticketType,
@@ -1543,16 +1486,19 @@ function createPrintService({ db, _, defaultTenantId }) {
       ticketData: {
         title: template.name,
         shopName: first.shopName || '',
-        tableNumber: first.tableNumber || '',
+        tableNumber: first.tableNumber ? `桌号：${first.tableNumber}` : '',
         orderNumber: first.rootOrderId || first._id || '',
-        orderTime: new Date(first.createTime || now()).toLocaleString('zh-CN', { hour12: false }),
+        peopleCount: peopleCount ? `人数：${peopleCount}人` : '',
+        orderType: first.orderScene === 'camping' ? '类型：露营' : '类型：堂食',
+        totalCount: allDishes.reduce((sum, dish) => sum + Number(dish.count || 0), 0),
+        orderTime: formatPrintTime(first.createTime || now()),
         printTime: '\u6253\u5370\u65f6\u95f4\uff1a\u7b49\u5f85\u53d1\u9001',
         dishes: allDishes,
         dishDisplayMode: useCashierDishTable ? 'cashier' : '',
         dishTableWidth: printer.paperWidth || 58,
         compactMoney: useCashierDishTable,
         ...settlementTicketData,
-        totalPrice: checkoutSummary.receivable !== undefined ? checkoutSummary.receivable : first.finalPrice || first.totalPrice || 0
+        totalPrice: checkoutSummary.receivable !== undefined ? checkoutSummary.receivable : fallbackOrderAmount
       },
       payload: { ticketType, orderIds: sortedOrders.map(order => order._id), checkoutSummary },
       copies: config.copies,
@@ -1943,9 +1889,13 @@ function createPrintService({ db, _, defaultTenantId }) {
   async function listCashierConfigs(payload) {
     const id = storeId(payload)
     await ensureDefaults(id)
-    const [configs, printers] = await Promise.all([listDocs('cashierPrintConfigs', { storeId: id }), listPrinters(id)])
+    const [configs, printers, frontStation] = await Promise.all([
+      listDocs('cashierPrintConfigs', { storeId: id }),
+      listPrinters(id),
+      getDoc('printStations', stableId('station', `${id}:front-counter`))
+    ])
     const map = printers.reduce((result, printer) => ({ ...result, [printer._id]: printer }), {})
-    return { success: true, data: configs.map(config => ({ ...config, printer: map[config.printerId] || null })) }
+    return { success: true, data: configs.map(config => ({ ...config, printer: map[FRONT_COUNTER_TICKETS.has(config.ticketType) && frontStation ? frontStation.printerId : config.printerId] || null })) }
   }
 
   async function saveCashierConfig(payload) {
@@ -1956,62 +1906,46 @@ function createPrintService({ db, _, defaultTenantId }) {
     const configId = stableId('cashier', `${id}:${ticketType}`)
     const existing = await getDoc('cashierPrintConfigs', configId)
     if (!existing) return { success: false, code: 'CASHIER_CONFIG_NOT_FOUND', message: 'cashier config not found' }
-    const printer = await getDoc('printers', text(input.printerId || existing.printerId))
-    if (!printer || printer.storeId !== id || printer.connectionType !== 'usb' || printer.status === false) return { success: false, code: 'CASHIER_USB_PRINTER_REQUIRED', message: 'cashier receipt requires an enabled USB printer' }
+    const frontStation = FRONT_COUNTER_TICKETS.has(ticketType)
+      ? await getDoc('printStations', stableId('station', `${id}:front-counter`))
+      : null
+    const printer = await getDoc('printers', frontStation ? frontStation.printerId : text(input.printerId || existing.printerId))
+    if (!printer || printer.storeId !== id || printer.status === false ||
+      (FRONT_COUNTER_TICKETS.has(ticketType) ? !frontStation || frontStation.status === false : printer.connectionType !== 'usb')) {
+      return { success: false, code: 'CASHIER_PRINTER_REQUIRED', message: '客单和结账单需要启用前台档口及其绑定的打印机；其他收银票据需要启用 USB 打印机' }
+    }
     const data = { enabled: bool(input.enabled, existing.enabled), copies: number(input.copies, existing.copies || 1, 1, 9), printerId: printer._id, updateTime: now() }
     await db.collection('cashierPrintConfigs').doc(configId).update({ data })
     await audit(id, 'cashier-config.update', 'cashierPrintConfig', configId, existing, data)
     return { success: true, data: await getDoc('cashierPrintConfigs', configId) }
   }
 
-  async function removeUnversionedDuplicateCheckoutTemplates(id, templates) {
-    const checkoutTemplates = templates.filter(template => template.ticketType === 'checkout')
-    if (checkoutTemplates.length < 2) return templates
-
-    const versions = await listDocs('receiptTemplateVersions', { storeId: id }, 500)
-    const versionCount = versions.reduce((map, version) => {
-      map[version.templateId] = (map[version.templateId] || 0) + 1
-      return map
-    }, {})
-    const savedTemplate = checkoutTemplates
-      .filter(template => Number(versionCount[template._id] || 0) > 0)
-      .sort((a, b) => Number(versionCount[b._id] || 0) - Number(versionCount[a._id] || 0) || new Date(b.updateTime || 0) - new Date(a.updateTime || 0))[0]
-    if (!savedTemplate) return templates
-
-    const removable = checkoutTemplates.filter(template => template._id !== savedTemplate._id && Number(versionCount[template._id] || 0) === 0)
-    if (!removable.length) return templates
-
-    await Promise.all(removable.map(template => db.collection('receiptTemplates').doc(template._id).remove()))
-    await audit(id, 'template.checkout-duplicate.remove', 'receiptTemplate', savedTemplate._id, { removedTemplateIds: removable.map(item => item._id) }, { retainedTemplateId: savedTemplate._id })
-    const removedIds = new Set(removable.map(template => template._id))
-    return templates.filter(template => !removedIds.has(template._id))
-  }
-
   async function listTemplates(payload) {
     const id = storeId(payload)
     await ensureDefaults(id)
-    const [loadedTemplates, printers, stations] = await Promise.all([
+    const [templates, printers, stations] = await Promise.all([
       listDocs('receiptTemplates', { storeId: id }),
       listDocs('printers', { storeId: id }),
       listDocs('printStations', { storeId: id })
     ])
-    const templates = await removeUnversionedDuplicateCheckoutTemplates(id, loadedTemplates)
     const printerMap = new Map(printers.map(item => [item._id, item]))
     const stationMap = new Map(stations.map(item => [item._id, item]))
     const data = templates.map(template => {
       const bindScope = ['global', 'station', 'printer'].includes(template.bindScope) ? template.bindScope : 'global'
       const printer = printerMap.get(template.printerId)
       const station = stationMap.get(template.stationId)
+      const isSystemDefault = template._id === templateIdFor(id, template.ticketType)
       return {
         ...template,
         bindScope,
+        isSystemDefault,
         stationName: station ? station.name : '',
         printerName: printer ? printer.name : '',
         bindingLabel: bindScope === 'printer'
           ? `\u6307\u5b9a\u6253\u5370\u673a\uff1a${printer ? printer.name : '\u5df2\u5220\u9664\u6253\u5370\u673a'}`
           : bindScope === 'station'
             ? `\u6307\u5b9a\u6863\u53e3\uff1a${station ? station.name : '\u5df2\u5220\u9664\u6863\u53e3'}`
-            : '\u5168\u5e97\u9ed8\u8ba4'
+            : isSystemDefault ? '全店默认（系统）' : '全店默认（旧版副本）'
       }
     })
     return { success: true, data: data.sort((a, b) => {
@@ -2025,7 +1959,8 @@ function createPrintService({ db, _, defaultTenantId }) {
       id: text(field.id || `${field.key}-${index}`),
       key: text(field.key),
       label: text(field.label),
-      size: ['small', 'normal', 'medium', 'large', 'xlarge'].includes(field.size) ? field.size : 'normal',
+      ...(field.key !== 'dishes' ? { content: text(field.content).slice(0, 120) } : {}),
+      size: ['small', 'normal', 'medium', 'large', 'xlarge', 'xxlarge', 'xxxlarge'].includes(field.size) ? field.size : 'normal',
       align: ['left', 'center', 'right'].includes(field.align) ? field.align : 'left',
       bold: bool(field.bold),
       inverse: bool(field.inverse),
@@ -2043,13 +1978,21 @@ function createPrintService({ db, _, defaultTenantId }) {
     const definition = TEMPLATE_DEFINITIONS.find(item => item.ticketType === ticketType)
     if (!definition) return { success: false, code: 'TEMPLATE_NOT_FOUND', message: 'template definition not found' }
     const binding = await normalizeTemplateBinding(id, input)
-    const templateId = templateIdFor(id, ticketType, binding)
+    const canonicalId = templateIdFor(id, ticketType, binding)
+    const supplied = text(input._id) ? await getDoc('receiptTemplates', text(input._id)) : null
+    const templateId = supplied && supplied.storeId === id && supplied.ticketType === ticketType &&
+      text(supplied.bindScope || 'global') === binding.bindScope &&
+      text(supplied.stationId) === binding.stationId && text(supplied.printerId) === binding.printerId
+      ? supplied._id : canonicalId
     const existing = await getDoc('receiptTemplates', templateId)
+    if (existing && (!supplied || supplied._id !== templateId)) {
+      return { success: false, code: 'TEMPLATE_BINDING_EXISTS', message: '该绑定范围已有票据样式，请在列表中直接编辑' }
+    }
     const fields = normalizeTemplateFields(input.fields)
     if (!fields.length) return { success: false, code: 'TEMPLATE_FIELD_REQUIRED', message: 'template needs at least one field' }
     if (existing) {
       await db.collection('receiptTemplateVersions').add({
-        data: { storeId: id, templateId, ticketType, version: existing.version || 1, fields: existing.fields || [], createTime: now(), reason: 'save' }
+        data: { storeId: id, templateId, ticketType, version: existing.version || 1, name: existing.name, paperWidth: existing.paperWidth, fields: existing.fields || [], createTime: now(), reason: 'save' }
       })
     }
     const data = documentData({
@@ -2060,7 +2003,7 @@ function createPrintService({ db, _, defaultTenantId }) {
       name: text(input.name || (existing && existing.name) || definition.name),
       scope: definition.scope,
       fields,
-      paperWidth: [58, 80].includes(Number(input.paperWidth)) ? Number(input.paperWidth) : ((existing && existing.paperWidth) || definition.paperWidth),
+      paperWidth: [58, 76, 80].includes(Number(input.paperWidth)) ? Number(input.paperWidth) : ((existing && existing.paperWidth) || definition.paperWidth),
       bindScope: binding.bindScope,
       stationId: binding.stationId,
       printerId: binding.printerId,
@@ -2071,7 +2014,10 @@ function createPrintService({ db, _, defaultTenantId }) {
     await db.collection('receiptTemplates').doc(templateId).set({ data })
     await audit(id, existing ? 'template.update' : 'template.create', 'receiptTemplate', templateId, existing || {}, data)
     const saved = await getDoc('receiptTemplates', templateId)
-    await syncSettlementTemplateLayout(id, saved, 'settlement-layout-save')
+    if (supplied && supplied._id !== templateId && supplied._id !== templateIdFor(id, ticketType)) {
+      await db.collection('receiptTemplates').doc(supplied._id).remove()
+      await audit(id, 'template.binding.move', 'receiptTemplate', supplied._id, supplied, { movedTo: templateId })
+    }
     return { success: true, data: saved }
   }
 
@@ -2088,11 +2034,23 @@ function createPrintService({ db, _, defaultTenantId }) {
     const definition = TEMPLATE_DEFINITIONS.find(item => item.ticketType === ticketType)
     if (!existing || existing.storeId !== id || !definition) return { success: false, code: 'TEMPLATE_NOT_FOUND', message: 'template not found' }
     const reset = defaultTemplate(definition)
-    await db.collection('receiptTemplateVersions').add({ data: { storeId: id, templateId, ticketType, version: existing.version || 1, fields: existing.fields || [], createTime: now(), reason: 'reset' } })
-    await db.collection('receiptTemplates').doc(templateId).update({ data: { fields: reset.fields, paperWidth: reset.paperWidth, version: number(existing.version, 1) + 1, updateTime: now() } })
+    await db.collection('receiptTemplateVersions').add({ data: { storeId: id, templateId, ticketType, version: existing.version || 1, name: existing.name, paperWidth: existing.paperWidth, fields: existing.fields || [], createTime: now(), reason: 'reset' } })
+    await db.collection('receiptTemplates').doc(templateId).update({ data: { name: reset.name, fields: reset.fields, paperWidth: reset.paperWidth, version: number(existing.version, 1) + 1, updateTime: now() } })
     const saved = await getDoc('receiptTemplates', templateId)
-    await syncSettlementTemplateLayout(id, saved, 'settlement-layout-reset')
     return { success: true, data: saved }
+  }
+
+  async function deleteTemplate(payload) {
+    const id = storeId(payload)
+    const templateId = text(payload.templateId)
+    const existing = await getDoc('receiptTemplates', templateId)
+    if (!existing || existing.storeId !== id) return { success: false, code: 'TEMPLATE_NOT_FOUND', message: 'template not found' }
+    if (templateId === templateIdFor(id, existing.ticketType)) {
+      return { success: false, code: 'DEFAULT_TEMPLATE_REQUIRED', message: '全店默认票据用于自动打印，请用停用收银票据开关或修改名称和字段' }
+    }
+    await db.collection('receiptTemplates').doc(templateId).remove()
+    await audit(id, 'template.delete', 'receiptTemplate', templateId, existing, { deleted: true })
+    return { success: true, data: { templateId } }
   }
 
   async function templateHistory(payload) {
@@ -2147,7 +2105,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     }, 88, printer.paperWidth)
     const ticketData = {
       title: template.name,
-      shopName: '\u5f20\u5357\u706b\u76c6\u70e7\u70e4',
+      shopName: '',
       tableNumber: 'T01',
       orderNumber: 'TEST-0001',
       orderTime: now().toLocaleString('zh-CN', { hour12: false }),
@@ -2737,6 +2695,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     if (action === 'admin.print.cashier.save') return saveCashierConfig(payload)
     if (action === 'admin.print.templates.list') return listTemplates(payload)
     if (action === 'admin.print.templates.save') return saveTemplate(payload)
+    if (action === 'admin.print.templates.delete') return deleteTemplate(payload)
     if (action === 'admin.print.templates.reset') return resetTemplate(payload)
     if (action === 'admin.print.templates.history') return templateHistory(payload)
     if (action === 'admin.print.templates.history.delete') return deleteTemplateHistory(payload)

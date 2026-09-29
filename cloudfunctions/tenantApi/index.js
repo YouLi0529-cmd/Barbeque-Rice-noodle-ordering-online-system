@@ -1268,6 +1268,7 @@ async function createOrder(payload) {
         }
       }
     }
+    if (orderScene !== 'camping') result.customerReceipt = await queueSubmittedCustomerReceipt(result.order)
   }
 
   return result
@@ -1337,6 +1338,11 @@ async function adminCreateOfflineOrder(payload) {
       userAvatar: '',
       userPhone: '',
       tableNumber: formatAdminTableNumber(tableRef),
+      ...(parentOrder && parentOrder.tableGroupId ? {
+        tableGroupId: parentOrder.tableGroupId,
+        tableGroupPrimary: parentOrder.tableGroupPrimary || null,
+        tableGroupTables: Array.isArray(parentOrder.tableGroupTables) ? parentOrder.tableGroupTables : []
+      } : {}),
       peopleCount
     }
 
@@ -1366,7 +1372,54 @@ async function adminCreateOfflineOrder(payload) {
     })
   }
   await touchAdminTableBoard()
+  if (result && result.success && result.order) {
+    const dishIndexes = (Array.isArray(result.order.goods) ? result.order.goods : []).map((_, index) => index)
+    if (dishIndexes.length) {
+      try {
+        const kitchenResult = await sendOrderDishesToKitchen(result.orderId, dishIndexes, {
+          eventKey: `auto-submit:${result.orderId}`
+        })
+        result.kitchenDispatch = kitchenResult.success
+          ? kitchenResult.data
+          : { hasDispatchFailure: true, error: kitchenResult.message || 'kitchen dispatch failed' }
+      } catch (err) {
+        console.error('auto dispatch waiter order to kitchen failed', err)
+        result.kitchenDispatch = { hasDispatchFailure: true, error: err.message || 'kitchen dispatch failed' }
+      }
+    }
+    result.customerReceipt = await queueSubmittedCustomerReceipt(result.order)
+  }
   return result
+}
+
+async function queueSubmittedCustomerReceipt(order) {
+  const rootOrderId = String(order.rootOrderId || order._id || '').trim()
+  if (!rootOrderId) return { skipped: true, reason: 'order root missing' }
+  try {
+    const tableRef = getOrderTableRef(order)
+    const records = tableRef
+      ? await getAdminTableOrders({ areaKey: tableRef.areaKey, tableNumber: tableRef.tableNumber })
+      : (await db.collection('order').where({ rootOrderId }).limit(100).get()).data || []
+    const orders = records.filter(item =>
+      item.type === 'order' &&
+      item.storeId === order.storeId &&
+      item.tableCleared !== true &&
+      item.deleted !== true &&
+      item.status !== 'cancelled' &&
+      !isAdminPaidOrder(item)
+    )
+    if (!orders.some(item => item._id === order._id)) orders.push(order)
+    const printed = await printService.queueCashierReceipt({
+      id: order.storeId,
+      ticketType: 'customer_order',
+      orders,
+      eventKey: `auto-submit:${order._id}`
+    })
+    return { jobs: (printed.jobs || []).map(job => job._id), skipped: !!printed.skipped, reason: printed.reason || '' }
+  } catch (err) {
+    console.error('auto customer receipt job failed', err)
+    return { jobs: [], error: err.message || 'customer receipt job failed' }
+  }
 }
 
 async function getCurrentUser(payload) {
@@ -2593,6 +2646,8 @@ async function getTableArrivalSnapshot(range = 'today', now = new Date()) {
 
 function getBusinessStatsGroupKey(order = {}) {
   const scene = isCampingOrder(order) ? 'camping' : 'dineIn'
+  const checkoutBatchId = String(order.checkoutBatchId || '').trim()
+  if (checkoutBatchId) return `${scene}:checkout:${checkoutBatchId}`
   const tableGroupId = String(order.tableGroupId || '').trim()
   if (scene === 'dineIn' && tableGroupId) return `table-group:${tableGroupId}`
   return `${scene}:${String(order.rootOrderId || order._id || '')}`
@@ -3362,12 +3417,47 @@ async function adminListTables() {
     success: true,
     data: {
       sections: buildAdminTableSections(res.data || [], tableGroups, tableSessions),
+      unsettledTotal: roundMoney((res.data || []).filter(order =>
+        isAdminTableOrder(order) && !isAdminPaidOrder(order)
+      ).reduce((sum, order) => sum + Number(order.finalPrice || order.totalPrice || 0), 0)),
       reservations: reservationRes.data || [],
       boardVersion,
       activityStamp,
       todayArrival
     }
   }
+}
+
+async function adminSearchOpenTableDishes(payload) {
+  const query = String(payload.query || '').trim().toLocaleLowerCase()
+  if (!query) return { success: true, data: { items: [] } }
+
+  const res = await listVisibleTableOrders()
+  const items = (res.data || [])
+    .filter(order => isAdminTableOrder(order) && !isAdminPaidOrder(order))
+    .reduce((results, order) => {
+      const tableRef = getOrderTableRef(order)
+      if (!tableRef) return results
+      ;(Array.isArray(order.goods) ? order.goods : []).forEach((good, index) => {
+        const name = String(good && (good.dishName || good.name) || '').trim()
+        const kitchenName = String(good && good.kitchenPrintName || '').trim()
+        if (![name, kitchenName].some(value => value.toLocaleLowerCase().includes(query))) return
+        results.push({
+          id: `${order._id || ''}:${index}`,
+          tableNumber: tableRef.tableNumber,
+          areaKey: tableRef.areaKey,
+          areaName: tableRef.areaName,
+          tableText: tableRef.label || `${tableRef.tableNumber}\u53f7\u684c`,
+          dishName: name || kitchenName,
+          count: Math.max(0, Number(good.count || 0)),
+          orderTime: getTimeValue(good.createTime || order.createTime)
+        })
+      })
+      return results
+    }, [])
+    .sort((left, right) => left.orderTime - right.orderTime)
+
+  return { success: true, data: { items } }
 }
 
 async function adminGetTableBoardStatus(payload) {
@@ -3904,6 +3994,7 @@ async function adminFinishTableCheckout(payload) {
 
   const checkoutSummary = buildAdminCheckoutSummary(targetOrders, payload)
   const checkoutTime = new Date()
+  const checkoutBatchId = `checkout_${checkoutTime.getTime()}_${targetOrders.map(order => order._id).sort().join('_')}`
 
   await Promise.all(targetOrders.map(order => db.collection('order').doc(order._id).update({
     data: {
@@ -3918,6 +4009,7 @@ async function adminFinishTableCheckout(payload) {
       checkoutDiscountType: checkoutSummary.discountType,
       checkoutDiscountValue: checkoutSummary.discountValue,
       checkoutDirectReduceValue: checkoutSummary.directReduceValue,
+      checkoutBatchId,
       checkoutAt: checkoutTime,
       updateTime: db.serverDate()
     }
@@ -3951,6 +4043,9 @@ async function adminFinishTableCheckout(payload) {
       eventKey: `checkout:${targetOrders.map(order => order._id).sort().join(',')}`
     })
     cashierPrintJobs = (printResult.jobs || []).map(job => job._id)
+    if (printResult.skipped || cashierPrintJobs.length === 0) {
+      cashierPrintError = '结账单未创建：请检查收银打印配置中的结账单开关，以及前台档口的打印机绑定和状态'
+    }
   } catch (err) {
     cashierPrintError = err.message || 'checkout print task creation failed'
     console.error('checkout receipt job failed', err)
@@ -7532,6 +7627,7 @@ function normalizeAdminDish(payload) {
     ...dish,
     _id: String(dish._id || dish.dishId || '').trim(),
     name: String(dish.name || '').trim(),
+    kitchenPrintName: String(dish.kitchenPrintName || '').trim(),
     categoryId: String(dish.categoryId || payload.categoryId || '').trim(),
     categoryName: String(dish.categoryName || '').trim(),
     menuType,
@@ -7580,6 +7676,7 @@ async function adminSaveDish(payload) {
 
   const data = {
     name: dish.name,
+    kitchenPrintName: dish.kitchenPrintName,
     price: dish.price,
     originalPrice: dish.originalPrice,
     description: dish.description,
@@ -8248,6 +8345,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.shop.uploadFile') return adminUploadShopContactFile(payload)
   if (action === 'admin.shop.save') return adminSaveShopInfo(payload)
   if (action === 'admin.table.list') return adminListTables(payload)
+  if (action === 'admin.table.searchDishes') return adminSearchOpenTableDishes(payload)
   if (action === 'admin.table.status') return adminGetTableBoardStatus(payload)
   if (action === 'admin.table.detail') return adminGetTableDetail(payload)
   if (action === 'admin.table.updatePeople') return completeAdminTableMutation(adminUpdateTablePeople(payload))

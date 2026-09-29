@@ -332,7 +332,7 @@
   <view class="people-modal-mask" wx:if="{{showPeopleModal}}" catchtouchmove="stopPropagation">
     <view class="people-modal" catchtap="stopPropagation">
       <view class="people-modal-title">请选择用餐人数</view>
-      <view class="people-modal-desc">确认人数后开始点单</view>
+      <view class="people-modal-desc">确认人数后开始点单<text class="people-modal-note">本店不收餐位费，小朋友也可以算入用餐人数。</text></view>
       <view class="people-options">
         <view
           class="people-option {{selectedPeopleMode === 'preset' && selectedPeopleCount === item ? 'active' : ''}}"

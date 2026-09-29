@@ -1669,6 +1669,11 @@ page {
   font-size: 24rpx;
 }
 
+.people-modal-note {
+  margin-left: 10rpx;
+  color: #8a7a6a;
+}
+
 .people-options {
   display: flex;
   flex-wrap: wrap;

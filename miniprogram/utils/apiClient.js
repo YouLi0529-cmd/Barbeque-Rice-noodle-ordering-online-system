@@ -8,7 +8,31 @@ const ADMIN_AUTH_TOKEN_KEY = 'adminAuthToken'
 const API_BASE_URL = 'https://zmbbq-d0ggmremua04f027d-1449718669.ap-shanghai.app.tcloudbase.com/tenantApi'
 
 function getBaseUrl() {
-  return wx.getStorageSync('tenantApiBaseUrl') || API_BASE_URL
+  const override = wx.getStorageSync('tenantApiBaseUrl')
+  if (override) return override
+
+  // Local development must opt in to a test endpoint. This prevents requests
+  // from the developer build from silently reaching the production backend.
+  try {
+    const accountInfo = wx.getAccountInfoSync()
+    if (accountInfo && accountInfo.miniProgram && accountInfo.miniProgram.envVersion === 'develop') return ''
+  } catch (err) {
+    // Fail closed when the runtime cannot identify the current build.
+    return ''
+  }
+  return API_BASE_URL
+}
+
+function getDisabledMessage() {
+  try {
+    const accountInfo = wx.getAccountInfoSync()
+    if (accountInfo && accountInfo.miniProgram && accountInfo.miniProgram.envVersion === 'develop') {
+      return '\u672c\u5730\u5f00\u53d1\u73af\u5883\u5df2\u963b\u6b62\u8bbf\u95ee\u6b63\u5f0f\u4e91\u51fd\u6570\uff0c\u8bf7\u5148\u914d\u7f6e cloud1 \u7684 tenantApi \u5730\u5740'
+    }
+  } catch (err) {
+    // Fall through to the generic message.
+  }
+  return 'TENANT_API_DISABLED'
 }
 
 function isEnabled() {
@@ -48,7 +72,7 @@ function clearAuth() {
 
 function call(action, data = {}) {
   if (!isEnabled()) {
-    return Promise.reject(new Error('TENANT_API_DISABLED'))
+    return Promise.reject(new Error(getDisabledMessage()))
   }
 
   return new Promise((resolve, reject) => {
@@ -91,7 +115,7 @@ function call(action, data = {}) {
 
 function login() {
   if (!isEnabled()) {
-    return Promise.reject(new Error('TENANT_API_DISABLED'))
+    return Promise.reject(new Error(getDisabledMessage()))
   }
 
   return new Promise((resolve, reject) => {

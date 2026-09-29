@@ -79,10 +79,11 @@
 
     <view wx:if="{{activeTab === 'settings' && activeSettingsTab === 'cashier'}}" class="tab-panel settings-content">
       <view class="section-title">收银打印配置</view>
-      <view class="section-tip top-tip">只绑定前台 USB 打印机。菜品按下单时间正序、完全相同的项目会合并打印。</view>
+      <view class="section-tip top-tip">客单和结账单只使用“前台”档口绑定的打印机。客单在开单或加菜后自动打印；结账单在确认结账后打印。其他收银票据使用这里绑定的 USB 打印机。</view>
       <view wx:for="{{cashierConfigs}}" wx:key="_id" class="data-card">
         <view class="card-top"><view class="card-title">{{item.name}}</view><switch checked="{{item.enabled}}" color="#E54A1D" bindchange="onCashierSwitch" data-index="{{index}}" /></view>
-        <view class="form-line"><text>绑定打印机</text><picker range="{{usbPrinterNames}}" bindchange="onCashierPrinter" data-index="{{index}}"><view class="picker-value">{{item.printer ? item.printer.name : '请选择前台 USB 打印机'}} ›</view></picker></view>
+        <view wx:if="{{item.ticketType === 'customer_order' || item.ticketType === 'checkout'}}" class="form-line"><text>前台档口打印机</text><view class="picker-value">{{item.printer ? item.printer.name : '请到出品档口绑定前台打印机'}}</view></view>
+        <view wx:else class="form-line"><text>绑定打印机</text><picker range="{{usbPrinterNames}}" bindchange="onCashierPrinter" data-index="{{index}}"><view class="picker-value">{{item.printer ? item.printer.name : '请选择前台 USB 打印机'}} ›</view></picker></view>
         <view class="form-line"><text>打印份数</text><input class="inline-input" type="number" value="{{item.copies}}" bindinput="onCashierCopies" data-index="{{index}}" /></view>
         <view class="card-actions"><view class="primary-small" bindtap="saveCashier" data-item="{{item}}">保存设置</view></view>
       </view>
@@ -98,25 +99,28 @@
 
     <view wx:if="{{activeTab === 'settings' && activeSettingsTab === 'templates'}}" class="tab-panel settings-content">
       <view class="section-title">票据样式</view>
+      <view class="section-tip">票据预览中的订单值是示例。“自填”字段留空时实际不会打印；“自动”字段读取真实订单，填写固定文字会覆盖其真实值。保存后会重新读取云端确认。</view>
       <view class="template-selector-row">
         <text class="template-selector-label">当前票据</text>
         <view class="job-filter-select template-select {{showTemplateDropdown ? 'open' : ''}}" catchtap="toggleTemplateDropdown">
           <view class="filter-picker job-filter-trigger"><text>{{editTemplate.name || '请选择票据'}}</text><text class="job-filter-arrow {{showTemplateDropdown ? 'open' : ''}}">∨</text></view>
           <scroll-view wx:if="{{showTemplateDropdown}}" class="job-filter-dropdown template-dropdown" scroll-y>
-            <view wx:for="{{templates}}" wx:key="_id" class="job-filter-option template-option {{selectedTemplateId === item._id ? 'active' : ''}}" data-index="{{index}}" catchtap="selectTemplateOption"><text>{{item.name}}</text></view>
+            <view wx:for="{{templates}}" wx:key="_id" class="job-filter-option template-option {{selectedTemplateId === item._id ? 'active' : ''}}" data-index="{{index}}" catchtap="selectTemplateOption"><text>{{item.name}} · {{item.bindingLabel}}</text></view>
           </scroll-view>
         </view>
       </view>
       <scroll-view wx:if="{{editTemplate}}" class="template-editor-scroll" scroll-x enable-flex>
         <view class="three-column-editor">
-        <view class="editor-column field-library"><view class="editor-label">可选字段</view><view wx:for="{{fieldLibrary}}" wx:key="key" class="field-option" bindtap="addTemplateField" data-item="{{item}}">+ {{item.label}}</view></view>
-        <view class="editor-column preview-column"><view class="editor-label">实时预览 {{editTemplate.paperWidth}}mm</view><view class="receipt-preview"><view wx:for="{{previewFields}}" wx:key="id" class="preview-line {{index === selectedTemplateFieldIndex ? 'selected' : ''}} size-{{item.size}} align-{{item.align}} {{item.bold ? 'bold' : ''}} {{item.inverse ? 'inverse' : ''}}" bindtap="selectTemplateField" data-index="{{index}}"><block wx:if="{{item.isCashierDishTable}}"><view wx:for="{{item.previewRows}}" wx:for-item="row" wx:key="dish" class="cashier-preview-row {{row.header ? 'header' : ''}}"><text class="cashier-preview-dish">{{row.dish}}</text><text class="cashier-preview-count">{{row.count}}</text><text class="cashier-preview-subtotal">{{row.subtotal}}</text></view></block><block wx:elif="{{item.isCashierSummary}}"><view wx:for="{{item.summaryRows}}" wx:for-item="row" wx:key="label" class="cashier-summary-row"><text>{{row.label}}</text><text>{{row.amount}}</text></view></block><text wx:else>{{item.text}}</text><view wx:if="{{item.dividerAfter}}" class="preview-divider"></view></view></view></view>
+        <view class="editor-column field-library"><view class="editor-label">可选字段</view><view wx:for="{{fieldLibrary}}" wx:key="key" class="field-option" bindtap="addTemplateField" data-item="{{item}}">+ {{item.label}} <text class="field-source-tag">{{item.fixedOnly ? '自填' : '自动'}}</text></view></view>
+        <view class="editor-column preview-column"><view class="editor-label">实时预览 {{editTemplate.paperWidth}}mm</view><view class="receipt-preview"><view wx:for="{{previewFields}}" wx:key="id" class="preview-line {{index === selectedTemplateFieldIndex ? 'selected' : ''}} size-{{item.size}} align-{{item.align}} {{item.bold ? 'bold' : ''}} {{item.inverse ? 'inverse' : ''}} {{item.isPlaceholder ? 'placeholder' : ''}}" bindtap="selectTemplateField" data-index="{{index}}"><block wx:if="{{item.isCashierDishTable}}"><view wx:for="{{item.previewRows}}" wx:for-item="row" wx:key="dish" class="cashier-preview-row {{row.header ? 'header' : ''}}"><text class="cashier-preview-dish">{{row.dish}}</text><text class="cashier-preview-count">{{row.count}}</text><text class="cashier-preview-subtotal">{{row.subtotal}}</text></view></block><block wx:elif="{{item.isCashierSummary}}"><view wx:for="{{item.summaryRows}}" wx:for-item="row" wx:key="label" class="cashier-summary-row"><text>{{row.label}}</text><text>{{row.amount}}</text></view></block><text wx:else>{{item.text}}</text><view wx:if="{{item.dividerAfter && !item.isPlaceholder}}" class="preview-divider"></view></view></view></view>
         <view class="editor-column settings-column">
           <view class="editor-label">字段样式</view>
           <block wx:for="{{editTemplate.fields}}" wx:key="id">
             <view wx:if="{{index === selectedTemplateFieldIndex}}">
               <view class="setting-row"><text>字段</text><view class="field-value">{{selectedTemplateFieldName || '请选择预览区域'}}</view></view>
-              <view class="setting-row"><text>字号</text><picker range="{{sizeLabels}}" bindchange="onTemplateFieldPicker" data-key="size" data-options="sizeOptions"><view>{{item.size === 'small' ? '小号' : (item.size === 'medium' ? '中号' : (item.size === 'large' ? '大号' : (item.size === 'xlarge' ? '加大号' : '正常')))}} ›</view></picker></view>
+              <view class="field-editor-hint">{{item.editorHint}}</view>
+              <view wx:if="{{item.key !== 'dishes'}}" class="setting-row template-content-row"><text>{{item.editorFixedOnly ? '打印文字' : '固定覆盖文字（可留空）'}}</text><input class="template-content-input" type="text" value="{{item.content}}" maxlength="120" placeholder="{{item.editorFixedOnly ? '请输入实际要打印的文字' : '留空使用真实订单值'}}" data-index="{{index}}" bindinput="onTemplateFieldContentInput" /></view>
+              <view class="setting-row"><text>字号</text><picker range="{{sizeLabels}}" value="{{sizeIndexMap[item.size]}}" bindchange="onTemplateFieldPicker" data-key="size" data-options="sizeOptions"><view>{{sizeLabelMap[item.size] || '6号字（标准）'}} ›</view></picker></view>
               <view class="setting-row"><text>对齐</text><picker range="{{alignLabels}}" bindchange="onTemplateFieldPicker" data-key="align" data-options="alignOptions"><view>{{item.align === 'center' ? '居中' : (item.align === 'right' ? '右对齐' : '左对齐')}} ›</view></picker></view>
               <view class="setting-row"><text>颜色</text><picker range="{{colorLabels}}" bindchange="onTemplateFieldPicker" data-key="color" data-options="colorOptions"><view>{{item.color === 'red' ? '红色' : '黑色'}} ›</view></picker></view>
               <view class="setting-row"><text>加粗</text><switch checked="{{item.bold}}" color="#E54A1D" data-key="bold" bindchange="onTemplateFieldSwitch" /></view>
@@ -131,12 +135,13 @@
         </view>
       </scroll-view>
       <view wx:if="{{editTemplate}}" class="data-card template-config-card">
+        <view class="form-line"><text>票据名称</text><input class="template-content-input" type="text" value="{{editTemplate.name}}" maxlength="30" placeholder="自定义票据名称" bindinput="onTemplateNameInput" /></view>
         <view class="form-line"><text>模板生效范围</text><picker range="{{templateBindingScopeLabels}}" bindchange="onTemplateBindingScope"><view class="picker-value">{{editTemplate.bindScope === 'station' ? '按后厨档口' : (editTemplate.bindScope === 'printer' ? '按具体打印机' : '全店默认')}} ›</view></picker></view>
         <view wx:if="{{editTemplate.bindScope === 'station'}}" class="form-line"><text>后厨档口</text><picker range="{{stations}}" range-key="name" bindchange="onTemplateStation"><view class="picker-value">{{editTemplate.stationName || '请选择档口'}} ›</view></picker></view>
         <view wx:if="{{editTemplate.bindScope === 'printer'}}" class="form-line"><text>绑定打印机</text><picker range="{{templateTestPrinters}}" range-key="name" bindchange="onTemplatePrinter"><view class="picker-value">{{editTemplate.printerName || '请选择打印机'}} ›</view></picker></view>
         <view class="form-line template-test-printer"><text>测试指定打印机</text><picker range="{{templateTestPrinters}}" range-key="name" bindchange="onTemplateTestPrinter"><view class="picker-value">{{templateTestPrinterName}} ›</view></picker></view>
       </view>
-      <view wx:if="{{editTemplate}}" class="template-actions template-actions-bottom"><view class="small-btn" bindtap="templateAction" data-action="history">版本记录</view><view class="small-btn" bindtap="templateAction" data-action="reset">恢复默认</view><view class="small-btn strong" bindtap="templateAction" data-action="test">打印测试</view><view class="primary-small" bindtap="saveTemplate">保存模板</view></view>
+      <view wx:if="{{editTemplate}}" class="template-actions template-actions-bottom"><view class="small-btn" bindtap="createTemplateVariant">新增定向样式</view><view wx:if="{{editTemplate._id && !editTemplate.isSystemDefault}}" class="small-btn danger" bindtap="deleteTemplate">删除样式</view><view class="small-btn" bindtap="templateAction" data-action="history">版本记录</view><view class="small-btn" bindtap="templateAction" data-action="reset">恢复默认</view><view class="small-btn strong" bindtap="templateAction" data-action="test">打印测试</view><view class="primary-small" bindtap="saveTemplate">{{savingTemplate ? '正在核验保存...' : '保存模板'}}</view></view>
     </view>
 
     <view wx:if="{{activeTab === 'jobs'}}" class="tab-panel">

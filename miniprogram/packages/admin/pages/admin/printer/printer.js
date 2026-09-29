@@ -40,26 +40,59 @@ const JOB_STATUS_OPTIONS = [
   { key: 'failed', label: '打印失败' },
   { key: 'cancelled', label: '已取消' }
 ]
+const TICKET_SIZE_OPTIONS = [
+  { value: 'xxxlarge', label: '1号字（6倍）' },
+  { value: 'xxlarge', label: '2号字（5倍）' },
+  { value: 'xlarge', label: '3号字（4倍）' },
+  { value: 'large', label: '4号字（3倍）' },
+  { value: 'medium', label: '5号字（2倍）' },
+  { value: 'normal', label: '6号字（标准）' },
+  { value: 'small', label: '7号字（细字）' }
+]
 const FIELD_LIBRARY = [
   { key: 'title', label: '票据名称', sample: '结账单' },
-  { key: 'shopName', label: '店铺名称', sample: '张南火盆烧烤' },
-  { key: 'banquetName', label: '宴会名称', sample: '生日宴' },
+  { key: 'shopName', label: '店铺名称', sample: '张南烤肉', fixedOnly: true },
+  { key: 'banquetName', label: '宴会名称', sample: '生日宴', fixedOnly: true },
   { key: 'tableNumber', label: '桌号', sample: '桌号：A01' },
-  { key: 'tableInfo', label: '桌台信息', sample: '一楼大厅' },
+  { key: 'tableInfo', label: '桌台信息', sample: '一楼大厅', fixedOnly: true },
   { key: 'orderNumber', label: '订单号', sample: 'ORD-20260713-001' },
-  { key: 'customData', label: '自定义数据', sample: '会员到店' },
+  { key: 'customData', label: '自定义数据', sample: '会员到店', fixedOnly: true },
   { key: 'peopleCount', label: '人数', sample: '人数：4人' },
-  { key: 'seatCount', label: '席数', sample: '1席' },
+  { key: 'seatCount', label: '席数', sample: '1席', fixedOnly: true },
   { key: 'orderType', label: '订单类型', sample: '类型：堂食' },
-  { key: 'openingRemark', label: '开台备注', sample: '靠窗' },
+  { key: 'openingRemark', label: '开台备注', sample: '靠窗', fixedOnly: true },
   { key: 'dishes', label: '菜品明细', sample: '五花肉 x2\n金针菇 x1' },
   { key: 'totalCount', label: '数量合计', sample: '共3份' },
   { key: 'orderAmount', label: '订单金额', sample: '订单金额：88\n打折（8.8折）：-10\n直减：-5' },
   { key: 'receivableAmount', label: '应付金额', sample: '应付金额：73' },
+  { key: 'totalPrice', label: '金额合计', sample: '￥88' },
   { key: 'orderTime', label: '下单时间', sample: '下单时间：2026-07-13 12:30' },
   { key: 'printTime', label: '打印时间', sample: '打印时间：2026-08-02 10:30' },
-  { key: 'customText', label: '自定义文字', sample: '欢迎光临' }
+  { key: 'customText', label: '自定义文字', sample: '欢迎光临', fixedOnly: true }
 ]
+
+function fieldAvailableForTicket(field, ticketType) {
+  if (['orderAmount', 'receivableAmount'].includes(field.key)) return ['checkout', 'prebill', 'customer_order'].includes(ticketType)
+  if (field.key === 'totalPrice') return !String(ticketType || '').startsWith('kitchen_')
+  return true
+}
+
+function fieldEditorHint(key) {
+  const source = FIELD_LIBRARY.find(item => item.key === key) || {}
+  if (source.fixedOnly) return '此字段没有可靠的订单数据来源；请填写实际要打印的文字。留空时小票不会出现这一行。'
+  if (key === 'dishes') return '自动读取本次票据的真实菜品。后厨使用后厨打印名，客单和结账单使用原菜名。'
+  if (key === 'title') return '留空时使用下方的票据名称；填写后只覆盖小票上的标题。'
+  if (['orderAmount', 'receivableAmount', 'totalPrice'].includes(key)) return '金额由订单自动计算。填写固定文字会覆盖真实金额，请仅在确实需要固定文案时使用。'
+  if (key === 'printTime') return '自动生成实际打印时间。填写固定文字会覆盖真实时间。'
+  return '自动读取订单数据。填写固定文字会覆盖该字段的真实值。'
+}
+
+function decorateTemplateFields(fields = []) {
+  return fields.map(field => {
+    const source = FIELD_LIBRARY.find(item => item.key === field.key) || {}
+    return { ...field, editorHint: fieldEditorHint(field.key), editorFixedOnly: !!source.fixedOnly }
+  })
+}
 
 const CASHIER_DISH_PREVIEW_ROWS = [
   { dish: '菜品', count: '数量', subtotal: '小计', header: true },
@@ -117,18 +150,25 @@ function setNested(target, path, value) {
 function makePreviewFields(fields, template = {}) {
   return (fields || []).map((field, index) => {
     const source = FIELD_LIBRARY.find(item => item.key === field.key) || {}
-    const isCashierDishTable = field.key === 'dishes' && ['checkout', 'prebill'].includes(template.ticketType)
-    const isCashierSummary = ['orderAmount', 'receivableAmount'].includes(field.key) && ['checkout', 'prebill'].includes(template.ticketType)
-    const text = field.key === 'title'
+    const isCashierDishTable = field.key === 'dishes' && ['checkout', 'prebill', 'customer_order'].includes(template.ticketType)
+    const isCashierSummary = !field.content && ['orderAmount', 'receivableAmount'].includes(field.key) && ['checkout', 'prebill', 'customer_order'].includes(template.ticketType)
+    const isPlaceholder = !!source.fixedOnly && !String(field.content || '').trim()
+    const isUnavailable = !fieldAvailableForTicket(source, template.ticketType) && !field.content
+    const text = isPlaceholder
+      ? '（未填写，实际不会打印）'
+      : isUnavailable
+        ? '（此票据无此数据，实际不会打印）'
+        : field.content || (field.key === 'title'
       ? (template.name || source.sample || field.key)
       : (isCashierDishTable
         ? '菜品                  数量  小计\n鲜虾                    2    60\n薄切五花肉              1    25'
-        : (source.sample || field.key))
+        : (source.sample || field.key)))
     return {
       ...field,
       index,
       label: field.label || source.label || field.key,
       text,
+      isPlaceholder: isPlaceholder || isUnavailable,
       isCashierDishTable,
       isCashierSummary,
       previewRows: isCashierDishTable ? CASHIER_DISH_PREVIEW_ROWS : [],
@@ -142,6 +182,40 @@ function getTemplateFieldName(fields, index) {
   if (!field) return ''
   const source = FIELD_LIBRARY.find(item => item.key === field.key)
   return (source && source.label) || field.key || ''
+}
+
+function templateDraftDifference(saved, draft) {
+  if (!saved || !draft || !saved._id) return '云端没有返回已保存的模板'
+  if (saved.ticketType !== draft.ticketType) return '票据类型不一致'
+  if ((saved.bindScope || 'global') !== (draft.bindScope || 'global')) return '模板生效范围不一致'
+  if (String(saved.stationId || '') !== String(draft.stationId || '')) return '绑定档口不一致'
+  if (String(saved.printerId || '') !== String(draft.printerId || '')) return '绑定打印机不一致'
+  if (String(saved.name || '').trim() !== String(draft.name || '').trim()) return '票据名称不一致'
+  if (Number(saved.paperWidth) !== Number(draft.paperWidth)) return '纸张宽度不一致'
+  const savedFields = Array.isArray(saved.fields) ? saved.fields : []
+  const draftFields = Array.isArray(draft.fields) ? draft.fields : []
+  if (savedFields.length !== draftFields.length) return `字段数量不一致（输入 ${draftFields.length} 项，返回 ${savedFields.length} 项）`
+  for (let index = 0; index < draftFields.length; index += 1) {
+    const field = draftFields[index]
+    const stored = savedFields[index] || {}
+    const label = `第 ${index + 1} 项「${field.label || field.key}」`
+    if (stored.key !== field.key || stored.id !== field.id) return `${label}的字段标识不一致`
+    if (String(stored.label || '').trim() !== String(field.label || '').trim()) return `${label}的名称不一致`
+    if (field.key !== 'dishes' && String(stored.content || '').trim() !== String(field.content || '').trim()) return `${label}的打印文字未保存`
+    if ((stored.size || 'normal') !== (field.size || 'normal')) return `${label}的字号未保存`
+    if ((stored.align || 'left') !== (field.align || 'left')) return `${label}的对齐方式未保存`
+    if ((stored.color || 'black') !== (field.color || 'black')) return `${label}的颜色未保存`
+    for (const key of ['bold', 'inverse', 'dividerAfter', 'blankBefore']) {
+      if (!!stored[key] !== !!field[key]) return `${label}的${{ bold: '加粗', inverse: '反白', dividerAfter: '分隔线', blankBefore: '前置空行' }[key]}设置未保存`
+    }
+  }
+  return ''
+}
+
+function templateSaveMismatch(message) {
+  const error = new Error(message)
+  error.code = 'TEMPLATE_SAVE_NOT_PERSISTED'
+  return error
 }
 
 Page({
@@ -187,8 +261,10 @@ Page({
     jobPrinterLabel: '全部打印机',
     jobStatusLabel: '全部状态',
     jobTicketLabel: '全部票据',
-    sizeOptions: ['small', 'normal', 'medium', 'large', 'xlarge'],
-    sizeLabels: ['小号', '正常', '中号', '大号', '加大号'],
+    sizeOptions: TICKET_SIZE_OPTIONS.map(item => item.value),
+    sizeLabels: TICKET_SIZE_OPTIONS.map(item => item.label),
+    sizeLabelMap: TICKET_SIZE_OPTIONS.reduce((map, item) => ({ ...map, [item.value]: item.label }), {}),
+    sizeIndexMap: TICKET_SIZE_OPTIONS.reduce((map, item, index) => ({ ...map, [item.value]: index }), {}),
     alignOptions: ['left', 'center', 'right'],
     alignLabels: ['左对齐', '居中', '右对齐'],
     colorOptions: ['black', 'red'],
@@ -196,6 +272,7 @@ Page({
     fieldLibrary: FIELD_LIBRARY,
     selectedTemplateId: '',
     editTemplate: null,
+    savingTemplate: false,
     previewFields: [],
     selectedTemplateFieldIndex: -1,
     selectedTemplateFieldName: '',
@@ -316,12 +393,14 @@ Page({
       return
     }
     const editTemplate = clone(selected)
+    editTemplate.fields = decorateTemplateFields(editTemplate.fields || [])
     const kitchenTicket = String(editTemplate.ticketType || '').indexOf('kitchen_') === 0
     const templateTestPrinters = this.data.printers.filter(printer => !kitchenTicket || printer.usage === 'kitchen' || printer.usage === 'both')
     const selectedTestPrinter = templateTestPrinters.find(printer => printer._id === editTemplate.printerId)
     this.setData({
       selectedTemplateId: selected._id,
       editTemplate,
+      fieldLibrary: FIELD_LIBRARY.filter(field => fieldAvailableForTicket(field, editTemplate.ticketType)),
       previewFields: makePreviewFields(editTemplate.fields, editTemplate),
       selectedTemplateFieldIndex: editTemplate.fields && editTemplate.fields.length ? 0 : -1,
       selectedTemplateFieldName: getTemplateFieldName(editTemplate.fields, 0),
@@ -387,8 +466,8 @@ Page({
     const tab = this.data.activeSettingsTab
     if (!tab) return
     if (tab === 'cashier') await Promise.all([this.loadPrinters(), this.loadCashier()])
-    if (tab === 'stations') await this.loadStations()
-    if (tab === 'templates') await Promise.all([this.loadPrinters(), this.loadStations(), this.loadTemplates()])
+    if (tab === 'stations') { await this.loadPrinters(); await this.loadStations() }
+    if (tab === 'templates') { await Promise.all([this.loadPrinters(), this.loadStations()]); await this.loadTemplates() }
     if (tab === 'logs') await Promise.all([this.loadPrinters(), this.loadLogs()])
   },
 
@@ -686,7 +765,7 @@ Page({
     const source = e.currentTarget.dataset.item
     const template = clone(this.data.editTemplate)
     template.fields = template.fields || []
-    template.fields.push({ id: `${source.key}-${Date.now()}`, key: source.key, label: source.label, size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: false })
+    template.fields.push({ id: `${source.key}-${Date.now()}`, key: source.key, label: source.label, editorHint: fieldEditorHint(source.key), editorFixedOnly: !!source.fixedOnly, size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: false })
     this.setData({
       editTemplate: template,
       previewFields: makePreviewFields(template.fields, template),
@@ -717,6 +796,20 @@ Page({
   },
 
   onTemplateFieldSwitch(e) { this.updateTemplateField(e.currentTarget.dataset.key, e.detail.value) },
+  onTemplateFieldContentInput(e) {
+    const index = Number(e.currentTarget.dataset.index)
+    const field = this.data.editTemplate && this.data.editTemplate.fields[index]
+    if (!field || field.key === 'dishes') return
+    const content = e.detail.value
+    const sample = FIELD_LIBRARY.find(item => item.key === field.key)
+    const isPlaceholder = !content && (sample && sample.fixedOnly || !fieldAvailableForTicket(sample || {}, this.data.editTemplate.ticketType))
+    this.setData({
+      [`editTemplate.fields[${index}].content`]: content,
+      [`previewFields[${index}].text`]: content || (isPlaceholder ? '（未填写，实际不会打印）' : field.key === 'title' ? this.data.editTemplate.name : (sample && sample.sample) || ''),
+      [`previewFields[${index}].isPlaceholder`]: !!isPlaceholder,
+      [`previewFields[${index}].isCashierSummary`]: !content && ['orderAmount', 'receivableAmount'].includes(field.key) && ['checkout', 'prebill', 'customer_order'].includes(this.data.editTemplate.ticketType)
+    })
+  },
   onTemplateFieldPicker(e) {
     const options = this.data[e.currentTarget.dataset.options] || []
     this.updateTemplateField(e.currentTarget.dataset.key, options[Number(e.detail.value)])
@@ -794,19 +887,93 @@ Page({
   },
 
   async saveTemplate() {
-    if (!this.data.editTemplate) return
+    if (!this.data.editTemplate || this.data.savingTemplate) return
+    if (this.data.editTemplate.bindScope === 'printer' && !this.data.editTemplate.printerId) {
+      toast('请先选择绑定打印机')
+      return
+    }
+    if (!this.data.editTemplate._id && this.data.templates.some(item =>
+      item.ticketType === this.data.editTemplate.ticketType &&
+      item.bindScope === this.data.editTemplate.bindScope &&
+      item.printerId === this.data.editTemplate.printerId &&
+      item.stationId === this.data.editTemplate.stationId
+    )) {
+      toast('该范围已有样式，请在列表中直接编辑')
+      return
+    }
     try {
-      const res = await this.call('admin.print.templates.save', { template: this.data.editTemplate })
-      await this.loadTemplates()
-      if (res.data && res.data._id) this.selectTemplate(res.data._id)
+      this.setData({ savingTemplate: true })
+      const draft = clone(this.data.editTemplate)
+      const res = await this.call('admin.print.templates.save', { template: draft })
+      const returnedDifference = templateDraftDifference(res.data, draft)
+      if (returnedDifference) throw templateSaveMismatch(`云端返回：${returnedDifference}。请确认部署的是当前项目 cloudfunctions/tenantApi 整个目录，且小程序连接同一云环境；本次输入仍保留在页面上。`)
+      const listRes = await this.call('admin.print.templates.list')
+      const templates = listRes.data || []
+      const stored = templates.find(item => item._id === res.data._id)
+      const storedDifference = templateDraftDifference(stored, draft)
+      if (storedDifference) throw templateSaveMismatch(`重新读取云端：${storedDifference}。请确认小程序连接的云环境与部署环境相同；本次输入仍保留在页面上。`)
+      this.setData({ templates })
+      this.selectTemplate(stored._id, templates)
       toast('票据模板已保存', 'success')
-    } catch (err) { toast(err.message || '模板保存失败') }
+    } catch (err) {
+      if (err.code === 'TEMPLATE_SAVE_NOT_PERSISTED') {
+        wx.showModal({ title: '票据样式未完整保存', content: err.message, showCancel: false })
+      } else {
+        toast(err.message || '模板保存失败')
+      }
+    } finally {
+      this.setData({ savingTemplate: false })
+    }
+  },
+
+  onTemplateNameInput(e) {
+    const next = { 'editTemplate.name': e.detail.value }
+    const fields = this.data.editTemplate.fields || []
+    fields.forEach((field, index) => {
+      if (field.key === 'title' && !field.content) next[`previewFields[${index}].text`] = e.detail.value
+    })
+    this.setData(next)
+  },
+
+  createTemplateVariant() {
+    if (!this.data.editTemplate) return
+    const template = clone(this.data.editTemplate)
+    template._id = ''
+    template.name = `${template.name || '票据'}（自定义）`
+    template.bindScope = 'printer'
+    template.printerId = ''
+    template.printerName = ''
+    template.stationId = ''
+    template.stationName = ''
+    this.setData({ editTemplate: template, selectedTemplateId: '', previewFields: makePreviewFields(template.fields, template) })
+    toast('请填写名称、选择绑定打印机，再保存新样式')
+  },
+
+  deleteTemplate() {
+    const template = this.data.editTemplate
+    if (!template || !template._id) return
+    wx.showModal({
+      title: '删除票据样式',
+      content: `确定删除“${template.name}”（${template.bindingLabel || '全店默认'}）吗？打印任务会改用全店默认样式。`,
+      success: async res => {
+        if (!res.confirm) return
+        try {
+          await this.call('admin.print.templates.delete', { templateId: template._id })
+          await this.loadTemplates()
+          toast('已删除票据样式', 'success')
+        } catch (err) { toast(err.message || '删除失败') }
+      }
+    })
   },
 
   async templateAction(e) {
     const action = e.currentTarget.dataset.action
     const template = this.data.editTemplate
     if (!template) return
+    if (!template._id) {
+      toast('请先保存新票据样式')
+      return
+    }
     try {
       if (action === 'test') {
         if (!this.data.templateTestPrinterId) {
@@ -828,6 +995,8 @@ Page({
           version: item.version || 1,
           time: formatTime(item.createTime),
           reason: item.reason === 'reset' ? '恢复默认前' : '保存前',
+          name: item.name,
+          paperWidth: item.paperWidth,
           fields: clone(item.fields || []),
           selected: false
         }))
@@ -858,7 +1027,9 @@ Page({
     this._lastTemplateHistoryTap = { versionId, timestamp }
     if (previous && previous.versionId === versionId && timestamp - previous.timestamp < 360) {
       const template = clone(this.data.editTemplate)
-      template.fields = clone(item.fields || [])
+      template.fields = decorateTemplateFields(clone(item.fields || []))
+      if (item.name) template.name = item.name
+      if (item.paperWidth) template.paperWidth = item.paperWidth
       this._lastTemplateHistoryTap = null
       this.setData({
         editTemplate: template,

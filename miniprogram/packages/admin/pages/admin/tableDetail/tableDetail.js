@@ -1705,7 +1705,7 @@ Page({
 
     try {
       this.setData({ checkingOut: true })
-      await apiClient.call('admin.table.finishCheckout', {
+      const checkoutResult = await apiClient.call('admin.table.finishCheckout', {
         areaKey: table.areaKey,
         tableNumber: table.tableNumber,
         paymentMethod: this.data.paymentMethod,
@@ -1713,11 +1713,16 @@ Page({
         discountValue: this.data.discountValue,
         directReduceValue: this.data.directReduceValue
       })
-      wx.showToast({
-        title: UI.checkoutSuccess,
-        icon: 'success'
-      })
       await this.loadDetail(true)
+      const receipt = checkoutResult && checkoutResult.data || {}
+      const printError = receipt.cashierPrintError || (Array.isArray(receipt.cashierPrintJobs) && !receipt.cashierPrintJobs.length
+        ? '结账单打印任务未创建，请检查收银打印配置及前台档口打印机'
+        : '')
+      if (printError) {
+        wx.showModal({ title: '已结账，但结账单未创建', content: printError, showCancel: false })
+      } else {
+        wx.showToast({ title: UI.checkoutSuccess, icon: 'success' })
+      }
     } catch (err) {
       console.error('finish checkout failed', err)
       wx.showToast({

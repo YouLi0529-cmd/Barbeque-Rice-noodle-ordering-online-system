@@ -48,7 +48,14 @@ const UI = {
   clearSuccess: '\u5df2\u6e05\u53f0',
   clearFailed: '\u6e05\u53f0\u5931\u8d25',
   todayArrival: '\u4eca\u65e5\u5230\u5e97',
-  peopleUnit: '\u4eba'
+  peopleUnit: '\u4eba',
+  unsettledTotal: '\u672a\u7ed3\u7b97\u91d1\u989d',
+  searchDish: '\u67e5\u83dc',
+  searchDishTitle: '\u67e5\u627e\u672a\u7ed3\u8d26\u684c\u53f0\u83dc\u54c1',
+  searchDishPlaceholder: '\u8f93\u5165\u83dc\u54c1\u540d\u79f0',
+  searchDishEmpty: '\u8bf7\u8f93\u5165\u83dc\u540d\u540e\u67e5\u627e',
+  searchDishNoResults: '\u6ca1\u6709\u5728\u8425\u684c\u53f0\u7684\u5df2\u63d0\u4ea4\u83dc\u54c1',
+  searchDishFailed: '\u67e5\u83dc\u5931\u8d25'
 }
 
 const TABLE_DETAIL_PAGE = '/packages/admin/pages/admin/tableDetail/tableDetail'
@@ -133,6 +140,13 @@ function formatPrice(price) {
   const value = Number(price || 0)
   if (Number.isInteger(value)) return String(value)
   return value.toFixed(1)
+}
+
+function formatSearchTime(value) {
+  const time = Number(value || 0)
+  if (!time) return '\u672a\u8bb0\u5f55\u65f6\u95f4'
+  const date = new Date(time)
+  return `${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`
 }
 
 function isSameTable(left, right) {
@@ -245,7 +259,12 @@ Page({
     selectedTableMap: {},
     selectedTableCount: 0,
     clearingTable: false,
-    todayArrivalCount: 0
+    todayArrivalCount: 0,
+    unsettledTotalText: '0',
+    showDishSearch: false,
+    dishSearchQuery: '',
+    dishSearchResults: [],
+    searchingDish: false
   },
 
   onLoad() {
@@ -314,12 +333,13 @@ Page({
       const todayArrivalCount = Math.max(0, Math.floor(Number(
         res && res.data && res.data.todayArrival && res.data.todayArrival.peopleCount || 0
       )))
+      const unsettledTotalText = formatPrice(res && res.data && res.data.unsettledTotal || 0)
 
       if (sections.length > 0) {
         this.rawTables = sections
         this.refreshTables()
       }
-      this.setData({ todayArrivalCount })
+      this.setData({ todayArrivalCount, unsettledTotalText })
       if (Number.isFinite(boardVersion)) this.tableBoardVersion = boardVersion
       if (activityStamp) this.tableBoardActivityStamp = activityStamp
       if (hasReservations) {
@@ -796,6 +816,54 @@ Page({
     } finally {
       this.setData({ transferring: false })
     }
+  },
+
+  stopPropagation() {},
+
+  openDishSearch() {
+    this.setData({ showDishSearch: true, dishSearchQuery: '', dishSearchResults: [] })
+  },
+
+  closeDishSearch() {
+    if (this.data.searchingDish) return
+    this.setData({ showDishSearch: false, dishSearchQuery: '', dishSearchResults: [] })
+  },
+
+  onDishSearchInput(event) {
+    this.setData({ dishSearchQuery: String(event.detail && event.detail.value || '') })
+  },
+
+  async searchOpenTableDishes() {
+    const query = String(this.data.dishSearchQuery || '').trim()
+    if (!query || this.data.searchingDish) {
+      if (!query) this.setData({ dishSearchResults: [] })
+      return
+    }
+    this.setData({ searchingDish: true })
+    try {
+      const res = await apiClient.call('admin.table.searchDishes', { query })
+      const items = (res && res.data && Array.isArray(res.data.items) ? res.data.items : []).map(item => ({
+        ...item,
+        orderTimeText: formatSearchTime(item.orderTime)
+      }))
+      this.setData({ dishSearchResults: items })
+    } catch (err) {
+      console.error('search open table dishes failed', err)
+      wx.showToast({ title: err.message || UI.searchDishFailed, icon: 'none' })
+    } finally {
+      this.setData({ searchingDish: false })
+    }
+  },
+
+  openDishSearchTable(event) {
+    const data = event.currentTarget.dataset || {}
+    if (!data.table) return
+    this.setData({ showDishSearch: false }, () => this.navigateToTable({
+      areaKey: data.areaKey,
+      area: data.area,
+      table: data.table,
+      tableKey: `${data.areaKey}-${data.table}`
+    }))
   },
 
   toggleMergeTable(data, activeSource = null) {

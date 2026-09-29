@@ -537,6 +537,9 @@
   font-size: 21rpx;
 }
 
+.field-source-tag { float: right; color: #9a806d; font-size: 18rpx; font-weight: 400; }
+.field-editor-hint { margin: 8rpx 0 14rpx; color: #947864; font-size: 19rpx; line-height: 1.5; }
+
 .receipt-preview {
   min-height: 440rpx;
   padding: 24rpx 18rpx;
@@ -552,16 +555,20 @@
   padding: 5rpx 6rpx;
   white-space: pre-wrap;
   word-break: break-all;
-  font-size: 21rpx;
+  font-size: 18rpx;
+  line-height: 1.15;
 }
 
 .preview-line.selected { outline: 2rpx solid #e54a1d; background: #fff0da; }
 .preview-line.bold { font-weight: 900; }
 .preview-line.inverse { color: #fff; background: #2f1d15; }
-.preview-line.size-small { font-size: 17rpx; }
-.preview-line.size-medium { font-size: 25rpx; }
-.preview-line.size-large { font-size: 29rpx; }
-.preview-line.size-xlarge { font-size: 34rpx; }
+.preview-line.size-small { font-size: 15rpx; }
+.preview-line.size-medium { font-size: 36rpx; }
+.preview-line.size-large { font-size: 54rpx; }
+.preview-line.size-xlarge { font-size: 72rpx; }
+.preview-line.size-xxlarge { font-size: 90rpx; }
+.preview-line.size-xxxlarge { font-size: 108rpx; }
+.preview-line.placeholder { color: #a9998e; font-size: 17rpx; font-weight: 400; }
 .preview-line.align-center { text-align: center; }
 .preview-line.align-right { text-align: right; }
 .cashier-preview-row { display: flex; align-items: flex-start; width: 100%; min-height: 30rpx; line-height: 1.55; text-align: left; }
@@ -587,6 +594,8 @@
 }
 
 .setting-row input { width: 130rpx; padding: 8rpx; color: #3a2418; background: #fff5e8; border-radius: 5rpx; font-size: 21rpx; }
+.template-content-row { display: block; }
+.setting-row .template-content-input { width: 100%; height: 56rpx; margin-top: 8rpx; padding: 0 10rpx; box-sizing: border-box; }
 .field-value { max-width: 130rpx; overflow: hidden; color: #8a5e37; font-size: 21rpx; font-weight: 800; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 
 .form-grid {
@@ -907,10 +916,12 @@
   .job-meta { margin-bottom: 8px; font-size: 12px; }
   .job-preview { min-height: 0; padding: 10px; }
   .job-detail-card .preview-line { min-height: 16px; padding: 3px 4px; font-size: 11px; }
-  .job-detail-card .preview-line.size-small { font-size: 10px; }
-  .job-detail-card .preview-line.size-medium { font-size: 12px; }
-  .job-detail-card .preview-line.size-large { font-size: 14px; }
-  .job-detail-card .preview-line.size-xlarge { font-size: 16px; }
+  .job-detail-card .preview-line.size-small { font-size: 9px; }
+  .job-detail-card .preview-line.size-medium { font-size: 22px; }
+  .job-detail-card .preview-line.size-large { font-size: 33px; }
+  .job-detail-card .preview-line.size-xlarge { font-size: 44px; }
+  .job-detail-card .preview-line.size-xxlarge { font-size: 55px; }
+  .job-detail-card .preview-line.size-xxxlarge { font-size: 66px; }
   .job-detail-footer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .job-detail-footer .modal-btn { padding: 0 8px; }
 }

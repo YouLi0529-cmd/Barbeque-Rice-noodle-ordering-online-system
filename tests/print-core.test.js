@@ -67,6 +67,9 @@ function createMemoryDb() {
 async function verifyKitchenRouting() {
   const db = createMemoryDb()
   const service = createPrintService({ db, _: {}, defaultTenantId: 'store-test' })
+  db.data.dish = {
+    'hot-beef': { _id: 'hot-beef', name: '招牌秘制牛肉', kitchenPrintName: '牛肉' }
+  }
   const stationsResult = await service.handleAdminAction('admin.print.stations.list', { tenantId: 'store-test' })
   const hotStation = stationsResult.data.find(station => station.code === 'hot-dishes')
   assert.ok(hotStation)
@@ -86,8 +89,150 @@ async function verifyKitchenRouting() {
   assert.strictEqual(dispatch.results.length, 2)
   assert.strictEqual(Object.values(db.data.printJobs).length, 2)
   assert.strictEqual(Object.values(db.data.unassignedDishAlerts).length, 1)
+  const kitchenJob = Object.values(db.data.printJobs).find(job => job.payload.dishIndexes.includes(0))
+  assert.ok(kitchenJob.ticket.lines.some(line => String(line.text || '').includes('牛肉 x1')))
+  assert.ok(!kitchenJob.ticket.lines.some(line => String(line.text || '').includes('招牌秘制牛肉')))
+  const kitchenTemplate = (await service.handleAdminAction('admin.print.templates.list', { tenantId: 'store-test' })).data.find(template => template.ticketType === 'kitchen_order' && template.bindScope === 'global')
+  const renamedKitchen = await service.handleAdminAction('admin.print.templates.save', {
+    tenantId: 'store-test', template: { ...kitchenTemplate, name: '烤肉制作单' }
+  })
+  assert.strictEqual(renamedKitchen.success, true)
+  const newKitchenOrder = { ...order, _id: 'renamed-kitchen-order' }
+  await service.queueKitchenJobs({ id: 'store-test', order: newKitchenOrder, eventKey: 'renamed', dishEntries: [{ index: 0, item: { dishId: 'hot-beef', dishName: '招牌秘制牛肉', count: 1 } }] })
+  const renamedKitchenJob = Object.values(db.data.printJobs).find(job => job.orderId === newKitchenOrder._id)
+  assert.ok(renamedKitchenJob.ticket.lines.some(line => line.key === 'title' && line.text === '烤肉制作单'))
   await service.queueKitchenJobs({ id: 'store-test', order, eventKey: 'first-submit', dishEntries: [{ index: 0, item: { dishId: 'hot-beef', dishName: 'hot beef', count: 1 } }, { index: 1, item: { dishId: 'unassigned-tofu', dishName: 'tofu', count: 1 } }] })
-  assert.strictEqual(Object.values(db.data.printJobs).length, 2)
+  assert.strictEqual(Object.values(db.data.printJobs).length, 3)
+
+  const templates = (await service.handleAdminAction('admin.print.templates.list', { tenantId: 'store-test' })).data
+  const prebillTemplate = templates.find(template => template.ticketType === 'prebill')
+  const savedTemplate = await service.handleAdminAction('admin.print.templates.save', {
+    tenantId: 'store-test',
+    template: {
+      ...prebillTemplate,
+      fields: prebillTemplate.fields.map(field => field.key === 'shopName'
+        ? { ...field, content: '张南烤肉', size: 'xxlarge' }
+        : field).concat({ id: 'large-note', key: 'customText', label: '自定义文字', content: '欢迎光临', size: 'xxxlarge' })
+    }
+  })
+  assert.strictEqual(savedTemplate.success, true)
+  assert.strictEqual(savedTemplate.data.fields.find(field => field.key === 'shopName').content, '张南烤肉')
+  assert.strictEqual(savedTemplate.data.fields.find(field => field.key === 'shopName').size, 'xxlarge')
+  assert.strictEqual(savedTemplate.data.fields.find(field => field.key === 'customText').size, 'xxxlarge')
+  const templatesAfterPrebillSave = (await service.handleAdminAction('admin.print.templates.list', { tenantId: 'store-test' })).data
+  const checkoutAfterPrebillSave = templatesAfterPrebillSave.find(template => template.ticketType === 'checkout' && template.bindScope === 'global')
+  assert.ok(!checkoutAfterPrebillSave.fields.find(field => field.key === 'shopName').content)
+  await service.queueCashierReceipt({
+    id: 'store-test', ticketType: 'prebill', eventKey: 'original-name',
+    orders: [{ ...order, goods: [{ dishId: 'hot-beef', dishName: '招牌秘制牛肉', count: 1, price: 28 }] }]
+  })
+  const prebill = Object.values(db.data.printJobs).find(job => job.ticketType === 'prebill')
+  assert.ok(prebill.ticket.lines.some(line => line.key === 'shopName' && line.text === '张南烤肉' && line.size === 'xxlarge'))
+  assert.ok(prebill.ticket.lines.some(line => line.key === 'customText' && line.text === '欢迎光临' && line.size === 'xxxlarge'))
+  assert.ok(prebill.ticket.lines.some(line => String(line.text || '').includes('招牌秘制牛肉')))
+  await service.handleAdminAction('admin.print.templates.save', {
+    tenantId: 'store-test',
+    template: { ...checkoutAfterPrebillSave, fields: checkoutAfterPrebillSave.fields.map(field => field.key === 'shopName' ? { ...field, content: '结账专用店名' } : field) }
+  })
+  const prebillAfterCheckoutSave = (await service.handleAdminAction('admin.print.templates.list', { tenantId: 'store-test' })).data.find(template => template.ticketType === 'prebill' && template.bindScope === 'global')
+  assert.strictEqual(prebillAfterCheckoutSave.fields.find(field => field.key === 'shopName').content, '张南烤肉')
+
+  const customerTemplate = templates.find(template => template.ticketType === 'customer_order' && template.bindScope === 'global')
+  const customizedCustomer = await service.handleAdminAction('admin.print.templates.save', {
+    tenantId: 'store-test',
+    template: {
+      ...customerTemplate,
+      fields: customerTemplate.fields.map(field => field.key === 'shopName'
+        ? { ...field, content: '张南烤肉' }
+        : field.key === 'dishes' ? { ...field, content: '不能覆盖菜品' } : field)
+    }
+  })
+  assert.strictEqual(customizedCustomer.success, true)
+  assert.strictEqual(customizedCustomer.data.fields.find(field => field.key === 'dishes').content, undefined)
+  const firstOrder = { ...order, _id: 'order-guest-1', rootOrderId: 'order-guest-1', totalPrice: 28, finalPrice: 28, goods: [{ dishId: 'hot-beef', dishName: '招牌秘制牛肉', count: 1, price: 28 }] }
+  const addOrder = { ...order, _id: 'order-guest-2', rootOrderId: 'order-guest-1', isAddOnOrder: true, totalPrice: 12, finalPrice: 12, goods: [{ dishId: 'drink', dishName: '啤酒', count: 2, price: 6 }] }
+  const frontStation = stationsResult.data.find(station => station.code === 'front-counter')
+  await service.handleAdminAction('admin.print.dishes.save', {
+    tenantId: 'store-test', dishIds: ['drink'], stationId: frontStation._id, printEnabled: true
+  })
+  const frontKitchenPrint = await service.queueKitchenJobs({
+    id: 'store-test', order: addOrder, eventKey: 'auto-submit:order-guest-2',
+    dishEntries: [{ index: 0, item: addOrder.goods[0] }]
+  })
+  assert.strictEqual(frontKitchenPrint.results.length, 1)
+  assert.strictEqual(frontKitchenPrint.results[0].stationId, frontStation._id)
+  assert.strictEqual(Object.values(db.data.printJobs).find(job => job.orderId === addOrder._id).ticketType, 'kitchen_add')
+  const customerPrint = await service.queueCashierReceipt({ id: 'store-test', ticketType: 'customer_order', orders: [firstOrder, addOrder], eventKey: 'auto-submit:order-guest-2' })
+  assert.strictEqual(customerPrint.jobs.length, 1)
+  const customerJob = customerPrint.jobs[0]
+  assert.strictEqual(customerJob.printerId, Object.values(db.data.printers).find(printer => printer.code === 'front-counter')._id)
+  assert.strictEqual(frontKitchenPrint.results[0].printerId, customerJob.printerId)
+  assert.ok(customerJob.ticket.lines.some(line => line.key === 'shopName' && line.text === '张南烤肉'))
+  assert.ok(customerJob.ticket.lines.some(line => line.key === 'dishes' && line.text.includes('招牌秘制牛肉') && line.text.includes('啤酒')))
+  assert.ok(customerJob.ticket.lines.some(line => line.key === 'totalPrice' && line.text.includes('40')))
+  const repeatPrint = await service.queueCashierReceipt({ id: 'store-test', ticketType: 'customer_order', orders: [firstOrder, addOrder], eventKey: 'auto-submit:order-guest-2' })
+  assert.strictEqual(repeatPrint.jobs[0]._id, customerJob._id)
+
+  const scopedCustomer = await service.handleAdminAction('admin.print.templates.save', {
+    tenantId: 'store-test',
+    template: { ...customerTemplate, name: '前台客单', bindScope: 'printer', printerId: customerJob.printerId }
+  })
+  assert.strictEqual(scopedCustomer.success, true)
+  const scopedPrint = await service.queueCashierReceipt({ id: 'store-test', ticketType: 'customer_order', orders: [firstOrder], eventKey: 'scoped-customer' })
+  assert.strictEqual(scopedPrint.jobs[0].ticketName, '前台客单')
+  const deleted = await service.handleAdminAction('admin.print.templates.delete', { tenantId: 'store-test', templateId: scopedCustomer.data._id })
+  assert.strictEqual(deleted.success, true)
+  const remaining = (await service.handleAdminAction('admin.print.templates.list', { tenantId: 'store-test' })).data
+  assert.ok(remaining.some(template => template._id === customerTemplate._id))
+  assert.ok(remaining.find(template => template._id === customerTemplate._id).isSystemDefault)
+  assert.ok(!remaining.some(template => template._id === scopedCustomer.data._id))
+  const protectedDefault = await service.handleAdminAction('admin.print.templates.delete', { tenantId: 'store-test', templateId: customerTemplate._id })
+  assert.strictEqual(protectedDefault.code, 'DEFAULT_TEMPLATE_REQUIRED')
+
+  db.data.printers['other-usb'] = { _id: 'other-usb', storeId: 'store-test', name: '别的 USB 打印机', connectionType: 'usb', status: true, paperWidth: 58 }
+  const checkoutConfig = Object.values(db.data.cashierPrintConfigs).find(config => config.ticketType === 'checkout')
+  checkoutConfig.printerId = 'other-usb'
+  const checkoutTemplate = templates.find(template => template.ticketType === 'checkout' && template.bindScope === 'global')
+  const frontCheckoutTemplate = await service.handleAdminAction('admin.print.templates.save', {
+    tenantId: 'store-test',
+    template: { ...checkoutTemplate, name: '前台结账单', bindScope: 'printer', printerId: customerJob.printerId }
+  })
+  assert.strictEqual(frontCheckoutTemplate.success, true)
+  const checkoutPrint = await service.queueCashierReceipt({
+    id: 'store-test', ticketType: 'checkout', orders: [firstOrder, addOrder],
+    checkoutSummary: { totalPrice: 40, receivable: 40 }, eventKey: 'checkout:guest-order'
+  })
+  assert.strictEqual(checkoutPrint.jobs.length, 1)
+  assert.strictEqual(checkoutPrint.jobs[0].printerId, customerJob.printerId)
+  assert.strictEqual(checkoutPrint.jobs[0].ticketName, '前台结账单')
+  await service.handleAdminAction('admin.print.templates.delete', { tenantId: 'store-test', templateId: frontCheckoutTemplate.data._id })
+  const fallbackCheckout = await service.queueCashierReceipt({
+    id: 'store-test', ticketType: 'checkout', orders: [firstOrder, addOrder],
+    checkoutSummary: { totalPrice: 40, receivable: 40 }, eventKey: 'checkout:fallback'
+  })
+  assert.strictEqual(fallbackCheckout.jobs[0].ticketName, checkoutTemplate.name)
+  assert.strictEqual(fallbackCheckout.jobs[0].printerId, customerJob.printerId)
+
+  const editableKeys = ['title', 'shopName', 'banquetName', 'tableNumber', 'tableInfo', 'orderNumber', 'customData', 'peopleCount', 'seatCount', 'orderType', 'openingRemark', 'totalCount', 'orderAmount', 'receivableAmount', 'totalPrice', 'orderTime', 'printTime', 'customText']
+  const fieldMatrix = editableKeys.map((key, index) => ({
+    id: `matrix-${index}`, key, label: key, content: `自定义-${key}`,
+    size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: false, blankBefore: false
+  })).concat({ id: 'matrix-dishes', key: 'dishes', label: '菜品明细', content: '不能覆盖菜品', size: 'normal' })
+  const matrixSave = await service.handleAdminAction('admin.print.templates.save', {
+    tenantId: 'store-test', template: { ...customerTemplate, name: '全字段测试', paperWidth: 76, fields: fieldMatrix }
+  })
+  assert.strictEqual(matrixSave.success, true)
+  const matrixReload = (await service.handleAdminAction('admin.print.templates.list', { tenantId: 'store-test' })).data.find(template => template._id === customerTemplate._id)
+  assert.strictEqual(matrixReload.paperWidth, 76)
+  editableKeys.forEach(key => assert.strictEqual(matrixReload.fields.find(field => field.key === key).content, `自定义-${key}`))
+  assert.strictEqual(matrixReload.fields.find(field => field.key === 'dishes').content, undefined)
+  const matrixPrint = await service.queueCashierReceipt({ id: 'store-test', ticketType: 'customer_order', orders: [firstOrder], eventKey: 'field-matrix' })
+  editableKeys.forEach(key => assert.ok(matrixPrint.jobs[0].ticket.lines.some(line => line.key === key && line.text === `自定义-${key}`)))
+  assert.ok(matrixPrint.jobs[0].ticket.lines.some(line => line.key === 'dishes' && line.text.includes('招牌秘制牛肉')))
+  const resetMatrix = await service.handleAdminAction('admin.print.templates.reset', { tenantId: 'store-test', templateId: customerTemplate._id, ticketType: 'customer_order' })
+  assert.strictEqual(resetMatrix.data.name, '客单')
+  assert.strictEqual(resetMatrix.data.paperWidth, 58)
+  assert.ok(!resetMatrix.data.fields.find(field => field.key === 'shopName').content)
 }
 
 async function verifyKitchenPrintFailureSync() {
@@ -162,12 +307,12 @@ async function verifyPrinterScopeAndHealth() {
   assert.strictEqual(migratedDessertStation.printerId, dessert._id)
   assert.strictEqual(migratedDessertStation.status, true)
 
-  const invalidStation = await service.handleAdminAction('admin.print.stations.save', {
+  const frontCounterStation = await service.handleAdminAction('admin.print.stations.save', {
     tenantId: 'store-test',
-    station: { name: 'invalid kitchen station', code: 'invalid', printerId: cashier._id, status: true }
+    station: { name: 'front counter station', code: 'front-counter', printerId: cashier._id, status: true }
   })
-  assert.strictEqual(invalidStation.success, false)
-  assert.strictEqual(invalidStation.code, 'STATION_KITCHEN_PRINTER_REQUIRED')
+  assert.strictEqual(frontCounterStation.success, true)
+  assert.strictEqual(frontCounterStation.data.printerId, cashier._id)
 
   const savedStation = await service.handleAdminAction('admin.print.stations.save', {
     tenantId: 'store-test',

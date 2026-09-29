@@ -160,6 +160,11 @@
           <view class="form-label">{{ui.dishName}}</view>
           <input class="form-input" placeholder="{{ui.inputDishName}}" value="{{currentDish.name}}" data-field="name" bindinput="onDishInput" />
         </view>
+        <view class="form-item">
+          <view class="form-label">{{ui.kitchenPrintName}}</view>
+          <input class="form-input" type="text" cursor-spacing="24" placeholder="{{ui.inputKitchenPrintName}}" value="{{currentDish.kitchenPrintName}}" data-field="kitchenPrintName" bindinput="onDishInput" />
+          <view class="form-tip">{{ui.kitchenPrintNameTip}}</view>
+        </view>
         <view class="form-item category-form-item">
           <view class="form-label">{{ui.dishCategory}}</view>
           <view class="category-select {{showCategoryDropdown ? 'open' : ''}}">
