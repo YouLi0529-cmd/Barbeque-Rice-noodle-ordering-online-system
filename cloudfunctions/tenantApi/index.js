@@ -2933,10 +2933,11 @@ function buildSettlementRecordDetail(key, orders = []) {
       return getTimeValue(left.createTime) - getTimeValue(right.createTime)
     })
     .map((order, index) => {
-      const goods = formatAdminGoods(order.goods).map(item => ({
+      const goods = formatAdminGoods(order.goods).map((item, goodsIndex) => ({
         dishName: item.dishName || '未命名菜品',
         count: item.count,
-        subtotal: item.subtotal
+        subtotal: item.subtotal,
+        goodsIndex
       }))
       return {
         id: order._id,
@@ -3034,6 +3035,133 @@ async function adminGetSettlementRecord(payload) {
     success: true,
     data: buildSettlementRecordDetail(recordId, groupOrders)
   }
+}
+
+function getSettlementGoodsTotal(goods = []) {
+  return roundMoney((Array.isArray(goods) ? goods : []).reduce((sum, item) => {
+    const count = Math.max(0, Number(item && item.count || 0))
+    const unitPrice = Number(item && (item.price !== undefined ? item.price : item.originalPrice) || 0)
+    const subtotal = item && item.subtotal !== undefined ? Number(item.subtotal) : unitPrice * count
+    return sum + (Number.isFinite(subtotal) ? subtotal : unitPrice * count)
+  }, 0))
+}
+
+function getEditedSettlementSummary(totalPrice, orders = []) {
+  const source = orders.find(order => order.checkoutDiscountType || order.checkoutDiscountValue !== undefined || order.checkoutDirectReduceValue !== undefined) || {}
+  const discountType = String(source.checkoutDiscountType || '')
+  const discountValue = Number(source.checkoutDiscountValue)
+  const afterDiscount = (discountType === 'discount' || discountType === 'reduce') && Number.isFinite(discountValue) && discountValue >= 0 && discountValue <= 10
+    ? roundMoney(totalPrice * discountValue / 10)
+    : totalPrice
+  const storedReduce = source.checkoutDirectReduceValue !== undefined && source.checkoutDirectReduceValue !== ''
+    ? Number(source.checkoutDirectReduceValue)
+    : (discountType === 'direct_reduce' ? discountValue : 0)
+  const directReduceValue = Number.isFinite(storedReduce) ? Math.min(afterDiscount, Math.max(0, storedReduce)) : 0
+  return {
+    receivable: roundMoney(Math.max(0, afterDiscount - directReduceValue)),
+    discountType,
+    discountValue: discountType === 'direct_reduce' ? directReduceValue : (Number.isFinite(discountValue) ? discountValue : ''),
+    directReduceValue
+  }
+}
+
+async function adminEditSettlement(payload) {
+  const dateRange = getSettlementDateRange(payload.date)
+  const recordId = String(payload.recordId || '').trim()
+  const operation = String(payload.operation || '').trim()
+  const orderId = String(payload.orderId || '').trim()
+  if (!dateRange || !recordId || !operation) {
+    return { success: false, code: 'SETTLEMENT_EDIT_REQUIRED', message: 'settlement edit information required' }
+  }
+
+  const tenantId = getTenantId(payload)
+  const orders = await listSettledOrdersByDate(tenantId, dateRange)
+  const groups = buildSettlementGroups(orders)
+  const groupOrders = groups[recordId]
+  if (!groupOrders || !groupOrders.length) {
+    return { success: false, code: 'SETTLEMENT_RECORD_NOT_FOUND', message: 'settlement record not found' }
+  }
+  const target = groupOrders.find(order => order._id === orderId)
+  if (operation !== 'deleteRecord' && (!target || !orderId)) {
+    return { success: false, code: 'SETTLEMENT_ORDER_NOT_IN_RECORD', message: 'order does not belong to this settlement record' }
+  }
+  if (!['deleteRecord', 'deleteOrder', 'deleteDish', 'addDish'].includes(operation)) {
+    return { success: false, code: 'SETTLEMENT_EDIT_OPERATION_INVALID', message: 'unsupported settlement edit operation' }
+  }
+  const dishName = String(payload.dishName || '').trim()
+  const unitPrice = Number(payload.unitPrice)
+  const count = Number(payload.count)
+  if (operation === 'addDish' && (!dishName || !Number.isFinite(unitPrice) || unitPrice < 0 || !Number.isInteger(count) || count < 1 || count > 99)) {
+    return { success: false, code: 'SETTLEMENT_DISH_INVALID', message: 'dish name, non-negative price and quantity are required' }
+  }
+
+  return db.runTransaction(async transaction => {
+    const currentOrders = []
+    for (const order of groupOrders) {
+      const result = await transaction.collection('order').doc(order._id).get()
+      const current = result.data
+      if (current && current.storeId === tenantId && isAdminPaidOrder(current) && current.deleted !== true && getBusinessStatsGroupKey(current) === recordId) currentOrders.push(current)
+    }
+    if (currentOrders.length !== groupOrders.length) {
+      return { success: false, code: 'SETTLEMENT_RECORD_CHANGED', message: 'settlement record changed; reload and retry' }
+    }
+    if (!currentOrders.length) return { success: false, code: 'SETTLEMENT_RECORD_NOT_FOUND', message: 'settlement record not found' }
+    if (operation === 'deleteRecord') {
+      for (const order of currentOrders) await transaction.collection('order').doc(order._id).remove()
+      return { success: true, data: { deletedOrders: currentOrders.length } }
+    }
+    const currentTarget = currentOrders.find(order => order._id === orderId)
+    if (!currentTarget) return { success: false, code: 'SETTLEMENT_ORDER_NOT_IN_RECORD', message: 'order does not belong to this settlement record' }
+
+    let updatedGoods = null
+    if (operation === 'deleteDish') {
+      const goodsIndex = Number(payload.goodsIndex)
+      if (!Number.isInteger(goodsIndex) || goodsIndex < 0 || goodsIndex >= (Array.isArray(currentTarget.goods) ? currentTarget.goods.length : 0)) {
+        return { success: false, code: 'SETTLEMENT_DISH_NOT_FOUND', message: 'dish not found in order' }
+      }
+      updatedGoods = currentTarget.goods.filter((_, index) => index !== goodsIndex)
+    }
+    if (operation === 'addDish') {
+      updatedGoods = (Array.isArray(currentTarget.goods) ? currentTarget.goods : []).concat([{
+        dishName,
+        name: dishName,
+        price: roundMoney(unitPrice),
+        finalPrice: roundMoney(unitPrice),
+        count,
+        subtotal: roundMoney(unitPrice * count),
+        settlementManualEntry: true
+      }])
+    }
+    if (operation === 'deleteOrder') {
+      await transaction.collection('order').doc(currentTarget._id).remove()
+    } else {
+      const targetTotal = getSettlementGoodsTotal(updatedGoods)
+      await transaction.collection('order').doc(currentTarget._id).update({
+        data: { goods: updatedGoods, totalPrice: targetTotal, finalPrice: targetTotal, updateTime: db.serverDate() }
+      })
+    }
+
+    const refreshedOrders = currentOrders
+      .filter(order => operation !== 'deleteOrder' || order._id !== currentTarget._id)
+      .map(order => order._id === currentTarget._id && updatedGoods
+        ? { ...order, goods: updatedGoods, totalPrice: getSettlementGoodsTotal(updatedGoods), finalPrice: getSettlementGoodsTotal(updatedGoods) }
+        : order)
+    if (!refreshedOrders.length) return { success: true, data: { deletedOrders: 1, receivable: 0 } }
+    const totalPrice = roundMoney(refreshedOrders.reduce((sum, order) => sum + getSettlementGoodsTotal(order.goods), 0))
+    const checkoutSummary = getEditedSettlementSummary(totalPrice, refreshedOrders)
+    for (const order of refreshedOrders) {
+      await transaction.collection('order').doc(order._id).update({ data: {
+        checkoutTotalPrice: totalPrice,
+        checkoutReceivable: checkoutSummary.receivable,
+        receivedAmount: checkoutSummary.receivable,
+        checkoutDiscountType: checkoutSummary.discountType,
+        checkoutDiscountValue: checkoutSummary.discountValue,
+        checkoutDirectReduceValue: checkoutSummary.directReduceValue,
+        updateTime: db.serverDate()
+      } })
+    }
+    return { success: true, data: { totalPrice, receivable: checkoutSummary.receivable, remainingOrders: refreshedOrders.length } }
+  })
 }
 
 function isAdminPreparingOrder(order) {
@@ -8374,6 +8502,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.business.stats') return adminGetBusinessStats(payload)
   if (action === 'admin.settlement.list') return adminListSettlementRecords(payload)
   if (action === 'admin.settlement.detail') return adminGetSettlementRecord(payload)
+  if (action === 'admin.settlement.edit') return adminEditSettlement(payload)
   if (action === 'admin.notification.list') return adminListInfoCenter(payload)
   if (action === 'admin.collection.list') return adminCollectionList(payload)
   if (action === 'admin.collection.save') return completeReservationMutation(adminCollectionSave(payload), payload)

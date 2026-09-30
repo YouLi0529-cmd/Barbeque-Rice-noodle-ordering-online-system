@@ -91,6 +91,15 @@ async function run() {
   page.selectTemplate(kitchen._id, [kitchen])
   assert.ok(!page.data.fieldLibrary.some(field => field.key === 'totalPrice'))
   assert.ok(!page.data.fieldLibrary.some(field => field.key === 'orderAmount'))
+  const dishesIndex = page.data.editTemplate.fields.findIndex(field => field.key === 'dishes')
+  page.data.selectedTemplateFieldIndex = dishesIndex
+  assert.strictEqual(page.data.previewFields[dishesIndex].dishPreviewRows[1].size, 'normal')
+  page.onTemplateFieldPicker({ currentTarget: { dataset: { key: 'specificationSize', options: 'sizeOptions' } }, detail: { value: 0 } })
+  page.onTemplateFieldPicker({ currentTarget: { dataset: { key: 'remarkSize', options: 'sizeOptions' } }, detail: { value: 3 } })
+  assert.strictEqual(page.data.editTemplate.fields[dishesIndex].specificationSize, 'xxxlarge')
+  assert.strictEqual(page.data.editTemplate.fields[dishesIndex].remarkSize, 'large')
+  assert.strictEqual(page.data.previewFields[dishesIndex].dishPreviewRows[1].size, 'xxxlarge')
+  assert.strictEqual(page.data.previewFields[dishesIndex].dishPreviewRows[2].size, 'large')
   console.log('printer template editor tests passed')
 }
 

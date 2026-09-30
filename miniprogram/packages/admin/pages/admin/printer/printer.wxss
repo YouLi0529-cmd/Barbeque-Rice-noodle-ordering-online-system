@@ -573,6 +573,15 @@
 .preview-line.align-right { text-align: right; }
 .cashier-preview-row { display: flex; align-items: flex-start; width: 100%; min-height: 30rpx; line-height: 1.55; text-align: left; }
 .cashier-preview-row.header { margin-bottom: 4rpx; font-weight: 900; }
+.dish-preview-size-samples { margin-top: 5rpx; }
+.dish-preview-subline { margin-top: 3rpx; font-weight: 400; }
+.dish-preview-subline.size-small { font-size: 15rpx; }
+.dish-preview-subline.size-normal { font-size: 18rpx; }
+.dish-preview-subline.size-medium { font-size: 36rpx; }
+.dish-preview-subline.size-large { font-size: 54rpx; }
+.dish-preview-subline.size-xlarge { font-size: 72rpx; }
+.dish-preview-subline.size-xxlarge { font-size: 90rpx; }
+.dish-preview-subline.size-xxxlarge { font-size: 108rpx; }
 .cashier-preview-dish { flex: 0 0 45%; min-width: 0; padding-right: 6rpx; word-break: break-all; box-sizing: border-box; }
 .cashier-preview-count { flex: 0 0 25%; text-align: center; }
 .cashier-preview-subtotal { flex: 1; text-align: right; }

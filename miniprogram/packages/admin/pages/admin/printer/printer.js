@@ -172,6 +172,11 @@ function makePreviewFields(fields, template = {}) {
       isCashierDishTable,
       isCashierSummary,
       previewRows: isCashierDishTable ? CASHIER_DISH_PREVIEW_ROWS : [],
+      dishPreviewRows: field.key === 'dishes' ? [
+        { key: 'dish', text: '五花肉 x2', size: field.size || 'normal' },
+        { key: 'specification', text: '规格：大份', size: field.specificationSize || field.size || 'normal' },
+        { key: 'remark', text: '备注：少辣', size: field.remarkSize || field.size || 'normal' }
+      ] : [],
       summaryRows: isCashierSummary ? (CASHIER_SUMMARY_PREVIEW_ROWS[field.key] || []) : []
     }
   })
@@ -203,6 +208,10 @@ function templateDraftDifference(saved, draft) {
     if (String(stored.label || '').trim() !== String(field.label || '').trim()) return `${label}的名称不一致`
     if (field.key !== 'dishes' && String(stored.content || '').trim() !== String(field.content || '').trim()) return `${label}的打印文字未保存`
     if ((stored.size || 'normal') !== (field.size || 'normal')) return `${label}的字号未保存`
+    if (field.key === 'dishes') {
+      if ((stored.specificationSize || stored.size || 'normal') !== (field.specificationSize || field.size || 'normal')) return `${label}的规格字号未保存`
+      if ((stored.remarkSize || stored.size || 'normal') !== (field.remarkSize || field.size || 'normal')) return `${label}的备注字号未保存`
+    }
     if ((stored.align || 'left') !== (field.align || 'left')) return `${label}的对齐方式未保存`
     if ((stored.color || 'black') !== (field.color || 'black')) return `${label}的颜色未保存`
     for (const key of ['bold', 'inverse', 'dividerAfter', 'blankBefore']) {

@@ -319,6 +319,57 @@ page {
   font-weight: 800;
 }
 
+.order-group-actions,
+.settlement-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.edit-action-link {
+  color: #A65A1B;
+  font-size: 9rpx;
+  white-space: nowrap;
+}
+
+.danger-text,
+.edit-action-button.danger {
+  color: #C9341C;
+}
+
+.settlement-edit-actions {
+  margin-top: 8rpx;
+  justify-content: flex-end;
+}
+
+.edit-action-button {
+  padding: 5rpx 9rpx;
+  border-radius: 5rpx;
+  background: #FFF0CF;
+  color: #70472E;
+  font-size: 9rpx;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.add-dish-form {
+  display: flex;
+  align-items: center;
+  gap: 7rpx;
+  padding: 8rpx;
+  border-top: 1rpx solid rgba(58, 36, 24, 0.08);
+}
+
+.add-dish-form input {
+  width: 22%;
+  min-width: 0;
+  height: 26rpx;
+  padding: 0 6rpx;
+  border: 1rpx solid rgba(58, 36, 24, 0.2);
+  border-radius: 4rpx;
+  font-size: 9rpx;
+}
+
 .settlement-error {
   position: fixed;
   left: 24rpx;

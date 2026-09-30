@@ -124,12 +124,14 @@ async function verifyKitchenRouting() {
   assert.ok(!checkoutAfterPrebillSave.fields.find(field => field.key === 'shopName').content)
   await service.queueCashierReceipt({
     id: 'store-test', ticketType: 'prebill', eventKey: 'original-name',
-    orders: [{ ...order, goods: [{ dishId: 'hot-beef', dishName: '招牌秘制牛肉', count: 1, price: 28 }] }]
+    orders: [{ ...order, goods: [{ dishId: 'hot-beef', dishName: '招牌秘制牛肉', count: 1, price: 28, specification: 'large', remark: 'mild' }] }]
   })
   const prebill = Object.values(db.data.printJobs).find(job => job.ticketType === 'prebill')
   assert.ok(prebill.ticket.lines.some(line => line.key === 'shopName' && line.text === '张南烤肉' && line.size === 'xxlarge'))
   assert.ok(prebill.ticket.lines.some(line => line.key === 'customText' && line.text === '欢迎光临' && line.size === 'xxxlarge'))
   assert.ok(prebill.ticket.lines.some(line => String(line.text || '').includes('招牌秘制牛肉')))
+  assert.ok(prebill.ticket.lines.some(line => line.key === 'dishSpecification' && line.size === 'normal'))
+  assert.ok(prebill.ticket.lines.some(line => line.key === 'dishRemark' && line.size === 'normal'))
   await service.handleAdminAction('admin.print.templates.save', {
     tenantId: 'store-test',
     template: { ...checkoutAfterPrebillSave, fields: checkoutAfterPrebillSave.fields.map(field => field.key === 'shopName' ? { ...field, content: '结账专用店名' } : field) }
@@ -144,12 +146,12 @@ async function verifyKitchenRouting() {
       ...customerTemplate,
       fields: customerTemplate.fields.map(field => field.key === 'shopName'
         ? { ...field, content: '张南烤肉' }
-        : field.key === 'dishes' ? { ...field, content: '不能覆盖菜品' } : field)
+        : field.key === 'dishes' ? { ...field, content: 'ignored', specificationSize: 'small', remarkSize: 'large' } : field)
     }
   })
   assert.strictEqual(customizedCustomer.success, true)
   assert.strictEqual(customizedCustomer.data.fields.find(field => field.key === 'dishes').content, undefined)
-  const firstOrder = { ...order, _id: 'order-guest-1', rootOrderId: 'order-guest-1', totalPrice: 28, finalPrice: 28, goods: [{ dishId: 'hot-beef', dishName: '招牌秘制牛肉', count: 1, price: 28 }] }
+  const firstOrder = { ...order, _id: 'order-guest-1', rootOrderId: 'order-guest-1', totalPrice: 28, finalPrice: 28, goods: [{ dishId: 'hot-beef', dishName: '招牌秘制牛肉', count: 1, price: 28, specification: 'large', remark: 'mild' }] }
   const addOrder = { ...order, _id: 'order-guest-2', rootOrderId: 'order-guest-1', isAddOnOrder: true, totalPrice: 12, finalPrice: 12, goods: [{ dishId: 'drink', dishName: '啤酒', count: 2, price: 6 }] }
   const frontStation = stationsResult.data.find(station => station.code === 'front-counter')
   await service.handleAdminAction('admin.print.dishes.save', {
@@ -168,7 +170,10 @@ async function verifyKitchenRouting() {
   assert.strictEqual(customerJob.printerId, Object.values(db.data.printers).find(printer => printer.code === 'front-counter')._id)
   assert.strictEqual(frontKitchenPrint.results[0].printerId, customerJob.printerId)
   assert.ok(customerJob.ticket.lines.some(line => line.key === 'shopName' && line.text === '张南烤肉'))
-  assert.ok(customerJob.ticket.lines.some(line => line.key === 'dishes' && line.text.includes('招牌秘制牛肉') && line.text.includes('啤酒')))
+  assert.ok(customerJob.ticket.lines.some(line => line.key === 'dishName' && line.text.includes('招牌秘制牛肉')))
+  assert.ok(customerJob.ticket.lines.some(line => line.key === 'dishName' && line.text.includes('啤酒')))
+  assert.ok(customerJob.ticket.lines.some(line => line.key === 'dishSpecification' && line.size === 'small'))
+  assert.ok(customerJob.ticket.lines.some(line => line.key === 'dishRemark' && line.size === 'large'))
   assert.ok(customerJob.ticket.lines.some(line => line.key === 'totalPrice' && line.text.includes('40')))
   const repeatPrint = await service.queueCashierReceipt({ id: 'store-test', ticketType: 'customer_order', orders: [firstOrder, addOrder], eventKey: 'auto-submit:order-guest-2' })
   assert.strictEqual(repeatPrint.jobs[0]._id, customerJob._id)
@@ -228,7 +233,7 @@ async function verifyKitchenRouting() {
   assert.strictEqual(matrixReload.fields.find(field => field.key === 'dishes').content, undefined)
   const matrixPrint = await service.queueCashierReceipt({ id: 'store-test', ticketType: 'customer_order', orders: [firstOrder], eventKey: 'field-matrix' })
   editableKeys.forEach(key => assert.ok(matrixPrint.jobs[0].ticket.lines.some(line => line.key === key && line.text === `自定义-${key}`)))
-  assert.ok(matrixPrint.jobs[0].ticket.lines.some(line => line.key === 'dishes' && line.text.includes('招牌秘制牛肉')))
+  assert.ok(matrixPrint.jobs[0].ticket.lines.some(line => line.key === 'dishName' && line.text.includes('招牌秘制牛肉')))
   const resetMatrix = await service.handleAdminAction('admin.print.templates.reset', { tenantId: 'store-test', templateId: customerTemplate._id, ticketType: 'customer_order' })
   assert.strictEqual(resetMatrix.data.name, '客单')
   assert.strictEqual(resetMatrix.data.paperWidth, 58)

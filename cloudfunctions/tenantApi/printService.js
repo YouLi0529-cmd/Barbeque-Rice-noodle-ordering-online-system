@@ -142,7 +142,7 @@ function mergeKitchenDishes(entries = []) {
     const specification = valueOf(item, ['specification', 'spec', 'skuName'])
     const method = valueOf(item, ['cookingMethod', 'method', 'practice'])
     const taste = valueOf(item, ['taste', 'flavor'])
-    const remark = getKitchenSpecialNotes(item).join('、')
+    const remark = getKitchenSpecialNotes(item).filter(note => note !== specification).join('\u3001')
     const combo = valueOf(item, ['comboRelationId', 'comboId', 'setMealId', 'packageId'])
     const signature = [dishId, specification, method, taste, remark, combo].join('\u001f')
     const current = groups.get(signature)
@@ -176,7 +176,9 @@ function mergeCashierDishes(entries = []) {
     const count = Number(item.count || 0)
     const unitPrice = Number(item.price !== undefined ? item.price : item.originalPrice || 0)
     const subtotal = Number(item.subtotal !== undefined ? item.subtotal : unitPrice * count)
-    const signature = [dishId, dishName, unitPrice].join('\u001f')
+    const specification = valueOf(item, ['specification', 'spec', 'skuName'])
+    const remark = valueOf(item, ['remark', 'note'])
+    const signature = [dishId, dishName, unitPrice, specification, remark].join('\u001f')
     const current = groups.get(signature)
 
     if (current) {
@@ -188,6 +190,8 @@ function mergeCashierDishes(entries = []) {
     groups.set(signature, {
       dishId,
       dishName,
+      specification,
+      remark,
       count,
       unitPrice,
       subtotal
@@ -1125,6 +1129,11 @@ function createPrintService({ db, _, defaultTenantId }) {
       const value = content || getTicketValue(field.key, data)
       if (isEmptyValue(value)) return
       if (field.blankBefore) lines.push({ kind: 'blank' })
+      if (field.key === 'dishes' && !content && Array.isArray(data.dishes)) {
+        lines.push(...renderDishLines(field, data))
+        if (field.dividerAfter) lines.push({ kind: 'divider' })
+        return
+      }
       lines.push({
         kind: field.key === 'dishes' ? 'dishes' : 'text',
         key: field.key,
@@ -1146,6 +1155,38 @@ function createPrintService({ db, _, defaultTenantId }) {
       openCashDrawer: bool(data.openCashDrawer),
       capabilities: data.capabilities || {}
     }
+  }
+
+  function renderDishLines(field = {}, data = {}) {
+    const dishes = Array.isArray(data.dishes) ? data.dishes : []
+    const isCashier = data.dishDisplayMode === 'cashier'
+    const dishSize = field.size || 'normal'
+    const specificationSize = field.specificationSize || dishSize
+    const remarkSize = field.remarkSize || dishSize
+    const lines = []
+    if (isCashier) {
+      const widePaper = Number(data.dishTableWidth || data.paperWidth || 58) >= 76
+      const columns = widePaper ? { dish: 21, count: 16, subtotal: 11 } : { dish: 14, count: 10, subtotal: 8 }
+      lines.push({ kind: 'text', key: 'dishes', text: `${padTicketText('\u83dc\u54c1', columns.dish)}${padTicketText('\u6570\u91cf', columns.count, 'center')}${padTicketText('\u5c0f\u8ba1', columns.subtotal, 'right')}`, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
+    }
+    dishes.forEach(item => {
+      const name = String(item.dishName || item.name || '')
+      const count = Number(item.count || 0)
+      if (isCashier) {
+        const columns = Number(data.dishTableWidth || data.paperWidth || 58) >= 76 ? { dish: 21, count: 16, subtotal: 11 } : { dish: 14, count: 10, subtotal: 8 }
+        const nameLines = wrapTicketText(name, columns.dish)
+        const row = `${padTicketText(nameLines[0], columns.dish)}${padTicketText(count, columns.count, 'center')}${padTicketText(formatCompactMoney(item.subtotal != null ? item.subtotal : Number(item.unitPrice || item.price || 0) * count), columns.subtotal, 'right')}`
+        lines.push({ kind: 'text', key: 'dishName', text: row, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
+        nameLines.slice(1).forEach(nameLine => lines.push({ kind: 'text', key: 'dishName', text: nameLine, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' }))
+      } else {
+        lines.push({ kind: 'text', key: 'dishName', text: `${name} x${count}`, size: dishSize, align: field.align || 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
+      }
+      const specification = String(item.specification || item.spec || item.skuName || '').trim()
+      const remark = String(item.remark || item.note || '').trim()
+      if (specification) lines.push({ kind: 'text', key: 'dishSpecification', text: `  \u89c4\u683c\uff1a${specification}`, size: specificationSize, align: 'left', bold: false, inverse: false, color: 'black' })
+      if (remark) lines.push({ kind: 'text', key: 'dishRemark', text: `  \u5907\u6ce8\uff1a${remark}`, size: remarkSize, align: 'left', bold: false, inverse: false, color: 'black' })
+    })
+    return lines
   }
 
   function formatPrintTime(timestamp) {
@@ -1961,6 +2002,10 @@ function createPrintService({ db, _, defaultTenantId }) {
       label: text(field.label),
       ...(field.key !== 'dishes' ? { content: text(field.content).slice(0, 120) } : {}),
       size: ['small', 'normal', 'medium', 'large', 'xlarge', 'xxlarge', 'xxxlarge'].includes(field.size) ? field.size : 'normal',
+      ...(field.key === 'dishes' ? {
+        specificationSize: ['small', 'normal', 'medium', 'large', 'xlarge', 'xxlarge', 'xxxlarge'].includes(field.specificationSize) ? field.specificationSize : (['small', 'normal', 'medium', 'large', 'xlarge', 'xxlarge', 'xxxlarge'].includes(field.size) ? field.size : 'normal'),
+        remarkSize: ['small', 'normal', 'medium', 'large', 'xlarge', 'xxlarge', 'xxxlarge'].includes(field.remarkSize) ? field.remarkSize : (['small', 'normal', 'medium', 'large', 'xlarge', 'xxlarge', 'xxxlarge'].includes(field.size) ? field.size : 'normal')
+      } : {}),
       align: ['left', 'center', 'right'].includes(field.align) ? field.align : 'left',
       bold: bool(field.bold),
       inverse: bool(field.inverse),

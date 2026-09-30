@@ -52,6 +52,7 @@
           <view class="detail-meta-row"><text>{{ui.settledAt}}</text><text>{{detail.paidTimeText}}</text></view>
           <view class="detail-meta-row"><text>{{ui.people}}</text><text>{{detail.peopleText}}</text></view>
           <view class="detail-meta-row"><text>{{ui.payment}}</text><text>{{detail.paymentText}}</text></view>
+          <view class="settlement-edit-actions"><view class="edit-action-button danger" bindtap="deleteSettlementRecord">永久删除整笔结算</view></view>
         </view>
 
         <view class="bill-section">
@@ -64,12 +65,19 @@
         <view class="order-group" wx:for="{{detail.orderGroups}}" wx:key="id">
           <view class="order-group-head">
             <view>{{item.title}}</view>
-            <view>¥{{item.totalText}}</view>
+            <view class="order-group-actions"><text>¥{{item.totalText}}</text><text class="edit-action-link danger-text" data-id="{{item.id}}" catchtap="deleteSettlementOrder">删除订单</text><text class="edit-action-link" data-id="{{item.id}}" catchtap="toggleAddDish">加菜</text></view>
           </view>
           <view class="goods-row" wx:for="{{item.goods}}" wx:key="index" wx:for-item="good">
             <view class="good-name">{{good.dishName}}</view>
             <view class="good-count">x{{good.count}}</view>
             <view class="good-money">¥{{good.subtotalText}}</view>
+            <text class="edit-action-link danger-text" data-order-id="{{item.id}}" data-goods-index="{{good.goodsIndex}}" catchtap="deleteSettlementDish">删除</text>
+          </view>
+          <view wx:if="{{addingToOrderId === item.id}}" class="add-dish-form">
+            <input placeholder="菜品名称" value="{{addDishForm.dishName}}" data-key="dishName" bindinput="onAddDishInput" />
+            <input type="digit" placeholder="单价" value="{{addDishForm.unitPrice}}" data-key="unitPrice" bindinput="onAddDishInput" />
+            <input type="number" placeholder="数量" value="{{addDishForm.count}}" data-key="count" bindinput="onAddDishInput" />
+            <view class="edit-action-button" data-id="{{item.id}}" bindtap="addSettlementDish">确认加菜</view>
           </view>
         </view>
       </scroll-view>

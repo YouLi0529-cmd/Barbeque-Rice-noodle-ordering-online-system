@@ -91,7 +91,9 @@ Page({
     selectedRecordId: '',
     detail: null,
     loadError: '',
-    isTruncated: false
+    isTruncated: false,
+    addingToOrderId: '',
+    addDishForm: { dishName: '', unitPrice: '', count: '1' }
   },
 
   onAdminTap(event) {
@@ -185,5 +187,88 @@ Page({
       })
       wx.showToast({ title: UI.detailFailed, icon: 'none' })
     }
+  },
+
+  toggleAddDish(event) {
+    const orderId = String(event.currentTarget.dataset.id || '')
+    this.setData({
+      addingToOrderId: this.data.addingToOrderId === orderId ? '' : orderId,
+      addDishForm: { dishName: '', unitPrice: '', count: '1' }
+    })
+  },
+
+  onAddDishInput(event) {
+    const key = String(event.currentTarget.dataset.key || '')
+    if (!['dishName', 'unitPrice', 'count'].includes(key)) return
+    this.setData({ [`addDishForm.${key}`]: event.detail.value })
+  },
+
+  async submitSettlementEdit(operation, extra = {}) {
+    const detail = this.data.detail
+    if (!detail || !this.data.selectedRecordId) return
+    try {
+      wx.showLoading({ title: '正在保存' })
+      await apiClient.call('admin.settlement.edit', {
+        date: this.data.selectedDate,
+        recordId: this.data.selectedRecordId,
+        operation,
+        ...extra
+      })
+      wx.hideLoading()
+      this.setData({ addingToOrderId: '' })
+      await this.loadRecords(true)
+      const nextRecord = this.data.records.find(item => item.id === this.data.selectedRecordId)
+      if (nextRecord) {
+        this.setData({ detailLoading: true })
+        const result = await apiClient.call('admin.settlement.detail', { date: this.data.selectedDate, recordId: this.data.selectedRecordId })
+        this.setData({ detail: normalizeDetail(result.data || {}), detailLoading: false })
+      } else {
+        this.setData({ selectedRecordId: '', detail: null })
+      }
+      wx.showToast({ title: '已更新结算记录', icon: 'success' })
+    } catch (err) {
+      wx.hideLoading()
+      wx.showToast({ title: err.message || '修改失败', icon: 'none' })
+    }
+  },
+
+  addSettlementDish(event) {
+    const orderId = String(event.currentTarget.dataset.id || '')
+    const form = this.data.addDishForm || {}
+    const dishName = String(form.dishName || '').trim()
+    const unitPrice = Number(form.unitPrice)
+    const count = Number(form.count)
+    if (!dishName || !Number.isFinite(unitPrice) || !Number.isInteger(count) || count < 1) {
+      wx.showToast({ title: '请填写菜名、单价和数量', icon: 'none' })
+      return
+    }
+    this.submitSettlementEdit('addDish', { orderId, dishName, unitPrice, count })
+  },
+
+  deleteSettlementDish(event) {
+    const { orderId, goodsIndex } = event.currentTarget.dataset
+    wx.showModal({
+      title: '删除菜品',
+      content: '删除后会直接改写该结算记录和营业统计，且无法恢复。',
+      success: result => { if (result.confirm) this.submitSettlementEdit('deleteDish', { orderId, goodsIndex: Number(goodsIndex) }) }
+    })
+  },
+
+  deleteSettlementOrder(event) {
+    const orderId = String(event.currentTarget.dataset.id || '')
+    wx.showModal({
+      title: '删除订单',
+      content: '将永久删除这笔已结账订单，并重算同一结账记录金额；此操作无法恢复。',
+      success: result => { if (result.confirm) this.submitSettlementEdit('deleteOrder', { orderId }) }
+    })
+  },
+
+  deleteSettlementRecord() {
+    if (!this.data.detail) return
+    wx.showModal({
+      title: '删除整笔结算',
+      content: '将永久删除该结算记录关联的全部订单，并从营业统计中移除；此操作无法恢复。',
+      success: result => { if (result.confirm) this.submitSettlementEdit('deleteRecord') }
+    })
   }
 })
