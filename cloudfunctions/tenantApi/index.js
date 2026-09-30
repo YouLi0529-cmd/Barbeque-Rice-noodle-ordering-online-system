@@ -3088,11 +3088,10 @@ async function adminEditSettlement(payload) {
   if (!['deleteRecord', 'deleteOrder', 'deleteDish', 'addDish'].includes(operation)) {
     return { success: false, code: 'SETTLEMENT_EDIT_OPERATION_INVALID', message: 'unsupported settlement edit operation' }
   }
-  const dishName = String(payload.dishName || '').trim()
-  const unitPrice = Number(payload.unitPrice)
+  const dishId = String(payload.dishId || '').trim()
   const count = Number(payload.count)
-  if (operation === 'addDish' && (!dishName || !Number.isFinite(unitPrice) || unitPrice < 0 || !Number.isInteger(count) || count < 1 || count > 99)) {
-    return { success: false, code: 'SETTLEMENT_DISH_INVALID', message: 'dish name, non-negative price and quantity are required' }
+  if (operation === 'addDish' && (!dishId || !Number.isInteger(count) || count < 1 || count > 99)) {
+    return { success: false, code: 'SETTLEMENT_DISH_INVALID', message: 'menu dish and quantity are required' }
   }
 
   return db.runTransaction(async transaction => {
@@ -3113,6 +3112,16 @@ async function adminEditSettlement(payload) {
     const currentTarget = currentOrders.find(order => order._id === orderId)
     if (!currentTarget) return { success: false, code: 'SETTLEMENT_ORDER_NOT_IN_RECORD', message: 'order does not belong to this settlement record' }
 
+    let selectedDish = null
+    if (operation === 'addDish') {
+      const dishResult = await transaction.collection('dish').doc(dishId).get()
+      selectedDish = dishResult.data
+      const targetMenuType = getMenuType(isCampingOrder(currentTarget) ? 'camping' : 'dineIn')
+      if (!selectedDish || (selectedDish.status !== undefined && selectedDish.status !== 1) || getMenuType(selectedDish.menuType) !== targetMenuType) {
+        return { success: false, code: 'SETTLEMENT_DISH_UNAVAILABLE', message: 'selected menu dish is unavailable for this order' }
+      }
+    }
+
     let updatedGoods = null
     if (operation === 'deleteDish') {
       const goodsIndex = Number(payload.goodsIndex)
@@ -3122,14 +3131,22 @@ async function adminEditSettlement(payload) {
       updatedGoods = currentTarget.goods.filter((_, index) => index !== goodsIndex)
     }
     if (operation === 'addDish') {
+      const unitPrice = roundMoney(selectedDish.price || 0)
+      const categoryName = String(selectedDish.categoryName || '').trim()
       updatedGoods = (Array.isArray(currentTarget.goods) ? currentTarget.goods : []).concat([{
-        dishName,
-        name: dishName,
-        price: roundMoney(unitPrice),
-        finalPrice: roundMoney(unitPrice),
+        dishId,
+        dishName: String(selectedDish.name || '').trim(),
+        name: String(selectedDish.name || '').trim(),
+        kitchenPrintName: String(selectedDish.kitchenPrintName || '').trim(),
+        categoryId: String(selectedDish.categoryId || '').trim(),
+        categoryName,
+        price: unitPrice,
+        originalPrice: unitPrice,
+        finalPrice: unitPrice,
         count,
         subtotal: roundMoney(unitPrice * count),
-        settlementManualEntry: true
+        tags: [],
+        settlementMenuSelection: true
       }])
     }
     if (operation === 'deleteOrder') {

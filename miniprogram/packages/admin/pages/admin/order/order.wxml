@@ -74,10 +74,20 @@
             <text class="edit-action-link danger-text" data-order-id="{{item.id}}" data-goods-index="{{good.goodsIndex}}" catchtap="deleteSettlementDish">删除</text>
           </view>
           <view wx:if="{{addingToOrderId === item.id}}" class="add-dish-form">
-            <input placeholder="菜品名称" value="{{addDishForm.dishName}}" data-key="dishName" bindinput="onAddDishInput" />
-            <input type="digit" placeholder="单价" value="{{addDishForm.unitPrice}}" data-key="unitPrice" bindinput="onAddDishInput" />
-            <input type="number" placeholder="数量" value="{{addDishForm.count}}" data-key="count" bindinput="onAddDishInput" />
-            <view class="edit-action-button" data-id="{{item.id}}" bindtap="addSettlementDish">确认加菜</view>
+            <view class="add-dish-search-row">
+              <input class="add-dish-search-input" placeholder="&#x641c;&#x7d22;&#x73b0;&#x6709;&#x83dc;&#x5355;&#x83dc;&#x54c1;" value="{{addDishForm.keyword}}" data-key="keyword" bindinput="onAddDishInput" />
+              <input class="add-dish-count-input" type="number" placeholder="&#x6570;&#x91cf;" value="{{addDishForm.count}}" data-key="count" bindinput="onAddDishInput" />
+            </view>
+            <view class="add-dish-hint" wx:if="{{addDishSearching}}">&#x6b63;&#x5728;&#x641c;&#x7d22;&#x83dc;&#x5355;...</view>
+            <view class="add-dish-results" wx:if="{{addDishResults.length}}">
+              <view class="add-dish-result" wx:for="{{addDishResults}}" wx:key="_id" data-id="{{item._id}}" catchtap="selectSettlementDish">
+                <text>{{item.name}}</text><text>RMB {{item.price}}</text>
+              </view>
+            </view>
+            <view class="add-dish-selected" wx:if="{{addDishForm.selectedDish}}">&#x5df2;&#x9009;: {{addDishForm.selectedDish.name}} | &#x83dc;&#x5355;&#x4ef7; RMB {{addDishForm.selectedDish.price}}</view>
+            <view class="add-dish-hint" wx:if="{{!addDishSearching && addDishForm.keyword && !addDishResults.length && !addDishForm.selectedDish}}">&#x6ca1;&#x6709;&#x627e;&#x5230;&#x53ef;&#x7528;&#x83dc;&#x54c1;</view>
+            <view class="add-dish-hint">&#x52a0;&#x83dc;&#x6309;&#x5f53;&#x524d;&#x83dc;&#x5355;&#x57fa;&#x7840;&#x4ef7;&#x683c;&#x8ba1;&#x4ef7;&#x3002;</view>
+            <view class="edit-action-button {{!addDishForm.dishId ? 'disabled' : ''}}" data-id="{{item.id}}" bindtap="addSettlementDish">&#x786e;&#x8ba4;&#x52a0;&#x83dc;</view>
           </view>
         </view>
       </scroll-view>

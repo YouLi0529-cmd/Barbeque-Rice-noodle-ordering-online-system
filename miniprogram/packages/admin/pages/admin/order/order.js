@@ -93,7 +93,9 @@ Page({
     loadError: '',
     isTruncated: false,
     addingToOrderId: '',
-    addDishForm: { dishName: '', unitPrice: '', count: '1' }
+    addDishForm: { dishId: '', keyword: '', count: '1', selectedDish: null },
+    addDishResults: [],
+    addDishSearching: false
   },
 
   onAdminTap(event) {
@@ -193,14 +195,60 @@ Page({
     const orderId = String(event.currentTarget.dataset.id || '')
     this.setData({
       addingToOrderId: this.data.addingToOrderId === orderId ? '' : orderId,
-      addDishForm: { dishName: '', unitPrice: '', count: '1' }
+      addDishForm: { dishId: '', keyword: '', count: '1', selectedDish: null },
+      addDishResults: [],
+      addDishSearching: false
     })
   },
 
   onAddDishInput(event) {
     const key = String(event.currentTarget.dataset.key || '')
-    if (!['dishName', 'unitPrice', 'count'].includes(key)) return
-    this.setData({ [`addDishForm.${key}`]: event.detail.value })
+    if (key === 'count') {
+      this.setData({ 'addDishForm.count': event.detail.value })
+      return
+    }
+    if (key !== 'keyword') return
+    const keyword = String(event.detail.value || '').trim()
+    this.setData({
+      'addDishForm.keyword': event.detail.value,
+      'addDishForm.dishId': '',
+      'addDishForm.selectedDish': null,
+      addDishResults: [],
+      addDishSearching: !!keyword
+    })
+    if (!keyword) return
+    const requestId = (this._settlementDishSearchRequestId || 0) + 1
+    this._settlementDishSearchRequestId = requestId
+    clearTimeout(this._settlementDishSearchTimer)
+    this._settlementDishSearchTimer = setTimeout(async () => {
+      try {
+        const res = await apiClient.call('admin.dish.list', {
+          menuType: this.data.detail && this.data.detail.scene === 'camping' ? 'camping' : 'dineIn',
+          keyword,
+          limit: 50
+        })
+        if (requestId !== this._settlementDishSearchRequestId) return
+        this.setData({ addDishResults: (res.data || []).filter(dish => dish && dish.status !== 0), addDishSearching: false })
+      } catch (err) {
+        if (requestId !== this._settlementDishSearchRequestId) return
+        console.error('search settlement menu dishes failed', err)
+        this.setData({ addDishResults: [], addDishSearching: false })
+        wx.showToast({ title: err.message || '\u83dc\u5355\u641c\u7d22\u5931\u8d25', icon: 'none' })
+      }
+    }, 250)
+  },
+
+  selectSettlementDish(event) {
+    const dishId = String(event.currentTarget.dataset.id || '')
+    const dish = (this.data.addDishResults || []).find(item => String(item._id || '') === dishId)
+    if (!dish) return
+    this._settlementDishSearchRequestId = (this._settlementDishSearchRequestId || 0) + 1
+    clearTimeout(this._settlementDishSearchTimer)
+    this.setData({
+      addDishForm: { ...this.data.addDishForm, dishId, selectedDish: dish, keyword: dish.name || '' },
+      addDishResults: [],
+      addDishSearching: false
+    })
   },
 
   async submitSettlementEdit(operation, extra = {}) {
@@ -235,14 +283,13 @@ Page({
   addSettlementDish(event) {
     const orderId = String(event.currentTarget.dataset.id || '')
     const form = this.data.addDishForm || {}
-    const dishName = String(form.dishName || '').trim()
-    const unitPrice = Number(form.unitPrice)
+    const dishId = String(form.dishId || '').trim()
     const count = Number(form.count)
-    if (!dishName || !Number.isFinite(unitPrice) || !Number.isInteger(count) || count < 1) {
-      wx.showToast({ title: '请填写菜名、单价和数量', icon: 'none' })
+    if (!dishId || !Number.isInteger(count) || count < 1 || count > 99) {
+      wx.showToast({ title: '\u8bf7\u9009\u62e9\u83dc\u5355\u83dc\u54c1\u5e76\u586b\u5199\u6709\u6548\u6570\u91cf', icon: 'none' })
       return
     }
-    this.submitSettlementEdit('addDish', { orderId, dishName, unitPrice, count })
+    this.submitSettlementEdit('addDish', { orderId, dishId, count })
   },
 
   deleteSettlementDish(event) {
