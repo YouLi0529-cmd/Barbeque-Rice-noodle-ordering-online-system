@@ -1114,7 +1114,7 @@ function createPrintService({ db, _, defaultTenantId }) {
 
   function formatKitchenStyleDishes(dishes = []) {
     return dishes.reduce((rows, item) => {
-      rows.push(`${item.dishName || item.name || ''} x${Number(item.count || 0)}`)
+      rows.push(`${item.dishName || item.name || ''} ${Number(item.count || 0)}份`)
       const note = String(item.remark || '').trim()
       if (note) rows.push(`  ${note}`)
       return rows
@@ -1179,7 +1179,7 @@ function createPrintService({ db, _, defaultTenantId }) {
         lines.push({ kind: 'text', key: 'dishName', text: row, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
         nameLines.slice(1).forEach(nameLine => lines.push({ kind: 'text', key: 'dishName', text: nameLine, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' }))
       } else {
-        lines.push({ kind: 'text', key: 'dishName', text: `${name} x${count}`, size: dishSize, align: field.align || 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
+        lines.push({ kind: 'text', key: 'dishName', text: `${name} ${count}份`, size: dishSize, align: field.align || 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
       }
       const specification = String(item.specification || item.spec || item.skuName || '').trim()
       const remark = String(item.remark || item.note || '').trim()

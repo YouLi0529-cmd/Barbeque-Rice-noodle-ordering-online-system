@@ -603,6 +603,9 @@
 }
 
 .setting-row input { width: 130rpx; padding: 8rpx; color: #3a2418; background: #fff5e8; border-radius: 5rpx; font-size: 21rpx; }
+.independent-size-row > text { flex: 0 0 auto; white-space: nowrap; }
+.independent-size-row > picker { flex: 0 1 68%; min-width: 0; text-align: right; white-space: nowrap; }
+.independent-size-row > picker view { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .template-content-row { display: block; }
 .setting-row .template-content-input { width: 100%; height: 56rpx; margin-top: 8rpx; padding: 0 10rpx; box-sizing: border-box; }
 .field-value { max-width: 130rpx; overflow: hidden; color: #8a5e37; font-size: 21rpx; font-weight: 800; text-align: right; text-overflow: ellipsis; white-space: nowrap; }

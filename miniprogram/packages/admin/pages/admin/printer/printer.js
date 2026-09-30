@@ -61,7 +61,7 @@ const FIELD_LIBRARY = [
   { key: 'seatCount', label: '席数', sample: '1席', fixedOnly: true },
   { key: 'orderType', label: '订单类型', sample: '类型：堂食' },
   { key: 'openingRemark', label: '开台备注', sample: '靠窗', fixedOnly: true },
-  { key: 'dishes', label: '菜品明细', sample: '五花肉 x2\n金针菇 x1' },
+  { key: 'dishes', label: '菜品明细', sample: '五花肉 2份\n金针菇 1份' },
   { key: 'totalCount', label: '数量合计', sample: '共3份' },
   { key: 'orderAmount', label: '订单金额', sample: '订单金额：88\n打折（8.8折）：-10\n直减：-5' },
   { key: 'receivableAmount', label: '应付金额', sample: '应付金额：73' },
@@ -173,7 +173,7 @@ function makePreviewFields(fields, template = {}) {
       isCashierSummary,
       previewRows: isCashierDishTable ? CASHIER_DISH_PREVIEW_ROWS : [],
       dishPreviewRows: field.key === 'dishes' ? [
-        { key: 'dish', text: '五花肉 x2', size: field.size || 'normal' },
+        { key: 'dish', text: '五花肉 2份', size: field.size || 'normal' },
         { key: 'specification', text: '规格：大份', size: field.specificationSize || field.size || 'normal' },
         { key: 'remark', text: '备注：少辣', size: field.remarkSize || field.size || 'normal' }
       ] : [],
