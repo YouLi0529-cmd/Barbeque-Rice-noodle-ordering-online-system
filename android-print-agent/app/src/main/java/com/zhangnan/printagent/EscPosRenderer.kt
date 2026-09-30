@@ -29,7 +29,14 @@ object EscPosRenderer {
     if (line.optBoolean("inverse")) output.write(byteArrayOf(0x1d, 0x42, 1))
     val font = if (line.optString("size") == "small") 1 else 0
     output.write(byteArrayOf(0x1b, 0x4d, font.toByte()))
-    val size = when (line.optString("size")) { "medium" -> 0x11; "large" -> 0x22; "xlarge" -> 0x33; else -> 0x00 }
+    val size = when (line.optString("size")) {
+      "medium" -> 0x11
+      "large" -> 0x22
+      "xlarge" -> 0x33
+      "xxlarge" -> 0x44
+      "xxxlarge" -> 0x55
+      else -> 0x00
+    }
     output.write(byteArrayOf(0x1d, 0x21, size.toByte()))
     if (line.optString("color") == "red" && capabilities.optBoolean("twoColor", false)) output.write(byteArrayOf(0x1b, 0x72, 1))
     output.write(line.optString("text").toByteArray(gb18030))
