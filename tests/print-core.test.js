@@ -90,7 +90,7 @@ async function verifyKitchenRouting() {
   assert.strictEqual(Object.values(db.data.printJobs).length, 2)
   assert.strictEqual(Object.values(db.data.unassignedDishAlerts).length, 1)
   const kitchenJob = Object.values(db.data.printJobs).find(job => job.payload.dishIndexes.includes(0))
-  assert.ok(kitchenJob.ticket.lines.some(line => String(line.text || '').includes('牛肉 x1')))
+  assert.ok(kitchenJob.ticket.lines.some(line => String(line.text || '').includes('牛肉 1份')))
   assert.ok(!kitchenJob.ticket.lines.some(line => String(line.text || '').includes('招牌秘制牛肉')))
   const kitchenTemplate = (await service.handleAdminAction('admin.print.templates.list', { tenantId: 'store-test' })).data.find(template => template.ticketType === 'kitchen_order' && template.bindScope === 'global')
   const renamedKitchen = await service.handleAdminAction('admin.print.templates.save', {
