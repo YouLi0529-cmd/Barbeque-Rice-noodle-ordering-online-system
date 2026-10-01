@@ -576,6 +576,8 @@
 .dish-preview-size-samples { margin-top: 5rpx; }
 .dish-preview-subline { margin-top: 3rpx; font-weight: 400; }
 .kitchen-preview-row { display: flex; width: 100%; justify-content: space-between; box-sizing: border-box; white-space: pre-wrap; }
+.kitchen-preview-row text:first-child { flex: 1 1 auto; min-width: 0; word-break: break-all; }
+.kitchen-preview-row text:last-child { flex: none; padding-left: 8rpx; white-space: nowrap; }
 .dish-preview-subline.size-small { font-size: 15rpx; }
 .dish-preview-subline.size-normal { font-size: 18rpx; }
 .dish-preview-subline.size-medium { font-size: 36rpx; }

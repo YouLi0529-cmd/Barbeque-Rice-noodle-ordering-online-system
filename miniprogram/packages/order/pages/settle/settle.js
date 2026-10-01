@@ -427,6 +427,29 @@ Page({
         await indexPage.sharedCartPatchPromise
         orderPayload.cartVersion = Number(indexPage.data.sharedCartVersion || orderPayload.cartVersion || 0)
       }
+      // The settle page receives an earlier snapshot when it opens. Use the
+      // latest local cart after queued shared-cart writes finish so fallback
+      // order paths cannot submit stale quantities.
+      if (indexPage && this.data.orderScene !== 'camping' && indexPage.data && indexPage.data.cart) {
+        const latestCart = indexPage.data.cart
+        orderPayload.orderGoods = Object.keys(latestCart).map(key => {
+          const item = latestCart[key] || {}
+          const info = item.info || {}
+          const tags = Array.isArray(item.tagLabels)
+            ? item.tagLabels
+            : Object.values(item.tags || {}).flatMap(value => Array.isArray(value) ? value : (value ? [value] : []))
+          return {
+            dishId: item.dishId || info._id || '',
+            dishName: info.name || '',
+            dishImage: info.image || '',
+            price: Number(item.displayPrice !== undefined ? item.displayPrice : info.price || 0),
+            count: Math.floor(Number(item.count || 0)),
+            tags,
+            packageId: item.packageId || '',
+            packageCount: item.packageId ? Math.floor(Number(item.packageCount || 0)) : 0
+          }
+        }).filter(item => item.dishId && item.count > 0)
+      }
       const doBuyResult = apiClient.isEnabled()
         ? await apiClient.call('order.create', orderPayload)
         : (await wx.cloud.callFunction({

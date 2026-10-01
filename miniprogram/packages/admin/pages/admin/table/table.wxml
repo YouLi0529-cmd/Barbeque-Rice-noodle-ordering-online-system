@@ -54,6 +54,10 @@
 
   <scroll-view class="table-board {{transferMode || mergeMode ? 'table-board-transfer' : ''}} {{reservationReminders.length > 0 && !transferMode && !mergeMode ? 'table-board-reservation' : ''}}" scroll-y bindtap="clearTableSelection">
     <view class="table-board-top">
+      <view class="today-table-count-chip">
+        <text class="today-arrival-label">{{ui.todayTableCount}}</text>
+        <text class="today-arrival-value">{{todayTableCount}}</text>
+      </view>
       <view class="today-arrival-chip">
         <text class="today-arrival-label">{{ui.todayArrival}}</text>
         <text class="today-arrival-value">{{todayArrivalCount}}{{ui.peopleUnit}}</text>

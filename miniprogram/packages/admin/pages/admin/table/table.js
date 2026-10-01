@@ -48,6 +48,7 @@ const UI = {
   clearSuccess: '\u5df2\u6e05\u53f0',
   clearFailed: '\u6e05\u53f0\u5931\u8d25',
   todayArrival: '\u4eca\u65e5\u5230\u5e97',
+  todayTableCount: '\u4eca\u65e5\u603b\u684c\u6570',
   peopleUnit: '\u4eba',
   unsettledTotal: '\u672a\u7ed3\u7b97\u91d1\u989d',
   searchDish: '\u67e5\u83dc',
@@ -260,6 +261,7 @@ Page({
     selectedTableCount: 0,
     clearingTable: false,
     todayArrivalCount: 0,
+    todayTableCount: 0,
     unsettledTotalText: '0',
     showDishSearch: false,
     dishSearchQuery: '',
@@ -333,13 +335,16 @@ Page({
       const todayArrivalCount = Math.max(0, Math.floor(Number(
         res && res.data && res.data.todayArrival && res.data.todayArrival.peopleCount || 0
       )))
+      const todayTableCount = Math.max(0, Math.floor(Number(
+        res && res.data && res.data.todayArrival && res.data.todayArrival.tableCount || 0
+      )))
       const unsettledTotalText = formatPrice(res && res.data && res.data.unsettledTotal || 0)
 
       if (sections.length > 0) {
         this.rawTables = sections
         this.refreshTables()
       }
-      this.setData({ todayArrivalCount, unsettledTotalText })
+      this.setData({ todayArrivalCount, todayTableCount, unsettledTotalText })
       if (Number.isFinite(boardVersion)) this.tableBoardVersion = boardVersion
       if (activityStamp) this.tableBoardActivityStamp = activityStamp
       if (hasReservations) {

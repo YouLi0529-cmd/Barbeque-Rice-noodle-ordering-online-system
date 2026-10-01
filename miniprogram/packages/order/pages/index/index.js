@@ -611,6 +611,15 @@ Page({
     this.sharedCartFetchSessionId = sessionId
     this.sharedCartFetchPromise = (async () => {
       try {
+        // Preserve local quantity changes until their queued deltas reach the
+        // shared cart; otherwise a watcher can paint an older count briefly.
+        let pendingPatch = this.sharedCartPatchPromise
+        while (pendingPatch) {
+          await pendingPatch.catch(() => {})
+          if (pendingPatch === this.sharedCartPatchPromise) break
+          pendingPatch = this.sharedCartPatchPromise
+        }
+        if (this.data.sharedSessionId !== sessionId) return
         const requestData = {
           action: 'get',
           sessionId,

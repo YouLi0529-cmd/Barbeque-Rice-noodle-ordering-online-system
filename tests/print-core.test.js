@@ -67,6 +67,25 @@ function createMemoryDb() {
 async function verifyKitchenRouting() {
   const db = createMemoryDb()
   const service = createPrintService({ db, _: {}, defaultTenantId: 'store-test' })
+  assert.strictEqual(service.formatTicketTableNumber('05'), '5')
+  assert.strictEqual(service.formatTicketTableNumber('VIP01'), 'VIP1')
+  assert.strictEqual(service.formatTicketTableNumber('天楼02'), '天2')
+  assert.strictEqual(service.formatTicketTableNumber('普通02号桌'), '普通2号桌')
+  assert.strictEqual(service.formatTicketTableNumber('天楼10'), '天10')
+  assert.strictEqual(service.formatTicketTableNumber('A10'), 'A10')
+  const kitchenLines = service.renderDishLines({ size: 'large' }, {
+    paperWidth: 80,
+    dishes: [{ dishName: '长菜名测试超过一行宽度的菜品', count: 2 }]
+  })
+  assert.ok(kitchenLines[0].text.endsWith('2份'))
+  assert.strictEqual(kitchenLines[0].size, 'large')
+  assert.ok(kitchenLines.slice(1).every(line => line.size === 'large'))
+  const oversizedKitchenLine = service.renderDishLines({ size: 'xxxlarge' }, {
+    paperWidth: 58,
+    dishes: [{ dishName: '牛肉', count: 99 }]
+  })[0]
+  assert.ok(oversizedKitchenLine.text.endsWith('99份'))
+  assert.strictEqual(oversizedKitchenLine.size, 'xxlarge')
   db.data.dish = {
     'hot-beef': { _id: 'hot-beef', name: '招牌秘制牛肉', kitchenPrintName: '牛肉' }
   }

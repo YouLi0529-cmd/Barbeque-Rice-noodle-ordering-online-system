@@ -249,7 +249,8 @@ page {
   box-sizing: border-box;
 }
 
-.today-arrival-chip {
+.today-arrival-chip,
+.today-table-count-chip {
   height: 22rpx;
   padding: 0 9rpx;
   display: inline-flex;

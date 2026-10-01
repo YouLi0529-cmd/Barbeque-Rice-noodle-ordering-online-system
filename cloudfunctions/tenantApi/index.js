@@ -1258,32 +1258,45 @@ async function adminCreateOfflineOrder(payload) {
   }
 
   const activeOrders = (await getSingleAdminTableOrders(tableRef.areaKey, tableRef.tableNumber))
-    .filter(order => !isAdminPaidOrder(order))
+    .filter(order => !isAdminPaidOrder(order) && order.tableCleared !== true && order.deleted !== true && order.status !== 'cancelled')
   const mode = payload.mode === 'create' ? 'create' : 'add'
-  if (mode === 'create' && activeOrders.length > 0) {
-    return { success: false, code: 'TABLE_OCCUPIED', message: '该桌已有订单，请使用加菜' }
-  }
-  if (mode === 'add' && activeOrders.length === 0) {
-    return { success: false, code: 'ORDER_NOT_FOUND', message: '该桌还没有主订单，请先开单' }
-  }
 
-  const parentOrder = mode === 'add'
-    ? (activeOrders.find(order => order.isAddOnOrder !== true) || activeOrders[0])
-    : null
+  const parentOrder = activeOrders.find(order => order.isAddOnOrder !== true) || activeOrders[0] || null
   const rootOrderId = parentOrder ? String(parentOrder.rootOrderId || parentOrder._id) : ''
-  const addOnIndex = mode === 'add'
-    ? activeOrders.reduce((max, order) => Math.max(max, Number(order.addOnIndex || 0)), 0) + 1
-    : 0
   const peopleCount = Math.max(1, Math.min(99, Math.floor(Number(
     payload.peopleCount || parentOrder && parentOrder.peopleCount || 1
   ))))
   const sessionId = getSharedCartSessionId(formatAdminTableNumber(tableRef))
-  const sessionRes = await db.collection('tableOrderSession').doc(sessionId).get().catch(() => ({ data: null }))
-  const priorSession = sessionRes.data
-  const visitId = priorSession && isActiveTableSession(priorSession) && priorSession.visitId
-    ? String(priorSession.visitId)
-    : crypto.randomBytes(16).toString('hex')
+  const requestId = String(payload.requestId || crypto.randomBytes(16).toString('hex')).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)
+  const requestScope = `${getTenantId(payload)}:${requestId}`
+  const requestDocId = `waiter-${crypto.createHash('sha256').update(requestScope).digest('hex')}`
   const result = await db.runTransaction(async transaction => {
+    const requestRef = transaction.collection('orderSubmission').doc(requestDocId)
+    const requestRes = await requestRef.get().catch(() => ({ data: null }))
+    if (requestRes.data && requestRes.data.orderId) {
+      const priorOrderRes = await transaction.collection('order').doc(String(requestRes.data.orderId)).get()
+      if (priorOrderRes.data) return { success: true, duplicateSubmission: true, orderId: priorOrderRes.data._id, order: priorOrderRes.data }
+    }
+    const sessionRef = transaction.collection('tableOrderSession').doc(sessionId)
+    const sessionRes = await sessionRef.get().catch(() => ({ data: null }))
+    const session = sessionRes.data || null
+    const sessionActive = isActiveTableSession(session)
+    const sessionRootOrderId = sessionActive ? String(session.activeOrderRootId || '').trim() : ''
+    if (mode === 'create' && (rootOrderId || sessionRootOrderId)) {
+      return { success: false, code: 'TABLE_OCCUPIED', message: 'table already has an active order' }
+    }
+    const effectiveRootOrderId = mode === 'add' ? (sessionRootOrderId || rootOrderId) : ''
+    if (mode === 'add' && !effectiveRootOrderId) {
+      return { success: false, code: 'ORDER_NOT_FOUND', message: 'active table order not found' }
+    }
+    const isAddOnOrder = !!effectiveRootOrderId
+    const legacyAddOnCount = activeOrders
+      .filter(order => String(order.rootOrderId || order._id) === effectiveRootOrderId)
+      .reduce((max, order) => Math.max(max, Number(order.addOnIndex || 0)), 0)
+    const addOnIndex = isAddOnOrder
+      ? Math.max(Number(sessionActive && session.addOnCount || 0), legacyAddOnCount) + 1
+      : 0
+    const visitId = sessionActive && session.visitId ? String(session.visitId) : crypto.randomBytes(16).toString('hex')
     const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods, { allowPackages: true })
     if (!priceResult.goods.length) throw new Error('请选择菜品')
 
@@ -1291,11 +1304,11 @@ async function adminCreateOfflineOrder(payload) {
       type: 'order',
       orderScene: 'dineIn',
       orderType: 'dineIn',
-      isAddOnOrder: mode === 'add',
-      parentOrderId: mode === 'add' ? rootOrderId : '',
-      rootOrderId,
+      isAddOnOrder,
+      parentOrderId: isAddOnOrder ? effectiveRootOrderId : '',
+      rootOrderId: effectiveRootOrderId,
       addOnIndex,
-      orderCardTitle: mode === 'add' ? `加菜单${addOnIndex}` : '服务员开单',
+      orderCardTitle: isAddOnOrder ? `加菜单${addOnIndex}` : '服务员开单',
       orderSource: 'waiter',
       createdByAdmin: true,
       goods: priceResult.goods,
@@ -1331,49 +1344,42 @@ async function adminCreateOfflineOrder(payload) {
     }
 
     const addRes = await transaction.collection('order').add({ data: orderData })
-    const savedRootOrderId = rootOrderId || addRes._id
-    if (!rootOrderId) {
+    const savedRootOrderId = effectiveRootOrderId || addRes._id
+    if (!effectiveRootOrderId) {
       await transaction.collection('order').doc(addRes._id).update({ data: { rootOrderId: savedRootOrderId } })
     }
+    const visitHistory = Array.isArray(session && session.visitHistory) ? session.visitHistory.slice() : []
+    if (!sessionActive && session && session.visitId) {
+      visitHistory.push({
+        visitId: String(session.visitId),
+        tableNumber: formatAdminTableNumber(tableRef),
+        memberOpenids: Array.isArray(session.memberOpenids) ? session.memberOpenids : [],
+        startedAt: session.createTime || session.updateTime || null,
+        endedAt: session.finishedAt || new Date()
+      })
+    }
+    const sessionData = {
+      tableNumber: formatAdminTableNumber(tableRef), status: 'ordering', checkoutStatus: '', finishedAt: null,
+      peopleCount, peopleConfirmed: true, peopleConfirmedAt: sessionActive && session.peopleConfirmedAt || db.serverDate(),
+      cartVersion: sessionActive ? Math.max(0, Number(session && session.cartVersion || 0)) : 0, visitId,
+      visitHistory: visitHistory.slice(-100),
+      memberOpenids: sessionActive && Array.isArray(session.memberOpenids) ? session.memberOpenids : [],
+      activeOrderRootId: savedRootOrderId, addOnCount: addOnIndex,
+      createTime: sessionActive && session.createTime ? session.createTime : db.serverDate(), updateTime: db.serverDate()
+    }
+    if (session) await sessionRef.update({ data: sessionData })
+    else await sessionRef.set({ data: sessionData })
+    await requestRef.set({ data: { orderId: addRes._id, requestId, createdAt: db.serverDate() } })
     return {
       success: true,
       orderId: addRes._id,
-      order: { ...orderData, _id: addRes._id, rootOrderId: savedRootOrderId }
+      order: { ...orderData, _id: addRes._id, rootOrderId: savedRootOrderId },
+      firstOrderForVisit: !isAddOnOrder,
+      duplicateSubmission: false
     }
   })
-
-  if (priorSession && isActiveTableSession(priorSession)) {
-    await db.collection('tableOrderSession').doc(sessionId).update({
-      data: {
-        visitId,
-        activeOrderRootId: result.order.rootOrderId,
-        addOnCount: addOnIndex,
-        peopleCount,
-        peopleConfirmed: true,
-        updateTime: db.serverDate()
-      }
-    })
-  } else {
-    const visitHistory = Array.isArray(priorSession && priorSession.visitHistory) ? priorSession.visitHistory.slice() : []
-    if (priorSession && priorSession.visitId) visitHistory.push({
-      visitId: String(priorSession.visitId),
-      tableNumber: formatAdminTableNumber(tableRef),
-      memberOpenids: Array.isArray(priorSession.memberOpenids) ? priorSession.memberOpenids : [],
-      startedAt: priorSession.createTime || priorSession.updateTime || null,
-      endedAt: priorSession.finishedAt || new Date()
-    })
-    const sessionData = {
-      tableNumber: formatAdminTableNumber(tableRef),
-      status: 'ordering', checkoutStatus: '', finishedAt: null,
-      peopleCount, peopleConfirmed: true, peopleConfirmedAt: db.serverDate(),
-      cartVersion: 0, visitId, visitHistory: visitHistory.slice(-100),
-      memberOpenids: [], activeOrderRootId: result.order.rootOrderId,
-      addOnCount, createTime: db.serverDate(), updateTime: db.serverDate()
-    }
-    if (priorSession) await db.collection('tableOrderSession').doc(sessionId).update({ data: sessionData })
-    else await db.collection('tableOrderSession').doc(sessionId).set({ data: sessionData })
-  }
-  await touchAdminTableBoard()
+  if (!result.success) return result
+  await touchAdminTableBoard().catch(err => console.warn('touch waiter table board failed', err))
   if (result && result.success && result.order) {
     const dishIndexes = (Array.isArray(result.order.goods) ? result.order.goods : []).map((_, index) => index)
     if (dishIndexes.length) {
@@ -1389,7 +1395,9 @@ async function adminCreateOfflineOrder(payload) {
         result.kitchenDispatch = { hasDispatchFailure: true, error: err.message || 'kitchen dispatch failed' }
       }
     }
-    if (mode === 'create') result.customerReceipt = await queueSubmittedCustomerReceipt(result.order)
+    if (result.firstOrderForVisit && !result.duplicateSubmission) {
+      result.customerReceipt = await queueSubmittedCustomerReceipt(result.order)
+    }
   }
   return result
 }
@@ -2551,6 +2559,7 @@ function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'tod
   const endAt = getBusinessStatsRangeEnd(range, now)
   const groups = {}
   const rootOrderGroupKeys = {}
+  const countedTableKeys = new Set()
 
   ;(orders || []).forEach(order => {
     if (!isDineInArrivalOrder(order)) return
@@ -2559,6 +2568,10 @@ function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'tod
 
     const groupKey = getArrivalOrderKey(order)
     if (!groupKey) return
+    if (order.status !== 'cancelled' && (order.tableCleared !== true || isAdminPaidOrder(order))) {
+      const visitId = String(order.tableVisitId || '').trim()
+      countedTableKeys.add(visitId ? `visit:${visitId}` : groupKey)
+    }
     const rootOrderId = String(order.rootOrderId || order._id || '').trim()
     if (rootOrderId) rootOrderGroupKeys[rootOrderId] = groupKey
     if (!groups[groupKey]) {
@@ -2576,6 +2589,11 @@ function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'tod
     if (!tableRef) return
     const arrivedAt = getTimeValue(session.peopleConfirmedAt || session.createTime || session.updateTime)
     if (!arrivedAt || arrivedAt < startAt || (endAt && arrivedAt >= endAt)) return
+    if (isActiveTableSession(session)) {
+      const visitId = String(session.visitId || '').trim()
+      const activeRoot = String(session.activeOrderRootId || '').trim()
+      countedTableKeys.add(visitId ? `visit:${visitId}` : (activeRoot ? `order:${activeRoot}` : `session:${String(session._id || session.tableNumber || '').trim()}`))
+    }
 
     const rootOrderId = String(session.activeOrderRootId || '').trim()
     const groupKey = rootOrderId
@@ -2595,7 +2613,7 @@ function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'tod
     startAt,
     endAt,
     peopleCount: Object.keys(groups).reduce((total, key) => total + Number(groups[key].peopleCount || 0), 0),
-    tableCount: Object.keys(groups).length
+    tableCount: countedTableKeys.size
   }
 }
 

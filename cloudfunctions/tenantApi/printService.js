@@ -1131,7 +1131,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     return dishes.reduce((rows, item) => {
       const name = String(item.dishName || item.name || '')
       const countText = `${Number(item.count || 0)}份`
-      const nameWidth = Math.max(4, lineWidth - ticketTextWidth(countText))
+      const nameWidth = Math.max(1, lineWidth - ticketTextWidth(countText))
       const nameLines = wrapTicketText(name, nameWidth)
       rows.push(`${padTicketText(nameLines[0] || '', nameWidth)}${padTicketText(countText, lineWidth - nameWidth, 'right')}`)
       nameLines.slice(1).forEach(nameLine => rows.push(nameLine))
@@ -1139,6 +1139,20 @@ function createPrintService({ db, _, defaultTenantId }) {
       if (note) wrapTicketText(`  ${note}`, lineWidth).forEach(noteLine => rows.push(noteLine))
       return rows
     }, []).join('\n')
+  }
+
+  function ticketFontScale(size) {
+    return ({ xxxlarge: 6, xxlarge: 5, xlarge: 4, large: 3, medium: 2 })[size] || 1
+  }
+
+  function fitDishFontSize(size, lineWidth, countText) {
+    const sizes = ['normal', 'medium', 'large', 'xlarge', 'xxlarge', 'xxxlarge']
+    let selected = sizes.includes(size) ? size : 'normal'
+    const neededWidth = ticketTextWidth(countText) + 2
+    while (ticketFontScale(selected) > 1 && Math.floor(lineWidth / ticketFontScale(selected)) < neededWidth) {
+      selected = sizes[sizes.indexOf(selected) - 1]
+    }
+    return selected
   }
 
   function renderTicket(template = {}, data = {}) {
@@ -1201,11 +1215,13 @@ function createPrintService({ db, _, defaultTenantId }) {
       } else {
         const lineWidth = Number(data.paperWidth || 80) >= 76 ? 42 : 32
         const countText = `${count}份`
-        const nameWidth = Math.max(4, lineWidth - ticketTextWidth(countText))
+        const fittedSize = fitDishFontSize(dishSize, lineWidth, countText)
+        const sizedLineWidth = Math.max(ticketTextWidth(countText) + 1, Math.floor(lineWidth / ticketFontScale(fittedSize)))
+        const nameWidth = sizedLineWidth - ticketTextWidth(countText)
         const nameLines = wrapTicketText(name, nameWidth)
-        const row = `${padTicketText(nameLines[0] || '', nameWidth)}${padTicketText(countText, lineWidth - nameWidth, 'right')}`
-        lines.push({ kind: 'text', key: 'dishName', text: row, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
-        nameLines.slice(1).forEach(nameLine => lines.push({ kind: 'text', key: 'dishName', text: nameLine, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' }))
+        const row = `${padTicketText(nameLines[0] || '', nameWidth)}${padTicketText(countText, ticketTextWidth(countText), 'right')}`
+        lines.push({ kind: 'text', key: 'dishName', text: row, size: fittedSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
+        nameLines.slice(1).forEach(nameLine => lines.push({ kind: 'text', key: 'dishName', text: nameLine, size: fittedSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' }))
       }
       const specification = String(item.specification || item.spec || item.skuName || '').trim()
       const remark = String(item.remark || item.note || '').trim()
@@ -1380,9 +1396,15 @@ function createPrintService({ db, _, defaultTenantId }) {
   }
 
   function formatTicketTableNumber(value) {
-    const tableNumber = text(value)
+    const tableNumber = text(value).trim()
     const skyMatch = tableNumber.match(/^(?:T|SKY|TIAN|TL|\u5929\u697c|\u5929)[-\s_]?0*(\d+)$/i)
-    return skyMatch ? `\u5929${Number(skyMatch[1])}` : tableNumber
+    if (skyMatch) return `\u5929${Number(skyMatch[1])}`
+    const numbered = tableNumber.match(/^(.*?)(\d+)(\D*)$/)
+    if (!numbered) return tableNumber
+    const numericValue = Number(numbered[2])
+    return numericValue < 10 && numbered[2].length > 1
+      ? `${numbered[1]}${numericValue}${numbered[3]}`
+      : tableNumber
   }
 
   function kitchenPeopleCountText(order = {}) {
@@ -2821,6 +2843,9 @@ function createPrintService({ db, _, defaultTenantId }) {
     handleAgentAction,
     queueKitchenJobs,
     queueCashierReceipt,
+    formatKitchenStyleDishes,
+    formatTicketTableNumber,
+    renderDishLines,
     JOB_STATUS
   }
 }

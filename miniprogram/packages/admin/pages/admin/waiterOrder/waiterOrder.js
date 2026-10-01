@@ -55,8 +55,19 @@ Page({
       modeText: mode === 'create' ? '代客开单' : '服务员加菜'
     })
     this.restoreMenuCache()
-    this.refreshMenu()
+    // Keep the cached menu as an instant fallback, but always verify it with
+    // the server when entering waiter ordering so recent dish edits appear.
+    this.refreshMenu(true)
     this.loadPackages()
+  },
+
+  onShow() {
+    if (this.hasShownWaiterMenu) {
+      this.refreshMenu(true)
+      this.loadPackages()
+      return
+    }
+    this.hasShownWaiterMenu = true
   },
 
   onUnload() {
@@ -116,6 +127,7 @@ Page({
       await this.loadAllCategoryGoods(categories, force)
     } catch (err) {
       if (!this.data.sections.length) wx.showToast({ title: '菜单加载失败', icon: 'none' })
+      else wx.showToast({ title: '菜单刷新失败，当前显示上次菜单', icon: 'none' })
     } finally {
       this.setData({ loading: false })
     }
@@ -393,10 +405,22 @@ Page({
     }))
     this.setData({ submitting: true })
     try {
-      await apiClient.call('admin.order.createOffline', {
+      if (!this.pendingSubmissionId) {
+        this.pendingSubmissionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+      }
+      const result = await apiClient.call('admin.order.createOffline', {
         mode: this.data.mode, areaKey: this.data.areaKey, tableNumber: this.data.tableNumber,
-        peopleCount: this.data.peopleCount, orderGoods
+        peopleCount: this.data.peopleCount, orderGoods, requestId: this.pendingSubmissionId
       })
+      if (result && result.kitchenDispatch && result.kitchenDispatch.hasDispatchFailure) {
+        wx.showModal({
+          title: '订单已创建，后厨派单失败',
+          content: '请返回桌台账单，在该订单上使用“再发送”重试后厨派单；不要重新开单。',
+          showCancel: false
+        })
+        return
+      }
+      this.pendingSubmissionId = ''
       wx.showToast({ title: this.data.mode === 'create' ? '开单成功' : '加菜成功', icon: 'success' })
       setTimeout(() => wx.navigateBack(), 500)
     } catch (err) {
