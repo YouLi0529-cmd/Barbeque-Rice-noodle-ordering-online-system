@@ -34,6 +34,7 @@ Page({
     sessionGoodsCount: 0,
     activeOrderSession: null,
     sharedSessionId: '',
+    sharedCartVersion: 0,
     appendToOrderId: '',
     isAddOnOrder: false,
     addOnIndex: 0,
@@ -255,6 +256,7 @@ Page({
         orderType: cartData.orderType || 'dineIn',
         orderScene,
         sharedSessionId: cartData.sharedSessionId || '',
+        sharedCartVersion: Number(cartData.sharedCartVersion || 0),
         submitLoadingGif: orderScene === 'camping'
           ? '/images/loadinggif-cutout-transparent.gif'
           : '/images/orderloadinggif-transparent.gif',
@@ -395,14 +397,6 @@ Page({
 
     await this.loadUserInfoFromDB()
 
-    const userInfo = this.data.userInfo
-    if (!this.isProfileCompleted(userInfo)) {
-      this.setData({
-        showAuthModal: true
-      })
-      return
-    }
-
     if (this.data.orderScene !== 'camping' && !this.data.tableNumber) {
       wx.showToast({
         title: '请先扫描桌码',
@@ -423,9 +417,15 @@ Page({
         orderType: this.data.orderType,
         orderScene: this.data.orderScene,
         sharedSessionId: this.data.sharedSessionId,
+        cartVersion: this.data.sharedCartVersion,
         parentOrderId: this.data.appendToOrderId,
         addOnIndex: this.data.addOnIndex,
         orderCardTitle: this.data.currentCardTitle
+      }
+      const indexPage = getCurrentPages().find(page => page.route === 'packages/order/pages/index/index')
+      if (indexPage && indexPage.sharedCartPatchPromise) {
+        await indexPage.sharedCartPatchPromise
+        orderPayload.cartVersion = Number(indexPage.data.sharedCartVersion || orderPayload.cartVersion || 0)
       }
       const doBuyResult = apiClient.isEnabled()
         ? await apiClient.call('order.create', orderPayload)
@@ -435,8 +435,27 @@ Page({
         })).result
 
       if (!doBuyResult || !doBuyResult.success) {
+        if (doBuyResult?.code === 'SHARED_CART_CHANGED' || doBuyResult?.code === 'SHARED_CART_ALREADY_SUBMITTED') {
+          if (indexPage && typeof indexPage.fetchSharedCart === 'function') {
+            await indexPage.fetchSharedCart(false, true)
+            wx.navigateBack()
+          }
+          wx.showToast({
+            title: doBuyResult.code === 'SHARED_CART_CHANGED' ? '购物车已更新，请重新提交' : '订单已提交，购物车已更新',
+            icon: 'none'
+          })
+          return
+        }
         const errorMsg = doBuyResult?.error || doBuyResult?.message || '下单失败'
         throw new Error(errorMsg)
+      }
+      if (doBuyResult.duplicateSubmission) {
+        if (indexPage && typeof indexPage.fetchSharedCart === 'function') {
+          await indexPage.fetchSharedCart(false, true)
+          wx.navigateBack()
+        }
+        wx.showToast({ title: '订单已提交，购物车已更新', icon: 'none' })
+        return
       }
 
       const orderId = doBuyResult.orderId
@@ -449,9 +468,12 @@ Page({
 
       if (this.data.orderScene !== 'camping') {
         await this.deleteOrderDraft()
-        await this.clearSharedCart()
+        if (!apiClient.isEnabled()) await this.clearSharedCart()
       }
       this.clearCart()
+      if (indexPage && apiClient.isEnabled() && this.data.orderScene !== 'camping' && typeof indexPage.fetchSharedCart === 'function') {
+        await indexPage.fetchSharedCart(false, true)
+      }
 
       const cartImageMap = (this.data.orderGoods || []).reduce((map, item) => {
         if (item && item.dishId && item.dishImage) {
@@ -480,13 +502,13 @@ Page({
       const submittedCard = this.buildOrderCard({
         cardId: orderId,
         orderId,
-        title: this.data.currentCardTitle,
+        title: serverOrder.orderCardTitle || this.data.currentCardTitle,
         goods: submittedGoods,
         goodsCount: submittedGoodsCount,
         totalPrice: Number(serverOrder.totalPrice || serverFinalPrice),
         finalPrice: serverFinalPrice,
         submitted: true,
-        isAddOnOrder: this.data.isAddOnOrder
+        isAddOnOrder: serverOrder.isAddOnOrder === true
       })
       const submittedCards = Array.isArray(this.data.previousOrderCards)
         ? this.data.previousOrderCards
@@ -513,6 +535,18 @@ Page({
       })
     } catch (err) {
       console.error('创建订单失败', err)
+      if (err && (err.code === 'SHARED_CART_CHANGED' || err.code === 'SHARED_CART_ALREADY_SUBMITTED')) {
+        const indexPage = getCurrentPages().find(page => page.route === 'packages/order/pages/index/index')
+        if (indexPage && typeof indexPage.fetchSharedCart === 'function') {
+          await indexPage.fetchSharedCart(false, true)
+          wx.navigateBack()
+        }
+        wx.showToast({
+          title: err.code === 'SHARED_CART_CHANGED' ? '购物车已更新，请重新提交' : '订单已提交，购物车已更新',
+          icon: 'none'
+        })
+        return
+      }
       wx.showToast({
         title: err.message || '下单失败',
         icon: 'none'
@@ -637,11 +671,11 @@ Page({
     const pages = getCurrentPages()
     const indexPage = pages.find(page => page.route === 'packages/order/pages/index/index')
     if (indexPage) {
-      indexPage.updateCart({})
+      indexPage.updateCart({}, { skipSync: true })
     }
     const campingPage = pages.find(page => page.route === 'packages/camping/pages/campingorderfood/campingorderfood')
     if (campingPage) {
-      campingPage.updateCart({})
+      campingPage.updateCart({}, { skipSync: true })
     }
   },
 

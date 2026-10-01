@@ -93,6 +93,9 @@ async function run() {
   assert.ok(!page.data.fieldLibrary.some(field => field.key === 'orderAmount'))
   const dishesIndex = page.data.editTemplate.fields.findIndex(field => field.key === 'dishes')
   page.data.selectedTemplateFieldIndex = dishesIndex
+  assert.strictEqual(page.data.previewFields[dishesIndex].isKitchenDishTable, true)
+  assert.strictEqual(page.data.previewFields[dishesIndex].kitchenPreviewRows[1].count, '1\u4efd')
+  assert.strictEqual(page.data.previewFields[dishesIndex].kitchenPreviewSubs.length, 2)
   assert.strictEqual(page.data.previewFields[dishesIndex].dishPreviewRows[1].size, 'normal')
   page.onTemplateFieldPicker({ currentTarget: { dataset: { key: 'specificationSize', options: 'sizeOptions' } }, detail: { value: 0 } })
   page.onTemplateFieldPicker({ currentTarget: { dataset: { key: 'remarkSize', options: 'sizeOptions' } }, detail: { value: 3 } })

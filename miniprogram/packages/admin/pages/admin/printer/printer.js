@@ -151,6 +151,7 @@ function makePreviewFields(fields, template = {}) {
   return (fields || []).map((field, index) => {
     const source = FIELD_LIBRARY.find(item => item.key === field.key) || {}
     const isCashierDishTable = field.key === 'dishes' && ['checkout', 'prebill', 'customer_order'].includes(template.ticketType)
+    const isKitchenDishTable = field.key === 'dishes' && ['kitchen_order', 'kitchen_add', 'kitchen_urge', 'kitchen_refund', 'kitchen_split'].includes(template.ticketType)
     const isCashierSummary = !field.content && ['orderAmount', 'receivableAmount'].includes(field.key) && ['checkout', 'prebill', 'customer_order'].includes(template.ticketType)
     const isPlaceholder = !!source.fixedOnly && !String(field.content || '').trim()
     const isUnavailable = !fieldAvailableForTicket(source, template.ticketType) && !field.content
@@ -170,8 +171,18 @@ function makePreviewFields(fields, template = {}) {
       text,
       isPlaceholder: isPlaceholder || isUnavailable,
       isCashierDishTable,
+      isKitchenDishTable,
       isCashierSummary,
       previewRows: isCashierDishTable ? CASHIER_DISH_PREVIEW_ROWS : [],
+      kitchenPreviewRows: isKitchenDishTable ? [
+        { key: 'beef', dish: '\u4e94\u82b1\u8089', count: '2\u4efd' },
+        { key: 'mushroom', dish: '\u91d1\u9488\u83c7', count: '1\u4efd' },
+        { key: 'beef-2', dish: '\u4e94\u82b1\u8089', count: '2\u4efd' }
+      ] : [],
+      kitchenPreviewSubs: isKitchenDishTable ? [
+        { key: 'specification', text: '\u89c4\u683c\uff1a\u5927\u4efd', size: field.specificationSize || field.size || 'normal' },
+        { key: 'remark', text: '\u5907\u6ce8\uff1a\u5c11\u8fa3', size: field.remarkSize || field.size || 'normal' }
+      ] : [],
       dishPreviewRows: field.key === 'dishes' ? [
         { key: 'dish', text: '五花肉 2份', size: field.size || 'normal' },
         { key: 'specification', text: '规格：大份', size: field.specificationSize || field.size || 'normal' },

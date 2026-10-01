@@ -178,6 +178,12 @@
       </view>
 
       <button
+        class="customer-order-btn"
+        loading="{{printingCustomerOrder}}"
+        disabled="{{printingCustomerOrder || checkingOut || billGroups.length === 0}}"
+        bindtap="printCustomerOrder"
+      >{{ui.printCustomerOrder}}</button>
+      <button
         class="prebill-btn"
         loading="{{printingPrebill}}"
         disabled="{{printingPrebill || checkingOut}}"

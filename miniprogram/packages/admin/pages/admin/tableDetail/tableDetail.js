@@ -57,6 +57,9 @@ const UI = {
   actualReceived: '\u5b9e\u6536',
   finishCheckout: '\u4ed8\u6b3e\u5b8c\u6210\uff0c\u786e\u5b9a\u7ed3\u8d26',
   printPrebill: '\u6253\u5370\u9884\u7ed3\u5355',
+  printCustomerOrder: '\u6253\u5370\u5ba2\u5355',
+  customerOrderPrintSuccess: '\u5ba2\u5355\u5df2\u53d1\u9001\u6253\u5370\u673a',
+  customerOrderPrintFailed: '\u5ba2\u5355\u6253\u5370\u5931\u8d25',
   prebillPrintSuccess: '\u9884\u7ed3\u5355\u5df2\u53d1\u9001',
   prebillPrintFailed: '\u9884\u7ed3\u5355\u6253\u5370\u5931\u8d25',
   sendKitchen: '\u518d\u53d1\u9001',
@@ -414,7 +417,8 @@ Page({
     refundQuantity: '1',
     submittingRefund: false,
     checkingOut: false,
-    printingPrebill: false
+    printingPrebill: false,
+    printingCustomerOrder: false
   },
 
   onLoad(options) {
@@ -1762,6 +1766,33 @@ Page({
       wx.showToast({ title: err.message || UI.prebillPrintFailed, icon: 'none' })
     } finally {
       this.setData({ printingPrebill: false })
+    }
+  },
+
+  async printCustomerOrder() {
+    if (this.data.printingCustomerOrder) return
+    const table = this.data.table || {}
+    if (!table.tableNumber || this.data.billGroups.length === 0) {
+      wx.showToast({ title: UI.noOrder, icon: 'none' })
+      return
+    }
+
+    try {
+      this.setData({ printingCustomerOrder: true })
+      const res = await apiClient.call('admin.table.printCustomerOrder', {
+        areaKey: table.areaKey,
+        tableNumber: table.tableNumber
+      })
+      const skipped = !!(res && res.data && res.data.skipped)
+      wx.showToast({
+        title: skipped ? UI.customerOrderPrintFailed : UI.customerOrderPrintSuccess,
+        icon: skipped ? 'none' : 'success'
+      })
+    } catch (err) {
+      console.error('print customer order failed', err)
+      wx.showToast({ title: err.message || UI.customerOrderPrintFailed, icon: 'none' })
+    } finally {
+      this.setData({ printingCustomerOrder: false })
     }
   }
 })

@@ -90,7 +90,8 @@ async function verifyKitchenRouting() {
   assert.strictEqual(Object.values(db.data.printJobs).length, 2)
   assert.strictEqual(Object.values(db.data.unassignedDishAlerts).length, 1)
   const kitchenJob = Object.values(db.data.printJobs).find(job => job.payload.dishIndexes.includes(0))
-  assert.ok(kitchenJob.ticket.lines.some(line => String(line.text || '').includes('牛肉 1份')))
+  const alignedKitchenText = kitchenJob.ticket.lines.map(line => String(line.text || '')).join('\n')
+  assert.match(alignedKitchenText, /\u725b\u8089\s+1\u4efd/)
   assert.ok(!kitchenJob.ticket.lines.some(line => String(line.text || '').includes('招牌秘制牛肉')))
   const kitchenTemplate = (await service.handleAdminAction('admin.print.templates.list', { tenantId: 'store-test' })).data.find(template => template.ticketType === 'kitchen_order' && template.bindScope === 'global')
   const renamedKitchen = await service.handleAdminAction('admin.print.templates.save', {
@@ -175,6 +176,13 @@ async function verifyKitchenRouting() {
   assert.ok(customerJob.ticket.lines.some(line => line.key === 'dishSpecification' && line.size === 'small'))
   assert.ok(customerJob.ticket.lines.some(line => line.key === 'dishRemark' && line.size === 'large'))
   assert.ok(customerJob.ticket.lines.some(line => line.key === 'totalPrice' && line.text.includes('40')))
+  const skyPrint = await service.queueCashierReceipt({
+    id: 'store-test', ticketType: 'customer_order',
+    orders: [{ ...firstOrder, _id: 'sky-order', tableNumber: 'T1' }],
+    eventKey: 'sky-table-display'
+  })
+  assert.strictEqual(skyPrint.jobs[0].tableNumber, '\u59291')
+  assert.ok(skyPrint.jobs[0].ticket.lines.some(line => line.key === 'tableNumber' && line.text.includes('\u59291')))
   const repeatPrint = await service.queueCashierReceipt({ id: 'store-test', ticketType: 'customer_order', orders: [firstOrder, addOrder], eventKey: 'auto-submit:order-guest-2' })
   assert.strictEqual(repeatPrint.jobs[0]._id, customerJob._id)
 

@@ -1059,99 +1059,112 @@ async function createOrder(payload) {
   auth = await refreshAuthSessionProfile(payload, auth)
 
   const openid = auth.data.openid
-  const orderScene = payload.orderScene === 'camping' || payload.orderType === 'camping'
-    ? 'camping'
-    : 'dineIn'
+  const orderScene = payload.orderScene === 'camping' || payload.orderType === 'camping' ? 'camping' : 'dineIn'
   const tableNumber = String(payload.tableNumber || '').trim()
-  let parentOrderId = String(payload.parentOrderId || '').trim()
-  let isAddOnOrder = !!parentOrderId
-  let addOnIndex = Math.max(0, Math.floor(Number(payload.addOnIndex) || 0))
-  let effectiveTableNumber = tableNumber
-  let sharedSessionId = ''
-  let sharedSession = null
-
   if (orderScene !== 'camping' && !tableNumber) {
-    return {
-      success: false,
-      code: 'TABLE_REQUIRED',
-      message: 'table number required'
-    }
+    return { success: false, code: 'TABLE_REQUIRED', message: 'table number required' }
   }
 
-  if (orderScene !== 'camping') {
-    sharedSessionId = String(payload.sharedSessionId || getSharedCartSessionId(tableNumber)).trim()
-    const sessionRes = await db.collection('tableOrderSession').doc(sharedSessionId).get()
-    sharedSession = sessionRes.data
-    if (!isActiveTableSession(sharedSession)) {
-      return {
-        success: false,
-        code: 'TABLE_SESSION_CLOSED',
-        message: '本桌订单已结账，请重新扫码开台'
-      }
-    }
-    if (!buildSharedCartPeopleState(sharedSession).peopleConfirmed) {
-      return {
-        success: false,
-        code: 'TABLE_PEOPLE_REQUIRED',
-        message: '请先确认用餐人数'
-      }
-    }
-
-    // A stale client can still carry an old local add-on order ID. Only the
-    // active shared session is allowed to decide whether this is an add-on.
-    const sessionParentOrderId = String(sharedSession.activeOrderRootId || '').trim()
-    if (parentOrderId && parentOrderId !== sessionParentOrderId) {
-      parentOrderId = ''
-      isAddOnOrder = false
-      addOnIndex = 0
-    }
-    if (!parentOrderId && sharedSession.activeOrderRootId) {
-      parentOrderId = String(sharedSession.activeOrderRootId)
-      isAddOnOrder = true
-      addOnIndex = Math.max(1, Math.floor(Number(sharedSession.addOnCount || 0)) + 1)
-    }
-  }
-
-  const linkedTableGroup = !isAddOnOrder && orderScene !== 'camping'
+  const sharedSessionId = orderScene === 'camping'
+    ? ''
+    : String(payload.sharedSessionId || getSharedCartSessionId(tableNumber)).trim()
+  const linkedTableGroup = orderScene === 'dineIn'
     ? await getActiveTableGroupSnapshotForTableNumber(tableNumber)
     : {}
+  const expectedCartVersion = Math.max(0, Math.floor(Number(payload.cartVersion || 0)))
+  const sharedCartActiveUntil = new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS)
 
   const result = await db.runTransaction(async transaction => {
-    const user = await getActiveUser(transaction, auth.data.userId)
-    const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods)
+    let session = null
+    let cartDocs = []
+    let orderGoods = Array.isArray(payload.orderGoods) ? payload.orderGoods : []
+    let parentOrderId = ''
+    let addOnIndex = 0
+    let firstOrderForVisit = false
+    let tableVisitId = ''
+
+    if (orderScene === 'dineIn') {
+      const sessionRef = transaction.collection('tableOrderSession').doc(sharedSessionId)
+      const sessionRes = await sessionRef.get()
+      session = sessionRes.data
+      if (!isActiveTableSession(session)) {
+        return { success: false, code: 'TABLE_SESSION_CLOSED', message: '\u672c\u684c\u8ba2\u5355\u5df2\u7ed3\u8d26\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u5f00\u53f0' }
+      }
+      if (!buildSharedCartPeopleState(session).peopleConfirmed) {
+        return { success: false, code: 'TABLE_PEOPLE_REQUIRED', message: '\u8bf7\u5148\u786e\u8ba4\u7528\u9910\u4eba\u6570' }
+      }
+      if (!Array.isArray(session.memberOpenids) || !session.memberOpenids.includes(openid)) {
+        return { success: false, code: 'SESSION_MEMBER_REQUIRED', message: '\u8bf7\u91cd\u65b0\u626b\u7801\u52a0\u5165\u672c\u684c\u70b9\u5355' }
+      }
+
+      const currentVersion = Math.max(0, Math.floor(Number(session.cartVersion || 0)))
+      if (expectedCartVersion !== currentVersion) {
+        if (Number(session.lastSubmittedCartVersion) === expectedCartVersion && session.lastSubmittedOrderId) {
+          const prior = await transaction.collection('order').doc(String(session.lastSubmittedOrderId)).get()
+          if (prior.data) {
+            return { success: true, duplicateSubmission: true, orderId: prior.data._id, order: prior.data }
+          }
+        }
+        return { success: false, code: 'SHARED_CART_CHANGED', message: '\u8d2d\u7269\u8f66\u5df2\u66f4\u65b0\uff0c\u8bf7\u91cd\u65b0\u63d0\u4ea4' }
+      }
+
+      const cartRes = await transaction.collection('tableCartItem').where({
+        sessionId: sharedSessionId,
+        deleted: _.neq(true)
+      }).limit(200).get()
+      cartDocs = cartRes.data || []
+      if (!cartDocs.length) {
+        if (session.lastSubmittedCartVersion === expectedCartVersion - 1 && session.lastSubmittedOrderId) {
+          const prior = await transaction.collection('order').doc(String(session.lastSubmittedOrderId)).get()
+          if (prior.data) {
+            return { success: true, duplicateSubmission: true, orderId: prior.data._id, order: prior.data }
+          }
+        }
+        return { success: false, code: 'SHARED_CART_ALREADY_SUBMITTED', message: '\u8ba2\u5355\u5df2\u63d0\u4ea4\uff0c\u8d2d\u7269\u8f66\u5df2\u66f4\u65b0' }
+      }
+      orderGoods = cartDocs.map(item => ({
+        dishId: item.dishId || item.info && item.info._id,
+        count: item.count,
+        tags: item.tagLabels && item.tagLabels.length ? item.tagLabels : item.tags,
+        dishName: item.info && item.info.name,
+        dishImage: item.info && item.info.image
+      }))
+      tableVisitId = String(session.visitId || '').trim()
+      if (!tableVisitId) {
+        tableVisitId = crypto.randomBytes(16).toString('hex')
+      }
+      parentOrderId = String(session.activeOrderRootId || '').trim()
+      firstOrderForVisit = !parentOrderId
+      addOnIndex = parentOrderId ? Math.max(1, Math.floor(Number(session.addOnCount || 0)) + 1) : 0
+    }
+
+    const userRes = auth.data.userId
+      ? await transaction.collection('user').doc(String(auth.data.userId)).get().catch(() => ({ data: null }))
+      : { data: null }
+    const maybeUser = userRes.data
+    const user = maybeUser && maybeUser.status !== 0 && maybeUser.phoneNumber ? maybeUser : null
+    const priceResult = await buildServerOrderGoods(transaction, orderGoods)
     let rootOrderId = ''
     let inheritedTableGroup = linkedTableGroup
 
-    if (isAddOnOrder) {
+    if (parentOrderId) {
       const parentRes = await transaction.collection('order').doc(parentOrderId).get()
       const parentOrder = parentRes.data
-
-      if (!parentOrder) {
-        throw new Error('parent order not found')
+      if (!parentOrder || parentOrder.orderScene !== orderScene || isAdminPaidOrder(parentOrder)) {
+        return { success: false, code: 'ACTIVE_ORDER_INVALID', message: '\u5f53\u524d\u684c\u53f0\u8ba2\u5355\u72b6\u6001\u5df2\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5' }
       }
-      const canAppendFromSharedTable = orderScene !== 'camping' &&
-        sharedSession &&
-        String(sharedSession.activeOrderRootId || '') === parentOrderId &&
-        Array.isArray(sharedSession.memberOpenids) &&
-        sharedSession.memberOpenids.includes(openid)
-      if (parentOrder.userId !== user._id && !canAppendFromSharedTable) {
-        throw new Error('cannot append to another user order')
+      const sessionOwnsParent = orderScene === 'dineIn' && session &&
+        String(session.activeOrderRootId || '') === parentOrderId &&
+        Array.isArray(session.memberOpenids) && session.memberOpenids.includes(openid)
+      const sameSubmitter = parentOrder._openid === openid
+      if (!sessionOwnsParent && !sameSubmitter && (!user || parentOrder.userId !== user._id)) {
+        return { success: false, code: 'ORDER_ACCESS_DENIED', message: '\u65e0\u6743\u6dfb\u52a0\u5230\u8be5\u8ba2\u5355' }
       }
-      if (parentOrder.orderScene !== orderScene) {
-        throw new Error('order scene mismatch')
+      if (orderScene === 'dineIn' && String(parentOrder.tableNumber || '') !== tableNumber &&
+          !isOrderTransferredFromTable(parentOrder, tableNumber)) {
+        return { success: false, code: 'TABLE_NUMBER_MISMATCH', message: '\u684c\u53f0\u8ba2\u5355\u5df2\u53d8\u5316\uff0c\u8bf7\u91cd\u65b0\u626b\u7801' }
       }
-      if (isAdminPaidOrder(parentOrder)) {
-        throw new Error('paid order cannot add dishes')
-      }
-      if (orderScene !== 'camping' && String(parentOrder.tableNumber || '') !== tableNumber) {
-        if (isOrderTransferredFromTable(parentOrder, tableNumber)) {
-          effectiveTableNumber = String(parentOrder.tableNumber || '').trim()
-        } else {
-          throw new Error('table number mismatch')
-        }
-      }
-
-      rootOrderId = parentOrder.rootOrderId || parentOrder._id || parentOrderId
+      rootOrderId = String(parentOrder.rootOrderId || parentOrder._id || parentOrderId)
       if (parentOrder.tableGroupId) {
         inheritedTableGroup = {
           tableGroupId: parentOrder.tableGroupId,
@@ -1163,98 +1176,63 @@ async function createOrder(payload) {
     }
 
     const orderData = {
-      type: 'order',
-      orderScene,
-      orderType: orderScene,
-      isAddOnOrder,
-      parentOrderId: isAddOnOrder ? parentOrderId : '',
-      rootOrderId,
-      addOnIndex: isAddOnOrder ? addOnIndex : 0,
-      // The client can retain an old add-on card title after a table has been
-      // cleared or a shared-cart session is recreated. The server-side add-on
-      // decision above is authoritative, so a new dine-in root order is always
-      // named as the first order.
-      orderCardTitle: isAddOnOrder
-        ? `加菜单${addOnIndex}`
-        : (orderScene === 'dineIn' ? '首单' : (payload.orderCardTitle || '首单')),
-      goods: priceResult.goods,
-      totalPrice: priceResult.totalPrice,
-      finalPrice: priceResult.finalPrice,
-      pay_status: false,
-      payStatus: false,
-      payMethod: 'offline',
-      status: 'submitted',
-      tableCleared: false,
-      frontDeskConfirmed: false,
-      frontDeskRemark: '',
-      kitchenPrinted: false,
-      kitchenPrintStatus: 'pending',
-      storeId: getTenantId(payload),
-      createTime: db.serverDate(),
-      updateTime: db.serverDate(),
-      _openid: openid,
-      userId: user._id,
-      userCode: user.userCode || '',
-      userSnapshot: {
-        userCode: user.userCode || '',
-        nickName: user.nickName || '',
-        avatarUrl: user.avatarUrl || '',
-        phoneNumber: user.phoneNumber || ''
-      },
-      userNickName: user.nickName || '',
-      userAvatar: user.avatarUrl || '',
-      userPhone: user.phoneNumber || '',
-      tableNumber: orderScene === 'camping' ? '' : effectiveTableNumber,
+      type: 'order', orderScene, orderType: orderScene,
+      isAddOnOrder: !!parentOrderId,
+      parentOrderId: parentOrderId || '', rootOrderId,
+      addOnIndex: parentOrderId ? addOnIndex : 0,
+      orderCardTitle: parentOrderId ? `\u52a0\u83dc\u5355${addOnIndex}` : (orderScene === 'dineIn' ? '\u9996\u5355' : (payload.orderCardTitle || '\u9996\u5355')),
+      goods: priceResult.goods, totalPrice: priceResult.totalPrice, finalPrice: priceResult.finalPrice,
+      pay_status: false, payStatus: false, payMethod: 'offline', status: 'submitted',
+      tableCleared: false, frontDeskConfirmed: false, frontDeskRemark: '',
+      kitchenPrinted: false, kitchenPrintStatus: 'pending', storeId: getTenantId(payload),
+      createTime: db.serverDate(), updateTime: db.serverDate(), _openid: openid,
+      userId: user ? user._id : '', userCode: user ? user.userCode || '' : '',
+      userSnapshot: user ? {
+        userCode: user.userCode || '', nickName: user.nickName || '',
+        avatarUrl: user.avatarUrl || '', phoneNumber: user.phoneNumber || ''
+      } : { userCode: '', nickName: '', avatarUrl: '', phoneNumber: '' },
+      userNickName: user ? user.nickName || '' : '',
+      userAvatar: user ? user.avatarUrl || '' : '',
+      userPhone: user ? user.phoneNumber || '' : '',
+      tableNumber: orderScene === 'camping' ? '' : tableNumber,
+      ...(orderScene === 'dineIn' ? { tableVisitId } : {}),
       ...inheritedTableGroup,
-      peopleCount: orderScene === 'camping'
-        ? 0
-        : Math.max(Number(inheritedTableGroup.peopleCount || 0), getSharedCartPeopleCount(sharedSession))
+      peopleCount: orderScene === 'camping' ? 0 : Math.max(Number(inheritedTableGroup.peopleCount || 0), getSharedCartPeopleCount(session))
     }
 
-    const orderRes = await transaction.collection('order').add({
-      data: orderData
-    })
+    const orderRes = await transaction.collection('order').add({ data: orderData })
     const savedRootOrderId = rootOrderId || orderRes._id
+    await transaction.collection('order').doc(orderRes._id).update({ data: { rootOrderId: savedRootOrderId } })
+    const savedOrder = { ...orderData, _id: orderRes._id, rootOrderId: savedRootOrderId }
 
-    if (!rootOrderId) {
-      await transaction.collection('order').doc(orderRes._id).update({
-        data: {
-          rootOrderId: savedRootOrderId
-        }
-      })
+    if (orderScene === 'dineIn') {
+      const sessionRef = transaction.collection('tableOrderSession').doc(sharedSessionId)
+      for (const item of cartDocs) {
+        await transaction.collection('tableCartItem').doc(item._id).remove()
+      }
+      await sessionRef.update({ data: {
+        visitId: tableVisitId,
+        activeOrderRootId: savedRootOrderId,
+        addOnCount: parentOrderId ? addOnIndex : 0,
+        cartVersion: expectedCartVersion + 1,
+        lastSubmittedCartVersion: expectedCartVersion,
+        lastSubmittedOrderId: orderRes._id,
+        sharedCartActiveUntil,
+        updateTime: db.serverDate()
+      } })
     }
 
     return {
-      success: true,
-      orderId: orderRes._id,
-      order: {
-        ...orderData,
-        _id: orderRes._id,
-        rootOrderId: savedRootOrderId
-      }
+      success: true, orderId: orderRes._id, order: savedOrder,
+      firstOrderForVisit, duplicateSubmission: false
     }
   })
 
-  if (orderScene !== 'camping' && sharedSessionId && result && result.order) {
-    await db.collection('tableOrderSession').doc(sharedSessionId).update({
-      data: {
-        activeOrderRootId: result.order.rootOrderId || result.order._id || '',
-        addOnCount: isAddOnOrder ? addOnIndex : 0,
-        updateTime: db.serverDate()
-      }
-    }).catch(err => {
-      console.error('save active table order context failed', err)
-    })
-  }
-
-  if (result && result.success && result.order) {
-    const dishIndexes = (Array.isArray(result.order.goods) ? result.order.goods : [])
-      .map((item, index) => index)
-    if (dishIndexes.length > 0) {
+  if (result && result.success && result.order && !result.duplicateSubmission) {
+    const dishIndexes = (Array.isArray(result.order.goods) ? result.order.goods : []).map((_, index) => index)
+    if (dishIndexes.length) {
       try {
         const kitchenResult = await sendOrderDishesToKitchen(result.orderId, dishIndexes, {
-          // The order document is already durable. A stable key protects this
-          // automatic dispatch from duplicated client retries.
           eventKey: `auto-submit:${result.orderId}`
         })
         result.kitchenDispatch = kitchenResult.success
@@ -1262,13 +1240,12 @@ async function createOrder(payload) {
           : { hasDispatchFailure: true, error: kitchenResult.message || 'kitchen dispatch failed' }
       } catch (err) {
         console.error('auto dispatch order to kitchen failed', err)
-        result.kitchenDispatch = {
-          hasDispatchFailure: true,
-          error: err.message || 'kitchen dispatch failed'
-        }
+        result.kitchenDispatch = { hasDispatchFailure: true, error: err.message || 'kitchen dispatch failed' }
       }
     }
-    if (orderScene !== 'camping') result.customerReceipt = await queueSubmittedCustomerReceipt(result.order)
+    if (orderScene !== 'camping' && result.firstOrderForVisit) {
+      result.customerReceipt = await queueSubmittedCustomerReceipt(result.order)
+    }
   }
 
   return result
@@ -1300,6 +1277,12 @@ async function adminCreateOfflineOrder(payload) {
   const peopleCount = Math.max(1, Math.min(99, Math.floor(Number(
     payload.peopleCount || parentOrder && parentOrder.peopleCount || 1
   ))))
+  const sessionId = getSharedCartSessionId(formatAdminTableNumber(tableRef))
+  const sessionRes = await db.collection('tableOrderSession').doc(sessionId).get().catch(() => ({ data: null }))
+  const priorSession = sessionRes.data
+  const visitId = priorSession && isActiveTableSession(priorSession) && priorSession.visitId
+    ? String(priorSession.visitId)
+    : crypto.randomBytes(16).toString('hex')
   const result = await db.runTransaction(async transaction => {
     const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods, { allowPackages: true })
     if (!priceResult.goods.length) throw new Error('请选择菜品')
@@ -1338,6 +1321,7 @@ async function adminCreateOfflineOrder(payload) {
       userAvatar: '',
       userPhone: '',
       tableNumber: formatAdminTableNumber(tableRef),
+      tableVisitId: visitId,
       ...(parentOrder && parentOrder.tableGroupId ? {
         tableGroupId: parentOrder.tableGroupId,
         tableGroupPrimary: parentOrder.tableGroupPrimary || null,
@@ -1358,11 +1342,10 @@ async function adminCreateOfflineOrder(payload) {
     }
   })
 
-  const sessionId = getSharedCartSessionId(formatAdminTableNumber(tableRef))
-  const sessionRes = await db.collection('tableOrderSession').doc(sessionId).get()
-  if (sessionRes.data) {
+  if (priorSession && isActiveTableSession(priorSession)) {
     await db.collection('tableOrderSession').doc(sessionId).update({
       data: {
+        visitId,
         activeOrderRootId: result.order.rootOrderId,
         addOnCount: addOnIndex,
         peopleCount,
@@ -1370,6 +1353,25 @@ async function adminCreateOfflineOrder(payload) {
         updateTime: db.serverDate()
       }
     })
+  } else {
+    const visitHistory = Array.isArray(priorSession && priorSession.visitHistory) ? priorSession.visitHistory.slice() : []
+    if (priorSession && priorSession.visitId) visitHistory.push({
+      visitId: String(priorSession.visitId),
+      tableNumber: formatAdminTableNumber(tableRef),
+      memberOpenids: Array.isArray(priorSession.memberOpenids) ? priorSession.memberOpenids : [],
+      startedAt: priorSession.createTime || priorSession.updateTime || null,
+      endedAt: priorSession.finishedAt || new Date()
+    })
+    const sessionData = {
+      tableNumber: formatAdminTableNumber(tableRef),
+      status: 'ordering', checkoutStatus: '', finishedAt: null,
+      peopleCount, peopleConfirmed: true, peopleConfirmedAt: db.serverDate(),
+      cartVersion: 0, visitId, visitHistory: visitHistory.slice(-100),
+      memberOpenids: [], activeOrderRootId: result.order.rootOrderId,
+      addOnCount, createTime: db.serverDate(), updateTime: db.serverDate()
+    }
+    if (priorSession) await db.collection('tableOrderSession').doc(sessionId).update({ data: sessionData })
+    else await db.collection('tableOrderSession').doc(sessionId).set({ data: sessionData })
   }
   await touchAdminTableBoard()
   if (result && result.success && result.order) {
@@ -1387,7 +1389,7 @@ async function adminCreateOfflineOrder(payload) {
         result.kitchenDispatch = { hasDispatchFailure: true, error: err.message || 'kitchen dispatch failed' }
       }
     }
-    result.customerReceipt = await queueSubmittedCustomerReceipt(result.order)
+    if (mode === 'create') result.customerReceipt = await queueSubmittedCustomerReceipt(result.order)
   }
   return result
 }
@@ -1968,78 +1970,88 @@ function getUserOrderHistoryStartTime() {
   )
 }
 
-async function listUserOrders(payload) {
-  const member = await requireCurrentMember(payload)
-  if (!member.success) return member
+async function getCustomerVisibleOrders(payload, auth, user) {
+  const openid = String(auth && auth.data && auth.data.openid || '')
+  const startTime = getUserOrderHistoryStartTime()
+  const visitRes = await db.collection('tableOrderSession').limit(1000).get().catch(() => ({ data: [] }))
+  const visitIds = new Set()
+  ;(visitRes.data || []).forEach(session => {
+    const currentMembers = Array.isArray(session.memberOpenids) ? session.memberOpenids : []
+    if (session.visitId && currentMembers.includes(openid) && toTime(session.createTime || session.updateTime) >= startTime.getTime()) {
+      visitIds.add(String(session.visitId))
+    }
+    ;(Array.isArray(session.visitHistory) ? session.visitHistory : []).forEach(visit => {
+      const members = Array.isArray(visit.memberOpenids) ? visit.memberOpenids : []
+      const startedAt = toTime(visit.startedAt || visit.endedAt)
+      if (visit.visitId && members.includes(openid) && startedAt >= startTime.getTime()) visitIds.add(String(visit.visitId))
+    })
+  })
 
+  const queries = []
+  if (openid) queries.push(db.collection('order').where({
+    _openid: openid, type: 'order', deleted: _.neq(true), createTime: _.gte(startTime)
+  }).limit(500).get())
+  if (user && user._id) queries.push(db.collection('order').where({
+    userId: user._id, type: 'order', deleted: _.neq(true), createTime: _.gte(startTime)
+  }).limit(500).get())
+  const visitList = Array.from(visitIds)
+  for (let offset = 0; offset < visitList.length; offset += 100) {
+    const ids = visitList.slice(offset, offset + 100)
+    queries.push(db.collection('order').where({
+      tableVisitId: _.in(ids), type: 'order', deleted: _.neq(true), createTime: _.gte(startTime)
+    }).limit(500).get())
+  }
+  const resultSets = await Promise.all(queries)
+  const byId = new Map()
+  resultSets.forEach(result => (result.data || []).forEach(order => {
+    if (order && order._id && !isExpiredSavedOrder(order)) byId.set(order._id, order)
+  }))
+  return Array.from(byId.values()).sort((a, b) => toTime(b.createTime) - toTime(a.createTime))
+}
+
+async function listUserOrders(payload) {
+  let auth = await getAuthSession(payload)
+  if (!auth.success) return auth
+  auth = await refreshAuthSessionProfile(payload, auth)
+  const user = await getCurrentMember(auth)
   const orderScene = getOrderScene(payload.orderScene)
   const page = getPage(payload)
   const limit = getLimit(payload, 20, 100)
-  const query = {
-    userId: member.data.user._id,
-    type: 'order',
-    deleted: _.neq(true),
-    createTime: _.gte(getUserOrderHistoryStartTime())
-  }
-
-  if (orderScene === 'camping') {
-    query.orderScene = 'camping'
-  } else {
-    query.orderScene = _.neq('camping')
-  }
-
-  const res = await db.collection('order')
-    .where(query)
-    .orderBy('createTime', 'desc')
-    .skip(page * limit)
-    .limit(limit)
-    .get()
-
-  const orders = await normalizeOrderGoodsImages(
-    (res.data || []).filter(order => !isExpiredSavedOrder(order))
-  )
-
+  const visible = await getCustomerVisibleOrders(payload, auth, user)
+  const sceneOrders = visible.filter(order => orderScene === 'camping'
+    ? order.orderScene === 'camping'
+    : order.orderScene !== 'camping')
+  const data = await normalizeOrderGoodsImages(sceneOrders.slice(page * limit, (page + 1) * limit))
   return {
     success: true,
-    data: orders,
+    data,
     page,
     limit,
-    hasMore: (res.data || []).length === limit
+    hasMore: sceneOrders.length > (page + 1) * limit
   }
 }
 
 async function getUserOrderDetail(payload) {
-  const member = await requireCurrentMember(payload)
-  if (!member.success) return member
-
+  let auth = await getAuthSession(payload)
+  if (!auth.success) return auth
+  auth = await refreshAuthSessionProfile(payload, auth)
+  const user = await getCurrentMember(auth)
   const orderId = String(payload.orderId || '').trim()
-  const rootOrderId = String(payload.rootOrderId || payload.orderId || '').trim()
-  if (!rootOrderId && !orderId) {
-    return {
-      success: false,
-      code: 'MISSING_ORDER_ID',
-      message: 'missing order id'
-    }
-  }
+  const rootOrderId = String(payload.rootOrderId || orderId).trim()
+  if (!rootOrderId && !orderId) return { success: false, code: 'MISSING_ORDER_ID', message: 'missing order id' }
 
-  const res = await db.collection('order')
-    .where(_.or([
-      { userId: member.data.user._id, _id: orderId, deleted: _.neq(true) },
-      { userId: member.data.user._id, rootOrderId, deleted: _.neq(true) },
-      { userId: member.data.user._id, parentOrderId: rootOrderId, deleted: _.neq(true) }
-    ]))
-    .orderBy('createTime', 'asc')
-    .limit(100)
-    .get()
-
-  const orders = await normalizeOrderGoodsImages(
-    (res.data || []).filter(order => !isExpiredSavedOrder(order))
-  )
-
-  return {
-    success: true,
-    data: orders
-  }
+  const visible = await getCustomerVisibleOrders(payload, auth, user)
+  const selected = visible.find(order => order._id === orderId || String(order.rootOrderId || order._id) === rootOrderId)
+  if (!selected) return { success: false, code: 'ORDER_NOT_FOUND', message: 'order not found' }
+  const selectedRoot = String(selected.rootOrderId || selected._id)
+  const visitId = String(selected.tableVisitId || '')
+  const sameOrderGroup = visible.filter(order => {
+    const sameRoot = String(order.rootOrderId || order._id) === selectedRoot
+    const sameVisit = !visitId || String(order.tableVisitId || '') === visitId
+    const sameScene = String(order.orderScene || '') === String(selected.orderScene || '')
+    return sameRoot && sameVisit && sameScene
+  }).sort((a, b) => toTime(a.createTime) - toTime(b.createTime))
+  return { success: true, data: await normalizeOrderGoodsImages(sameOrderGroup) }
 }
 
 async function markUserOrdersDeleted(payload) {
@@ -4213,7 +4225,9 @@ async function adminFinishTableCheckout(payload) {
 
 async function adminPrintTableReceipt(payload, ticketType) {
   const orders = await getAdminTableOrders(payload)
-  const targets = orders.filter(order => !order.deleted && order.status !== 'cancelled')
+  const targets = orders.filter(order => !order.deleted && order.status !== 'cancelled' && (
+    ticketType !== 'customer_order' || (!order.tableCleared && !isAdminPaidOrder(order))
+  ))
   if (!targets.length) {
     return {
       success: false,
@@ -4227,7 +4241,9 @@ async function adminPrintTableReceipt(payload, ticketType) {
     ticketType,
     orders: targets,
     checkoutSummary: buildAdminCheckoutSummary(targets, payload),
-    eventKey: `${ticketType}:${targets.map(order => order._id).sort().join(',')}`
+    eventKey: ticketType === 'customer_order'
+      ? `customer_order:${targets.map(order => `${order._id}:${toTime(order.updateTime)}`).sort().join(',')}`
+      : `${ticketType}:${targets.map(order => order._id).sort().join(',')}`
   })
 
   return {
@@ -5444,15 +5460,25 @@ async function clearSharedCartSessionByTableNumber(tableNumber, finishedAt) {
   const sessionRef = db.collection('tableOrderSession').doc(sessionId)
   const sessionRes = await sessionRef.get()
   if (sessionRes.data) {
-    // A cleared or settled table must not leave an add-on context for the next party.
-    await sessionRef.remove()
+    // Keep visit membership so each participant can still see the completed
+    // visit's orders. The next scan archives it before opening a new visit.
+    await sessionRef.update({ data: {
+      status: 'finished',
+      checkoutStatus: 'finished',
+      finishedAt: finishedAt || new Date(),
+      sharedCartActiveUntil: null,
+      cartVersion: _.inc(1),
+      activeOrderRootId: '',
+      addOnCount: 0,
+      updateTime: db.serverDate()
+    } })
   }
 
   return {
     tableNumber: normalizedTableNumber,
     sessionId,
     removed: (res.data || []).length,
-    sessionRemoved: !!sessionRes.data
+    sessionRetained: !!sessionRes.data
   }
 }
 
@@ -5718,6 +5744,7 @@ async function joinSharedCart(payload) {
   const oldSessionRes = await sessionRef.get()
   const oldSession = oldSessionRes.data
   const sharedCartActiveUntil = new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS)
+  const newVisitId = () => crypto.randomBytes(16).toString('hex')
   let nextSession = oldSession
   let clearedForNewSession = {
     clearedOrders: 0,
@@ -5753,6 +5780,18 @@ async function joinSharedCart(payload) {
       updateData.addOnCount = inferredOrderContext.addOnCount
     }
     if (shouldResetSession) {
+      const visitHistory = Array.isArray(oldSession.visitHistory) ? oldSession.visitHistory.slice() : []
+      if (oldSession.visitId) {
+        visitHistory.push({
+          visitId: String(oldSession.visitId),
+          tableNumber,
+          memberOpenids: Array.isArray(oldSession.memberOpenids) ? oldSession.memberOpenids : [],
+          startedAt: oldSession.createTime || oldSession.updateTime || null,
+          endedAt: new Date()
+        })
+      }
+      updateData.visitHistory = visitHistory.filter(visit => toTime(visit.endedAt || visit.startedAt) >= getUserOrderHistoryStartTime().getTime()).slice(-100)
+      updateData.visitId = newVisitId()
       updateData.createTime = db.serverDate()
       updateData.peopleCount = 0
       updateData.peopleConfirmed = false
@@ -5763,6 +5802,7 @@ async function joinSharedCart(payload) {
       await clearSharedCartItemsBySessionId(sessionId)
       clearedForNewSession = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date())
     }
+    if (!shouldResetSession && !oldSession.visitId) updateData.visitId = newVisitId()
     await sessionRef.update({
       data: updateData
     })
@@ -5773,6 +5813,8 @@ async function joinSharedCart(payload) {
         peopleCount: 0,
         peopleConfirmed: false,
         cartVersion: 0,
+        visitId: newVisitId(),
+        visitHistory: [],
         activeOrderRootId: '',
         addOnCount: 0,
         sharedCartActiveUntil
@@ -5783,6 +5825,7 @@ async function joinSharedCart(payload) {
         sharedCartActiveUntil
       }
   } else {
+    const inferredOrderContext = await getActiveTableOrderContext(tableNumber)
     await sessionRef.set({
       data: {
         tableNumber,
@@ -5791,8 +5834,10 @@ async function joinSharedCart(payload) {
         peopleConfirmed: false,
         peopleConfirmedAt: null,
         cartVersion: 0,
-        activeOrderRootId: '',
-        addOnCount: 0,
+        visitId: newVisitId(),
+        visitHistory: [],
+        activeOrderRootId: inferredOrderContext.activeOrderRootId || '',
+        addOnCount: inferredOrderContext.addOnCount || 0,
         sharedCartActiveUntil,
         memberOpenids: [auth.data.openid],
         createTime: db.serverDate(),
@@ -5806,8 +5851,9 @@ async function joinSharedCart(payload) {
       peopleCount: 0,
       peopleConfirmed: false,
       cartVersion: 0,
-      activeOrderRootId: '',
-      addOnCount: 0,
+      visitId: newVisitId(),
+      activeOrderRootId: inferredOrderContext.activeOrderRootId || '',
+      addOnCount: inferredOrderContext.addOnCount || 0,
       sharedCartActiveUntil
     }
   }
@@ -6030,7 +6076,10 @@ async function patchSharedCart(payload) {
     }
   }
 
-  await db.runTransaction(async transaction => {
+  const nextVersion = await db.runTransaction(async transaction => {
+    const txSessionRef = transaction.collection('tableOrderSession').doc(sessionId)
+    const txSessionRes = await txSessionRef.get()
+    if (!isActiveTableSession(txSessionRes.data)) throw new Error('TABLE_SESSION_CLOSED')
     for (const operation of operations) {
       const cartKey = String(operation.cartKey || '').trim()
       const delta = Math.floor(Number(operation.delta) || 0)
@@ -6078,22 +6127,23 @@ async function patchSharedCart(payload) {
         })
       }
     }
+    await txSessionRef.update({
+      data: {
+        tableNumber,
+        memberOpenids: _.addToSet(auth.data.openid),
+        cartVersion: _.inc(1),
+        sharedCartActiveUntil: new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS),
+        updateTime: db.serverDate()
+      }
+    })
+    return Math.max(0, Math.floor(Number(txSessionRes.data.cartVersion || 0))) + 1
   })
 
   const sharedCartActiveUntil = new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS)
-  await sessionRef.update({
-    data: {
-      tableNumber,
-      memberOpenids: _.addToSet(auth.data.openid),
-      cartVersion: _.inc(1),
-      sharedCartActiveUntil,
-      updateTime: db.serverDate()
-    }
-  })
 
   return {
     success: true,
-    cartVersion: Math.max(0, Math.floor(Number(sessionRes.data && sessionRes.data.cartVersion || 0))) + 1,
+    cartVersion: nextVersion,
     sharedCartSyncActive: true,
     sharedCartActiveUntil: sharedCartActiveUntil.getTime()
   }
@@ -7848,10 +7898,20 @@ async function adminSaveDish(payload) {
 
   if (dish._id) {
     await db.collection('dish').doc(dish._id).update({ data })
+    const savedRes = await db.collection('dish').doc(dish._id).get()
+    const savedKitchenPrintName = String(savedRes.data && savedRes.data.kitchenPrintName || '').trim()
+    if (!savedRes.data || savedKitchenPrintName !== dish.kitchenPrintName) {
+      return {
+        success: false,
+        code: 'KITCHEN_PRINT_NAME_SAVE_FAILED',
+        message: 'kitchen print name could not be verified after saving'
+      }
+    }
     return {
       success: true,
       data: {
-        _id: dish._id
+        _id: dish._id,
+        kitchenPrintName: savedKitchenPrintName
       }
     }
   }
@@ -7862,11 +7922,21 @@ async function adminSaveDish(payload) {
       createTime: db.serverDate()
     }
   })
+  const savedRes = await db.collection('dish').doc(addRes._id).get()
+  const savedKitchenPrintName = String(savedRes.data && savedRes.data.kitchenPrintName || '').trim()
+  if (!savedRes.data || savedKitchenPrintName !== dish.kitchenPrintName) {
+    return {
+      success: false,
+      code: 'KITCHEN_PRINT_NAME_SAVE_FAILED',
+      message: 'kitchen print name could not be verified after saving'
+    }
+  }
 
   return {
     success: true,
     data: {
-      _id: addRes._id
+      _id: addRes._id,
+      kitchenPrintName: savedKitchenPrintName
     }
   }
 }

@@ -4,7 +4,7 @@ const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()
 const _ = db ? db.command : null
 const { getCustomNavOptions } = require('../../../../utils/customNav')
-const SHARED_CART_ACTIVE_POLL_MS = 8000
+const SHARED_CART_ACTIVE_POLL_MS = 2000
 const SHARED_CART_IDLE_POLL_MS = 20000
 // Non-breaking spaces are preserved by the mini program text renderer.
 const NOTICE_SEPARATOR = '\u00a0'.repeat(11)
@@ -772,7 +772,7 @@ Page({
     const operations = this.buildSharedCartOperations(prevCart, nextCart)
     if (operations.length === 0) return
 
-    const request = apiClient.isEnabled()
+    const sendPatch = () => apiClient.isEnabled()
       ? this.callSharedCartApi('sharedCart.patch', {
         action: 'patch',
         sessionId: this.data.sharedSessionId,
@@ -789,7 +789,8 @@ Page({
         }
       })
 
-    request.then(res => {
+    const previousPatch = this.sharedCartPatchPromise || Promise.resolve()
+    const pending = previousPatch.catch(() => {}).then(sendPatch).then(res => {
       const result = apiClient.isEnabled() ? (res || {}) : (res.result || {})
       if (result && Number.isFinite(Number(result.cartVersion))) {
         this.setData({
@@ -814,6 +815,8 @@ Page({
       this.startSharedCartFallback()
       wx.showToast({ title: '同步稍慢，正在重试', icon: 'none' })
     })
+    this.sharedCartPatchPromise = pending
+    return pending
   },
 
   startOrderLoadingAnimation() {
@@ -2432,6 +2435,7 @@ Page({
         orderType: 'dineIn',
         orderScene: 'dineIn',
         sharedSessionId: this.data.sharedSessionId || '',
+        sharedCartVersion: Number(this.data.sharedCartVersion || 0),
         activeOrderSession: this.getActiveOrderSessionForSettle(),
         sharedOrderContext: this.data.sharedOrderRootId
           ? {

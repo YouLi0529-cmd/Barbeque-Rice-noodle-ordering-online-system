@@ -1001,7 +1001,7 @@ function createPrintService({ db, _, defaultTenantId }) {
        if (data.dishDisplayMode === 'cashier') {
          return formatCashierDishTable(dishes, data.dishTableWidth)
        }
-      return formatKitchenStyleDishes(dishes)
+      return formatKitchenStyleDishes(dishes, data.paperWidth)
     }
     if (key === 'totalPrice' && value !== undefined && value !== null && value !== '') {
       return data.compactMoney ? formatCompactMoney(value) : `\uffe5${Number(value || 0).toFixed(2)}`
@@ -1112,11 +1112,17 @@ function createPrintService({ db, _, defaultTenantId }) {
     return [header].concat(rows).join('\n')
   }
 
-  function formatKitchenStyleDishes(dishes = []) {
+  function formatKitchenStyleDishes(dishes = [], paperWidth = 80) {
+    const lineWidth = Number(paperWidth || 80) >= 76 ? 42 : 32
     return dishes.reduce((rows, item) => {
-      rows.push(`${item.dishName || item.name || ''} ${Number(item.count || 0)}份`)
+      const name = String(item.dishName || item.name || '')
+      const countText = `${Number(item.count || 0)}份`
+      const nameWidth = Math.max(4, lineWidth - ticketTextWidth(countText))
+      const nameLines = wrapTicketText(name, nameWidth)
+      rows.push(`${padTicketText(nameLines[0] || '', nameWidth)}${padTicketText(countText, lineWidth - nameWidth, 'right')}`)
+      nameLines.slice(1).forEach(nameLine => rows.push(nameLine))
       const note = String(item.remark || '').trim()
-      if (note) rows.push(`  ${note}`)
+      if (note) wrapTicketText(`  ${note}`, lineWidth).forEach(noteLine => rows.push(noteLine))
       return rows
     }, []).join('\n')
   }
@@ -1179,12 +1185,28 @@ function createPrintService({ db, _, defaultTenantId }) {
         lines.push({ kind: 'text', key: 'dishName', text: row, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
         nameLines.slice(1).forEach(nameLine => lines.push({ kind: 'text', key: 'dishName', text: nameLine, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' }))
       } else {
-        lines.push({ kind: 'text', key: 'dishName', text: `${name} ${count}份`, size: dishSize, align: field.align || 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
+        const lineWidth = Number(data.paperWidth || 80) >= 76 ? 42 : 32
+        const countText = `${count}份`
+        const nameWidth = Math.max(4, lineWidth - ticketTextWidth(countText))
+        const nameLines = wrapTicketText(name, nameWidth)
+        const row = `${padTicketText(nameLines[0] || '', nameWidth)}${padTicketText(countText, lineWidth - nameWidth, 'right')}`
+        lines.push({ kind: 'text', key: 'dishName', text: row, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' })
+        nameLines.slice(1).forEach(nameLine => lines.push({ kind: 'text', key: 'dishName', text: nameLine, size: dishSize, align: 'left', bold: bool(field.bold), inverse: bool(field.inverse), color: field.color === 'red' ? 'red' : 'black' }))
       }
       const specification = String(item.specification || item.spec || item.skuName || '').trim()
       const remark = String(item.remark || item.note || '').trim()
-      if (specification) lines.push({ kind: 'text', key: 'dishSpecification', text: `  \u89c4\u683c\uff1a${specification}`, size: specificationSize, align: 'left', bold: false, inverse: false, color: 'black' })
-      if (remark) lines.push({ kind: 'text', key: 'dishRemark', text: `  \u5907\u6ce8\uff1a${remark}`, size: remarkSize, align: 'left', bold: false, inverse: false, color: 'black' })
+      if (specification) {
+        const lineWidth = Number(data.paperWidth || 80) >= 76 ? 42 : 32
+        wrapTicketText(`  \u89c4\u683c\uff1a${specification}`, lineWidth).forEach(textValue => {
+          lines.push({ kind: 'text', key: 'dishSpecification', text: textValue, size: specificationSize, align: 'left', bold: false, inverse: false, color: 'black' })
+        })
+      }
+      if (remark) {
+        const lineWidth = Number(data.paperWidth || 80) >= 76 ? 42 : 32
+        wrapTicketText(`  \u5907\u6ce8\uff1a${remark}`, lineWidth).forEach(textValue => {
+          lines.push({ kind: 'text', key: 'dishRemark', text: textValue, size: remarkSize, align: 'left', bold: false, inverse: false, color: 'black' })
+        })
+      }
     })
     return lines
   }
@@ -1339,8 +1361,14 @@ function createPrintService({ db, _, defaultTenantId }) {
   function kitchenTableNumberText(order = {}) {
     const camping = order.orderScene === 'camping' || order.orderType === 'camping'
     if (camping) return '\u684c\u53f7\uff1a\u6237\u5916\u81ea\u53d6'
-    const tableNumber = text(order.tableNumber)
+    const tableNumber = formatTicketTableNumber(order.tableNumber)
     return tableNumber ? `\u684c\u53f7\uff1a${tableNumber}` : ''
+  }
+
+  function formatTicketTableNumber(value) {
+    const tableNumber = text(value)
+    const skyMatch = tableNumber.match(/^(?:T|SKY|TIAN|TL|\u5929\u697c|\u5929)[-\s_]?0*(\d+)$/i)
+    return skyMatch ? `\u5929${Number(skyMatch[1])}` : tableNumber
   }
 
   function kitchenPeopleCountText(order = {}) {
@@ -1522,12 +1550,12 @@ function createPrintService({ db, _, defaultTenantId }) {
       ticketName: template.name,
       orderId: first._id || '',
       orderNumber: first.rootOrderId || first._id || '',
-      tableNumber: first.tableNumber || '',
+      tableNumber: formatTicketTableNumber(first.tableNumber),
       template,
       ticketData: {
         title: template.name,
         shopName: first.shopName || '',
-        tableNumber: first.tableNumber ? `桌号：${first.tableNumber}` : '',
+        tableNumber: first.tableNumber ? `桌号：${formatTicketTableNumber(first.tableNumber)}` : '',
         orderNumber: first.rootOrderId || first._id || '',
         peopleCount: peopleCount ? `人数：${peopleCount}人` : '',
         orderType: first.orderScene === 'camping' ? '类型：露营' : '类型：堂食',

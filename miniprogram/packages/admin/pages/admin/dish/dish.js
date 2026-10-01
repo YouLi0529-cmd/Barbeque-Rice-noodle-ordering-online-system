@@ -63,6 +63,7 @@ const UI = {
   inputDishName: '\u8bf7\u8f93\u5165\u83dc\u54c1\u540d\u79f0',
   inputKitchenPrintName: '可选，不填时后厨小票使用原菜名',
   kitchenPrintNameTip: '仅后厨制作、加菜、催菜、退菜小票使用；顾客端与结账小票仍显示原菜名',
+  kitchenPrintNameSaveFailed: '后厨打印菜名未能验证保存，请更新云函数后重试',
   inputPrice: '\u8bf7\u8f93\u5165\u4ef7\u683c',
   inputUnit: '\u4f8b\u5982\uff1a\u4efd',
   inputDescription: '\u8bf7\u8f93\u5165\u63cf\u8ff0',
@@ -1614,6 +1615,10 @@ Page({
       const saveRes = await apiClient.call('admin.dish.save', { dish })
       const dishId = saveRes && saveRes.data && saveRes.data._id
       if (!dishId) throw new Error(UI.failed)
+      const savedKitchenPrintName = String(saveRes.data.kitchenPrintName || '').trim()
+      if (savedKitchenPrintName !== String(dish.kitchenPrintName || '').trim()) {
+        throw new Error(UI.kitchenPrintNameSaveFailed)
+      }
 
       await apiClient.call('admin.print.dishes.save', {
         dishIds: [dishId],
