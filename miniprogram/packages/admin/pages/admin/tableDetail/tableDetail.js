@@ -109,6 +109,13 @@ const UI = {
   directReduceInputPlaceholder: '\u8bf7\u8f93\u5165\u76f4\u51cf\u91d1\u989d',
   discountCancel: '\u53d6\u6d88',
   discountConfirm: '\u786e\u5b9a',
+  mixedPayment: '\u6df7\u5408\u6536\u6b3e',
+  mixedCash: '\u73b0\u91d1',
+  mixedOnline: '\u5fae\u4fe1/\u652f\u4ed8\u5b9d',
+  mixedPaymentDialogTitle: '\u8f93\u5165\u6536\u6b3e\u91d1\u989d',
+  mixedPaymentInputPlaceholder: '\u8bf7\u8f93\u5165\u91d1\u989d',
+  mixedPaymentAutoFill: '\u53e6\u4e00\u9879\u5c06\u81ea\u52a8\u8865\u8db3',
+  mixedPaymentInvalid: '\u6536\u6b3e\u91d1\u989d\u4e0d\u80fd\u5c0f\u4e8e 0 \u6216\u5927\u4e8e\u5e94\u6536',
   discountInvalid: '\u8bf7\u8f93\u5165 0-10 \u4e4b\u95f4\u7684\u6298\u6263',
   directReduceInvalid: '\u76f4\u51cf\u91d1\u989d\u4e0d\u80fd\u8d85\u8fc7\u6298\u540e\u91d1\u989d',
   editDishTitle: '\u4fee\u6539\u83dc\u54c1',
@@ -160,7 +167,8 @@ const DISCOUNT_OPTIONS = [
 
 const PAYMENT_OPTIONS = [
   { value: 'cash', label: '\u73b0\u91d1' },
-  { value: 'wechat_alipay', label: '\u5fae\u4fe1/\u652f\u4ed8\u5b9d' }
+  { value: 'wechat_alipay', label: '\u5fae\u4fe1/\u652f\u4ed8\u5b9d' },
+  { value: 'mixed', label: UI.mixedPayment }
 ]
 
 function decode(value) {
@@ -180,7 +188,7 @@ function getNumber(value, fallback = 0) {
 function formatPrice(price) {
   const value = getNumber(price)
   if (Number.isInteger(value)) return String(value)
-  return value.toFixed(1)
+  return value.toFixed(2)
 }
 
 function getDiningTime(scannedAt, finishedAt = 0) {
@@ -283,7 +291,7 @@ function getOptionLabel(options, value) {
   return match ? match.label : ''
 }
 
-function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue = '', directReduceValue = '') {
+function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue = '', directReduceValue = '', mixedPaymentChannel = 'cash', mixedPaymentAmount = '0') {
   const total = getNumber(totalPrice)
   const hasDiscountInput = discountValue !== '' && discountValue != null
   const discountNumber = getNumber(discountValue)
@@ -304,6 +312,17 @@ function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue 
   const discountTextParts = []
   if (hasRateDiscount) discountTextParts.push(formatPrice(discountNumber) + '\u6298')
   if (hasDirectReduction) discountTextParts.push('\u76f4\u51cf\uffe5' + formatPrice(directReductionNumber))
+  const isMixed = paymentMethod === 'mixed'
+  const editableMixedAmount = Number(mixedPaymentAmount)
+  const safeMixedAmount = Number.isFinite(editableMixedAmount)
+    ? Math.max(0, Math.min(receivable, editableMixedAmount))
+    : 0
+  const cashReceived = isMixed
+    ? (mixedPaymentChannel === 'online' ? receivable - safeMixedAmount : safeMixedAmount)
+    : (paymentMethod === 'cash' ? receivable : 0)
+  const onlineReceived = isMixed
+    ? (mixedPaymentChannel === 'online' ? safeMixedAmount : receivable - safeMixedAmount)
+    : (paymentMethod === 'wechat_alipay' ? receivable : 0)
 
   return {
     totalText: formatPrice(total),
@@ -311,7 +330,11 @@ function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue 
     discountText: discountTextParts.join(' + '),
     discountPriceText: formatPrice(receivable),
     paymentLabel: getOptionLabel(PAYMENT_OPTIONS, paymentMethod) || getOptionLabel(PAYMENT_OPTIONS, 'wechat_alipay'),
-    receivedText: formatPrice(received)
+    receivedText: formatPrice(received),
+    isMixed,
+    cashReceivedText: formatPrice(cashReceived),
+    onlineReceivedText: formatPrice(onlineReceived),
+    mixedOtherText: formatPrice(mixedPaymentChannel === 'online' ? cashReceived : onlineReceived)
   }
 }
 
@@ -399,7 +422,12 @@ Page({
     selectedMergeTableCount: 0,
     peopleInput: '',
     paymentMethod: 'wechat_alipay',
-    paySummary: buildPaySummary(0, 'wechat_alipay', '', '', ''),
+    mixedPaymentChannel: 'cash',
+    mixedPaymentAmount: '0',
+    mixedPaymentEditingChannel: '',
+    mixedPaymentInput: '',
+    showMixedPaymentDialog: false,
+    paySummary: buildPaySummary(0, 'wechat_alipay', '', '', '', 'cash', '0'),
     loading: false,
     sendingKitchen: false,
     retryingKitchen: false,
@@ -428,7 +456,7 @@ Page({
       billGroups: [],
       itemCount: 0,
       totalPriceText: table.priceText,
-      paySummary: buildPaySummary(table.totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, this.data.directReduceValue)
+      paySummary: buildPaySummary(table.totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
     })
     this.loadDetail()
   },
@@ -505,7 +533,7 @@ Page({
         selectedDishCount: 0,
         selectedDishText: UI.noSelectedDish,
         selectedGroupId: '',
-        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, this.data.directReduceValue)
+        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
       })
     } catch (err) {
       console.error('load admin table detail failed', err)
@@ -1100,7 +1128,7 @@ Page({
         directReduceValue: '',
         discountDialogType: '',
         showDiscountDialog: false,
-        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, '')
+        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, '', this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
       })
       return
     }
@@ -1111,7 +1139,7 @@ Page({
         discountValue: '',
         discountDialogType: '',
         showDiscountDialog: false,
-        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, '', '', this.data.directReduceValue)
+        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, '', '', this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
       })
       return
     }
@@ -1180,14 +1208,67 @@ Page({
       directReduceValue: nextDirectReduceValue,
       discountDialogType: '',
       showDiscountDialog: false,
-      paySummary: buildPaySummary(this.data.table.totalPrice, this.data.paymentMethod, nextDiscountType, nextDiscountValue, nextDirectReduceValue)
+        paySummary: buildPaySummary(this.data.table.totalPrice, this.data.paymentMethod, nextDiscountType, nextDiscountValue, nextDirectReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
     })
   },
   selectPayment(event) {
     const value = event.currentTarget.dataset.value || 'wechat_alipay'
     this.setData({
       paymentMethod: value,
-      paySummary: buildPaySummary(this.data.table.totalPrice, value, this.data.discountType, this.data.discountValue, this.data.directReduceValue)
+      paySummary: buildPaySummary(this.data.table.totalPrice, value, this.data.discountType, this.data.discountValue, this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
+    })
+  },
+
+  openMixedPaymentDialog(event) {
+    if (this.data.paymentMethod !== 'mixed') return
+    const channel = event.currentTarget.dataset.channel === 'online' ? 'online' : 'cash'
+    const paySummary = this.data.paySummary || {}
+    const input = channel === 'cash' ? paySummary.cashReceivedText : paySummary.onlineReceivedText
+    this.setData({
+      mixedPaymentEditingChannel: channel,
+      mixedPaymentInput: input,
+      showMixedPaymentDialog: true
+    })
+  },
+
+  closeMixedPaymentDialog() {
+    this.setData({
+      showMixedPaymentDialog: false,
+      mixedPaymentEditingChannel: '',
+      mixedPaymentInput: ''
+    })
+  },
+
+  stopMixedPaymentDialogTap() {},
+
+  onMixedPaymentInput(event) {
+    this.setData({ mixedPaymentInput: event.detail.value })
+  },
+
+  confirmMixedPaymentDialog() {
+    const amount = Number(this.data.mixedPaymentInput)
+    const receivable = getNumber(this.data.paySummary && this.data.paySummary.receivableText)
+    if (!Number.isFinite(amount) || amount < 0 || amount > receivable) {
+      wx.showToast({ title: UI.mixedPaymentInvalid, icon: 'none' })
+      return
+    }
+    const channel = this.data.mixedPaymentEditingChannel === 'online' ? 'online' : 'cash'
+    const normalizedAmount = String(Math.round(amount * 100) / 100)
+    this.setData({
+      mixedPaymentChannel: channel,
+      mixedPaymentAmount: normalizedAmount,
+      mixedPaymentEditingChannel: '',
+      mixedPaymentInput: '',
+      showMixedPaymentDialog: false,
+      paySummary: buildPaySummary(
+        this.data.table.totalPrice,
+        this.data.paymentMethod,
+        this.data.discountType,
+        this.data.discountValue,
+        this.data.directReduceValue,
+        channel,
+        normalizedAmount
+      )
     })
   },
 
@@ -1336,6 +1417,11 @@ Page({
       return
     }
 
+    if (selectedItems.length > 1) {
+      this.confirmBatchRefundDishes(selectedItems)
+      return
+    }
+
     const selectedDetails = selectedItems
       .map(item => this.getDishByRecord(item))
       .filter(Boolean)
@@ -1375,6 +1461,73 @@ Page({
       refundMaxCount,
       refundQuantity: '1'
     })
+  },
+
+  async confirmBatchRefundDishes(selectedItems) {
+    if (this.data.submittingRefund) return
+
+    const selectedDetails = selectedItems
+      .map(record => ({ record, detail: this.getDishByRecord(record) }))
+      .filter(item => item.detail && item.detail.group && item.detail.dish)
+    const items = selectedDetails
+      .filter(item => item.detail.group.isPaid !== true)
+      .map(item => ({
+        orderId: item.record.groupId,
+        dishIndex: item.record.dishIndex,
+        count: Math.floor(Number(item.detail.dish.count || 0))
+      }))
+      .filter(item => item.orderId && Number.isInteger(item.dishIndex) && item.dishIndex >= 0 && item.count > 0)
+
+    if (items.length !== selectedItems.length) {
+      wx.showToast({
+        title: UI.refundUnavailable,
+        icon: 'none'
+      })
+      return
+    }
+
+    const confirmed = await new Promise(resolve => {
+      wx.showModal({
+        title: UI.refundConfirmTitle,
+        content: UI.refundConfirmContent,
+        confirmText: UI.refundDish,
+        success: res => resolve(!!res.confirm),
+        fail: () => resolve(false)
+      })
+    })
+    if (!confirmed) return
+
+    try {
+      this.setData({ submittingRefund: true })
+      await apiClient.call('admin.table.refundDishes', { items })
+      wx.showToast({
+        title: UI.refundSuccess,
+        icon: 'success'
+      })
+      this.refundCandidates = []
+      this.setData({
+        submittingRefund: false,
+        showRefundDialog: false,
+        refundDishTitle: '',
+        refundMaxCount: 0,
+        refundQuantity: '1',
+        selectedDishRowId: '',
+        selectedDishName: '',
+        selectedDishIndex: -1,
+        selectedDishMap: {},
+        selectedDishCount: 0,
+        selectedDishText: UI.noSelectedDish,
+        selectedGroupId: ''
+      })
+      await this.loadDetail(true)
+    } catch (err) {
+      console.error('refund multiple selected dishes failed', err)
+      this.setData({ submittingRefund: false })
+      wx.showToast({
+        title: err.message || UI.refundUnavailable,
+        icon: 'none'
+      })
+    }
   },
 
   closeRefundDishDialog() {
@@ -1715,7 +1868,9 @@ Page({
         paymentMethod: this.data.paymentMethod,
         discountType: this.data.discountType,
         discountValue: this.data.discountValue,
-        directReduceValue: this.data.directReduceValue
+        directReduceValue: this.data.directReduceValue,
+        mixedPaymentChannel: this.data.mixedPaymentChannel,
+        mixedPaymentAmount: this.data.mixedPaymentAmount
       })
       await this.loadDetail(true)
       const receipt = checkoutResult && checkoutResult.data || {}
@@ -1754,7 +1909,9 @@ Page({
         paymentMethod: this.data.paymentMethod,
         discountType: this.data.discountType,
         discountValue: this.data.discountValue,
-        directReduceValue: this.data.directReduceValue
+        directReduceValue: this.data.directReduceValue,
+        mixedPaymentChannel: this.data.mixedPaymentChannel,
+        mixedPaymentAmount: this.data.mixedPaymentAmount
       })
       const skipped = !!(res && res.data && res.data.skipped)
       wx.showToast({

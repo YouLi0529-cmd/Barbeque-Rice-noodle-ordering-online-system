@@ -350,7 +350,7 @@ Page({
       console.error('load print management failed', error)
       const message = error.message || ''
       const backendError = message.indexOf('unknown action') >= 0
-        ? '云端 tenantApi 还是旧版本，尚未包含打印管理接口。请在微信开发者工具上传并部署 tenantApi 后重新编译。'
+        ? '云端 tenantApi 还是旧版本，尚未包含打印管理接口。请在开发者工具上传并部署 tenantApi 后重新编译。'
         : `打印管理数据暂时无法加载：${message || '请检查云函数和网络连接。'}`
       this.setData({ backendError })
     } finally {

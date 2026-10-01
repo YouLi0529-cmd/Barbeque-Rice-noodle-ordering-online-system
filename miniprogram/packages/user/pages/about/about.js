@@ -43,6 +43,10 @@ Page({
   async confirmRevokeAuthorization() {
     if (this.data.revoking) return
     this.setData({ revoking: true })
+    wx.showLoading({
+      title: '正在撤销授权',
+      mask: true
+    })
 
     try {
       await apiClient.call('user.revokeAuthorization')
@@ -59,12 +63,14 @@ Page({
       app.globalData.userInfoReady = false
       app.globalData.userInfoPromise = null
 
+      wx.hideLoading()
       wx.exitMiniProgram({
         fail: () => {
           wx.reLaunch({ url: '/pages/covertest/covertest' })
         }
       })
     } catch (err) {
+      wx.hideLoading()
       console.error('revoke privacy authorization failed', err)
       this.setData({ revoking: false })
       const message = String(err && err.message || '')

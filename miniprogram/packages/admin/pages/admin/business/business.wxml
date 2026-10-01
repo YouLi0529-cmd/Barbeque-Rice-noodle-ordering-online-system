@@ -19,6 +19,20 @@
           </view>
         </view>
         <view class="revenue-value"><text class="money-symbol">{{ui.currency}}</text>{{revenueText}}</view>
+        <view class="revenue-breakdown">
+          <view class="revenue-breakdown-item">
+            <text class="revenue-breakdown-label">{{ui.cashRevenue}}</text>
+            <text class="revenue-breakdown-amount">{{ui.currency}}{{cashRevenueText}}</text>
+          </view>
+          <view class="revenue-breakdown-item">
+            <text class="revenue-breakdown-label">{{ui.onlineRevenue}}</text>
+            <text class="revenue-breakdown-amount">{{ui.currency}}{{onlineRevenueText}}</text>
+          </view>
+          <view class="revenue-breakdown-item" wx:if="{{hasOtherRevenue}}">
+            <text class="revenue-breakdown-label">{{ui.otherRevenue}}</text>
+            <text class="revenue-breakdown-amount">{{ui.currency}}{{otherRevenueText}}</text>
+          </view>
+        </view>
       </view>
 
       <view class="summary-card table-card">

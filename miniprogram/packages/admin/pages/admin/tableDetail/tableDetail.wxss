@@ -590,6 +590,36 @@ page {
   border-bottom: 0;
 }
 
+.summary-mixed-row {
+  min-height: 34rpx;
+  height: auto;
+  padding: 4rpx 0;
+}
+
+.mixed-payment-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4rpx;
+  min-width: 154rpx;
+}
+
+.mixed-payment-value {
+  min-width: 0;
+  height: 24rpx;
+  padding: 0 5rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4rpx;
+  border: 1rpx solid rgba(177, 91, 24, 0.2);
+  border-radius: 5rpx;
+  color: #6B4B34;
+  background: #FFFFFF;
+  font-size: 8rpx;
+  font-weight: 900;
+  box-sizing: border-box;
+}
+
 .strong-row {
   color: #2C1A12;
   font-size: 11rpx;
@@ -653,6 +683,7 @@ page {
   background: #4B9D64;
 }
 .discount-mask,
+.mixed-payment-mask,
 .people-mask,
 .edit-dish-mask,
 .refund-dish-mask,
@@ -670,6 +701,7 @@ page {
 }
 
 .discount-dialog,
+.mixed-payment-dialog,
 .people-dialog {
   width: 260rpx;
   padding: 18rpx;
@@ -698,6 +730,7 @@ page {
 }
 
 .discount-title,
+.mixed-payment-title,
 .people-title {
   color: #2C1A12;
   font-size: 15rpx;
@@ -749,6 +782,14 @@ page {
   text-align: center;
 }
 
+.mixed-payment-hint {
+  margin-top: 6rpx;
+  color: rgba(58, 36, 24, 0.52);
+  font-size: 8rpx;
+  font-weight: 800;
+  text-align: center;
+}
+
 .edit-dish-form {
   margin-top: 10rpx;
 }
@@ -765,6 +806,7 @@ page {
 }
 
 .discount-input,
+.mixed-payment-input,
 .people-input {
   height: 38rpx;
   margin-top: 14rpx;
@@ -801,6 +843,7 @@ page {
 }
 
 .discount-actions,
+.mixed-payment-actions,
 .people-actions {
   margin-top: 14rpx;
   display: grid;
@@ -823,6 +866,7 @@ page {
 }
 
 .discount-action,
+.mixed-payment-action,
 .people-action {
   height: 34rpx;
   display: flex;
@@ -854,6 +898,7 @@ page {
 }
 
 .discount-action.cancel,
+.mixed-payment-action.cancel,
 .people-action.cancel {
   color: #6B4B34;
   background: #FFF7EC;
@@ -870,6 +915,7 @@ page {
 }
 
 .discount-action.confirm,
+.mixed-payment-action.confirm,
 .people-action.confirm {
   color: #FFF7EC;
   background: #B15B18;

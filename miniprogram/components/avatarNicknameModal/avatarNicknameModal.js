@@ -101,7 +101,7 @@ Component({
         const errMsg = String(e && e.detail && e.detail.errMsg || '')
         console.error('getPhoneNumber did not return authorization code', e && e.detail)
         wx.showToast({
-          title: errMsg.includes('deny') ? '请允许授权手机号' : '微信未返回手机号',
+          title: errMsg.includes('deny') ? '请允许授权手机号' : '未返回手机号',
           icon: 'none'
         })
         return

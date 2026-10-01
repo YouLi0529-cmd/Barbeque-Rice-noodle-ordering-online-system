@@ -101,7 +101,7 @@ Page({
           return
         }
         wx.showToast({
-          title: '微信未返回昵称，请填写',
+          title: '未返回昵称，请填写',
           icon: 'none'
         })
         focusNicknameInput()

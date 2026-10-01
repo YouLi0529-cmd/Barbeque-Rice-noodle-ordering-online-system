@@ -19,12 +19,12 @@
       <view class="account-row account-name-row">
         <view class="account-label">账号名称</view>
         <view class="account-name-editor">
-          <input class="account-name-input" type="nickname" value="{{nickNameInput}}" maxlength="20" placeholder="请输入或选择微信昵称" bindinput="onNicknameInput" />
-          <view class="wechat-name-btn" hover-class="wechat-name-btn-hover" bindtap="chooseWechatNickname">使用微信昵称</view>
+          <input class="account-name-input" type="nickname" value="{{nickNameInput}}" maxlength="20" placeholder="请输入或选择昵称" bindinput="onNicknameInput" />
+          <view class="wechat-name-btn" hover-class="wechat-name-btn-hover" bindtap="chooseWechatNickname">使用昵称</view>
         </view>
       </view>
       <view class="account-row">
-        <view class="account-label">微信手机号</view>
+        <view class="account-label">手机号</view>
         <view class="account-value">{{phoneDisplay}}</view>
       </view>
       <picker class="account-row birthday-row" mode="date" value="{{birthDate}}" start="1900-01-01" end="{{maxBirthDate}}" bindchange="onBirthDateChange">

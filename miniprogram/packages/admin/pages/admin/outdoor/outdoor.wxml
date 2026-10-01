@@ -175,7 +175,20 @@
           </view>
           <text>{{ui.moneySymbol}}{{paySummary.receivableText}}</text>
         </view>
-        <view class="summary-row">
+        <view class="summary-row summary-mixed-row" wx:if="{{paySummary.isMixed}}">
+          <text>{{ui.actualReceived}}</text>
+          <view class="mixed-payment-values">
+            <view class="mixed-payment-value" data-channel="cash" bindtap="openMixedPaymentDialog">
+              <text>{{ui.mixedCash}}</text>
+              <text>{{ui.moneySymbol}}{{paySummary.cashReceivedText}}</text>
+            </view>
+            <view class="mixed-payment-value" data-channel="online" bindtap="openMixedPaymentDialog">
+              <text>{{ui.mixedOnline}}</text>
+              <text>{{ui.moneySymbol}}{{paySummary.onlineReceivedText}}</text>
+            </view>
+          </view>
+        </view>
+        <view class="summary-row" wx:else>
           <text>{{paySummary.paymentLabel}}</text>
           <text>{{ui.actualReceived}}{{ui.moneySymbol}}{{paySummary.receivedText}}</text>
         </view>
@@ -210,6 +223,24 @@
       <view class="discount-actions">
         <view class="discount-action cancel" bindtap="closeDiscountDialog">{{ui.discountCancel}}</view>
         <view class="discount-action confirm" bindtap="confirmDiscountDialog">{{ui.discountConfirm}}</view>
+      </view>
+    </view>
+  </view>
+  <view class="mixed-payment-mask" wx:if="{{showMixedPaymentDialog}}" catchtap="closeMixedPaymentDialog">
+    <view class="mixed-payment-dialog" catchtap="stopMixedPaymentDialogTap">
+      <view class="mixed-payment-title">{{mixedPaymentEditingChannel === 'online' ? ui.mixedOnline : ui.mixedCash}}</view>
+      <input
+        class="mixed-payment-input"
+        type="digit"
+        value="{{mixedPaymentInput}}"
+        placeholder="{{ui.mixedPaymentInputPlaceholder}}"
+        focus="{{showMixedPaymentDialog}}"
+        bindinput="onMixedPaymentInput"
+      />
+      <view class="mixed-payment-hint">{{ui.mixedPaymentAutoFill}}{{ui.moneySymbol}}{{paySummary.mixedOtherText}}</view>
+      <view class="mixed-payment-actions">
+        <view class="mixed-payment-action cancel" bindtap="closeMixedPaymentDialog">{{ui.discountCancel}}</view>
+        <view class="mixed-payment-action confirm" bindtap="confirmMixedPaymentDialog">{{ui.discountConfirm}}</view>
       </view>
     </view>
   </view>

@@ -69,6 +69,7 @@ page {
 }
 
 .revenue-card {
+  min-height: 128rpx;
   background: #FFFDF8;
 }
 
@@ -136,7 +137,7 @@ page {
 }
 
 .revenue-value {
-  margin-top: 14rpx;
+  margin-top: 10rpx;
   color: #BE351D;
   font-size: 32rpx;
   line-height: 1;
@@ -146,6 +147,33 @@ page {
 .money-symbol {
   margin-right: 4rpx;
   font-size: 16rpx;
+}
+
+.revenue-breakdown {
+  margin-top: 10rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.revenue-breakdown-item {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 5rpx;
+  white-space: nowrap;
+}
+
+.revenue-breakdown-label {
+  color: #8A6B57;
+  font-size: 9rpx;
+  font-weight: 800;
+}
+
+.revenue-breakdown-amount {
+  color: #5B351B;
+  font-size: 12rpx;
+  font-weight: 900;
 }
 
 .table-value {

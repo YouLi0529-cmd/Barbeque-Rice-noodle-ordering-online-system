@@ -648,11 +648,15 @@ function createPrintService({ db, _, defaultTenantId }) {
     return ticketType === 'checkout' || ticketType === 'prebill'
   }
 
-  function cashierSummaryFields() {
-    return [
+  function cashierSummaryFields(ticketType = '') {
+    const fields = [
       { id: 'order-amount', key: 'orderAmount', label: '\u8ba2\u5355\u91d1\u989d', size: 'normal', align: 'left', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false },
       { id: 'receivable-amount', key: 'receivableAmount', label: '\u5e94\u4ed8\u91d1\u989d', size: 'large', align: 'left', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false }
     ]
+    if (ticketType === 'checkout') {
+      fields.push({ id: 'received-amount', key: 'receivedAmount', label: '\u5b9e\u6536\u91d1\u989d', size: 'normal', align: 'left', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false })
+    }
+    return fields
   }
 
   function cashierTemplateFields(definition) {
@@ -664,7 +668,7 @@ function createPrintService({ db, _, defaultTenantId }) {
       { id: 'dishes', key: 'dishes', label: '\u83dc\u54c1\u660e\u7ec6', size: 'normal', align: 'left', bold: false, inverse: false, color: 'black', dividerAfter: true, blankBefore: false }
     ]
     if (isSettlementTicket(definition.ticketType)) {
-      fields.push(...cashierSummaryFields())
+      fields.push(...cashierSummaryFields(definition.ticketType))
     } else {
       fields.push({ id: 'total', key: 'totalPrice', label: '\u8ba2\u5355\u4ef7\u683c', size: 'large', align: 'right', bold: true, inverse: false, color: 'black', dividerAfter: false, blankBefore: false })
     }
@@ -674,16 +678,16 @@ function createPrintService({ db, _, defaultTenantId }) {
   }
 
   async function migrateCashierSummaryTemplate(template) {
-    if (!template || !isSettlementTicket(template.ticketType) || Number(template.cashierSummaryVersion || 0) >= 5) {
+    if (!template || !isSettlementTicket(template.ticketType) || Number(template.cashierSummaryVersion || 0) >= 6) {
       return template
     }
 
     const source = Array.isArray(template.fields) ? template.fields.map(field => ({ ...field })) : []
     const existing = source.reduce((map, field) => ({ ...map, [field.key]: field }), {})
-    const summaryKeys = ['totalPrice', 'orderAmount', 'discountAmount', 'directReduceAmount', 'receivableAmount']
+    const summaryKeys = ['totalPrice', 'orderAmount', 'discountAmount', 'directReduceAmount', 'receivableAmount', 'receivedAmount']
     const fields = source.filter(field => !summaryKeys.includes(field.key) && field.key !== 'orderRemark')
     const legacyTotal = existing.orderAmount || existing.totalPrice
-    const defaults = cashierSummaryFields()
+    const defaults = cashierSummaryFields(template.ticketType)
     const summaries = defaults.map(field => {
       if (field.key === 'orderAmount' && legacyTotal) {
         return { ...legacyTotal, id: 'order-amount', key: 'orderAmount', label: '\u8ba2\u5355\u91d1\u989d', align: 'left' }
@@ -696,7 +700,7 @@ function createPrintService({ db, _, defaultTenantId }) {
       const printTimeIndex = fields.findIndex(field => field.key === 'orderTime')
       fields.splice(printTimeIndex >= 0 ? printTimeIndex + 1 : fields.length, 0, printTimeTemplateField())
     }
-    const patch = { cashierSummaryVersion: 5, updateTime: now() }
+    const patch = { cashierSummaryVersion: 6, updateTime: now() }
     if (JSON.stringify(source) !== JSON.stringify(fields)) patch.fields = fields
     await db.collection('receiptTemplates').doc(template._id).update({ data: patch })
     return { ...template, ...patch }
@@ -726,7 +730,7 @@ function createPrintService({ db, _, defaultTenantId }) {
         ? kitchenTemplateFields()
         : cashierTemplateFields(definition),
       kitchenHeaderVersion: kitchen ? 4 : 0,
-      cashierSummaryVersion: isSettlementTicket(definition.ticketType) ? 5 : 0,
+      cashierSummaryVersion: isSettlementTicket(definition.ticketType) ? 6 : 0,
       orderRemarkRemovedVersion: 1,
       version: 1,
       updateTime: now(),
@@ -1075,14 +1079,24 @@ function createPrintService({ db, _, defaultTenantId }) {
     const receivable = summary.receivable !== undefined
       ? number(summary.receivable, priceAfterRateDiscount - (hasDirectReduction ? directReduceValue : 0))
       : priceAfterRateDiscount - (hasDirectReduction ? directReduceValue : 0)
+    const paymentMethod = text(summary.paymentMethod)
+    const cashReceived = number(summary.cashReceived, paymentMethod === 'cash' ? receivable : 0, 0)
+    const onlineReceived = number(summary.onlineReceived, ['wechat_alipay', 'wechat', 'alipay', 'online'].includes(paymentMethod) ? receivable : 0, 0)
 
     const orderAmountLines = [formatCashierMoneyRow('\u8ba2\u5355\u91d1\u989d', orderAmount, paperWidth)]
     if (hasRateDiscount) orderAmountLines.push(formatCashierMoneyRow(`\u6253\u6298\uff08${discountValue}\u6298\uff09`, -discountAmount, paperWidth))
     if (hasDirectReduction) orderAmountLines.push(formatCashierMoneyRow('\u76f4\u51cf', -directReduceValue, paperWidth))
+    const receivedAmountLines = paymentMethod === 'mixed'
+      ? [
+        formatCashierMoneyRow('\u5b9e\u6536\u73b0\u91d1', cashReceived, paperWidth),
+        formatCashierMoneyRow('\u5b9e\u6536\u5fae\u4fe1/\u652f\u4ed8\u5b9d', onlineReceived, paperWidth)
+      ]
+      : [formatCashierMoneyRow(paymentMethod === 'cash' ? '\u5b9e\u6536\u73b0\u91d1' : '\u5b9e\u6536\u5fae\u4fe1/\u652f\u4ed8\u5b9d', receivable, paperWidth)]
 
     return {
       orderAmount: orderAmountLines.join('\n'),
-      receivableAmount: formatCashierMoneyRow('\u5e94\u4ed8\u91d1\u989d', Math.max(0, receivable), paperWidth)
+      receivableAmount: formatCashierMoneyRow('\u5e94\u4ed8\u91d1\u989d', Math.max(0, receivable), paperWidth),
+      receivedAmount: receivedAmountLines.join('\n')
     }
   }
 

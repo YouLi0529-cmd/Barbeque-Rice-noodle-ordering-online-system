@@ -43,6 +43,12 @@ const UI = {
   discountConfirm: '\u786e\u5b9a',
   discountInvalid: '\u8bf7\u8f93\u5165 0-10 \u4e4b\u95f4\u7684\u6298\u6263',
   directReduceInvalid: '\u76f4\u51cf\u91d1\u989d\u4e0d\u80fd\u8d85\u8fc7\u6298\u540e\u91d1\u989d',
+  mixedPayment: '\u6df7\u5408\u6536\u6b3e',
+  mixedCash: '\u73b0\u91d1',
+  mixedOnline: '\u5fae\u4fe1/\u652f\u4ed8\u5b9d',
+  mixedPaymentInputPlaceholder: '\u8bf7\u8f93\u5165\u91d1\u989d',
+  mixedPaymentAutoFill: '\u53e6\u4e00\u9879\u5c06\u81ea\u52a8\u8865\u8db3',
+  mixedPaymentInvalid: '\u6536\u6b3e\u91d1\u989d\u4e0d\u80fd\u5c0f\u4e8e 0 \u6216\u5927\u4e8e\u5e94\u6536',
   noSelectedGoods: '\u8bf7\u5148\u9009\u62e9\u83dc\u54c1',
   noSelectedKitchenGoods: '\u8bf7\u5148\u9009\u62e9\u8981\u53d1\u9001\u7684\u83dc\u54c1',
   sendKitchenConfirmTitle: '\u518d\u53d1\u9001',
@@ -100,7 +106,8 @@ const DISCOUNT_OPTIONS = [
 
 const PAYMENT_OPTIONS = [
   { value: 'cash', label: '\u73b0\u91d1' },
-  { value: 'wechat_alipay', label: '\u5fae\u4fe1/\u652f\u4ed8\u5b9d' }
+  { value: 'wechat_alipay', label: '\u5fae\u4fe1/\u652f\u4ed8\u5b9d' },
+  { value: 'mixed', label: UI.mixedPayment }
 ]
 
 function pad(value) {
@@ -415,7 +422,7 @@ function getOptionLabel(options, value) {
   return match ? match.label : ''
 }
 
-function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue = '', directReduceValue = '') {
+function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue = '', directReduceValue = '', mixedPaymentChannel = 'cash', mixedPaymentAmount = '0') {
   const total = getNumber(totalPrice)
   const hasDiscountInput = discountValue !== '' && discountValue != null
   const discountNumber = getNumber(discountValue)
@@ -435,6 +442,17 @@ function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue 
   const discountTextParts = []
   if (hasRateDiscount) discountTextParts.push(`${formatPrice(discountNumber)}\u6298`)
   if (hasDirectReduction) discountTextParts.push(`\u76f4\u51cf\uffe5${formatPrice(directReductionNumber)}`)
+  const isMixed = paymentMethod === 'mixed'
+  const editableMixedAmount = Number(mixedPaymentAmount)
+  const safeMixedAmount = Number.isFinite(editableMixedAmount)
+    ? Math.max(0, Math.min(receivable, editableMixedAmount))
+    : 0
+  const cashReceived = isMixed
+    ? (mixedPaymentChannel === 'online' ? receivable - safeMixedAmount : safeMixedAmount)
+    : (paymentMethod === 'cash' ? receivable : 0)
+  const onlineReceived = isMixed
+    ? (mixedPaymentChannel === 'online' ? safeMixedAmount : receivable - safeMixedAmount)
+    : (paymentMethod === 'wechat_alipay' ? receivable : 0)
 
   return {
     totalText: formatPrice(total),
@@ -442,7 +460,11 @@ function buildPaySummary(totalPrice, paymentMethod, discountType, discountValue 
     receivableText: formatPrice(receivable),
     discountText: discountTextParts.join(' + '),
     paymentLabel: getOptionLabel(PAYMENT_OPTIONS, paymentMethod) || getOptionLabel(PAYMENT_OPTIONS, 'wechat_alipay'),
-    receivedText: formatPrice(receivable)
+    receivedText: formatPrice(receivable),
+    isMixed,
+    cashReceivedText: formatPrice(cashReceived),
+    onlineReceivedText: formatPrice(onlineReceived),
+    mixedOtherText: formatPrice(mixedPaymentChannel === 'online' ? cashReceived : onlineReceived)
   }
 }
 
@@ -504,7 +526,12 @@ Page({
     discountDialogType: '',
     showDiscountDialog: false,
     paymentMethod: 'wechat_alipay',
-    paySummary: buildPaySummary(0, 'wechat_alipay', '', '', '')
+    mixedPaymentChannel: 'cash',
+    mixedPaymentAmount: '0',
+    mixedPaymentEditingChannel: '',
+    mixedPaymentInput: '',
+    showMixedPaymentDialog: false,
+    paySummary: buildPaySummary(0, 'wechat_alipay', '', '', '', 'cash', '0')
   },
 
   onLoad() {
@@ -674,7 +701,7 @@ Page({
         directReduceValue: '',
         discountDialogType: '',
         showDiscountDialog: false,
-        paySummary: buildPaySummary(0, this.data.paymentMethod, '', '', '')
+        paySummary: buildPaySummary(0, this.data.paymentMethod, '', '', '', this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
       })
       return
     }
@@ -687,7 +714,7 @@ Page({
     const goodsList = normalizeMergedGoods(order, selectedGoodsMap)
     const goodsCount = goodsList.reduce((sum, goods) => sum + goods.count, 0)
     const totalPrice = getOrderTotal(order)
-    const paySummary = buildPaySummary(totalPrice, this.data.paymentMethod, discountType, discountValue, directReduceValue)
+    const paySummary = buildPaySummary(totalPrice, this.data.paymentMethod, discountType, discountValue, directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
     const kitchenFailedDishes = getKitchenFailedDishes(order)
 
     this.setData({
@@ -905,7 +932,7 @@ Page({
       this.setData({
         directReduceValue: '',
         discountDialogType: '',
-        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, '')
+        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, '', this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
       })
       return
     }
@@ -915,7 +942,7 @@ Page({
         discountValue: '',
         discountInput: '',
         discountDialogType: '',
-        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, '', '', this.data.directReduceValue)
+        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, '', '', this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
       })
       return
     }
@@ -979,7 +1006,7 @@ Page({
       directReduceValue: nextDirectReduceValue,
       discountDialogType: '',
       showDiscountDialog: false,
-      paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, nextDiscountType, nextDiscountValue, nextDirectReduceValue)
+      paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, nextDiscountType, nextDiscountValue, nextDirectReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
     })
   },
 
@@ -989,7 +1016,61 @@ Page({
     const totalPrice = getOrderTotal(this.data.selectedOrder)
     this.setData({
       paymentMethod: value,
-      paySummary: buildPaySummary(totalPrice, value, this.data.discountType, this.data.discountValue, this.data.directReduceValue)
+      paySummary: buildPaySummary(totalPrice, value, this.data.discountType, this.data.discountValue, this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
+    })
+  },
+
+  openMixedPaymentDialog(e) {
+    if (this.data.paymentMethod !== 'mixed') return
+    const channel = e.currentTarget.dataset.channel === 'online' ? 'online' : 'cash'
+    const paySummary = this.data.paySummary || {}
+    const input = channel === 'cash' ? paySummary.cashReceivedText : paySummary.onlineReceivedText
+    this.setData({
+      mixedPaymentEditingChannel: channel,
+      mixedPaymentInput: input,
+      showMixedPaymentDialog: true
+    })
+  },
+
+  closeMixedPaymentDialog() {
+    this.setData({
+      showMixedPaymentDialog: false,
+      mixedPaymentEditingChannel: '',
+      mixedPaymentInput: ''
+    })
+  },
+
+  stopMixedPaymentDialogTap() {},
+
+  onMixedPaymentInput(e) {
+    this.setData({ mixedPaymentInput: e.detail.value })
+  },
+
+  confirmMixedPaymentDialog() {
+    const amount = Number(this.data.mixedPaymentInput)
+    const receivable = getNumber(this.data.paySummary && this.data.paySummary.receivable)
+    if (!Number.isFinite(amount) || amount < 0 || amount > receivable) {
+      wx.showToast({ title: UI.mixedPaymentInvalid, icon: 'none' })
+      return
+    }
+    const channel = this.data.mixedPaymentEditingChannel === 'online' ? 'online' : 'cash'
+    const normalizedAmount = String(Math.round(amount * 100) / 100)
+    const totalPrice = getOrderTotal(this.data.selectedOrder)
+    this.setData({
+      mixedPaymentChannel: channel,
+      mixedPaymentAmount: normalizedAmount,
+      mixedPaymentEditingChannel: '',
+      mixedPaymentInput: '',
+      showMixedPaymentDialog: false,
+      paySummary: buildPaySummary(
+        totalPrice,
+        this.data.paymentMethod,
+        this.data.discountType,
+        this.data.discountValue,
+        this.data.directReduceValue,
+        channel,
+        normalizedAmount
+      )
     })
   },
 
@@ -1136,7 +1217,11 @@ Page({
           discountType: this.data.discountType,
           discountValue: this.data.discountValue,
           directReduceValue: this.data.directReduceValue,
-          receivedAmount: this.data.paySummary.receivable
+          receivedAmount: this.data.paySummary.receivable,
+          checkoutReceivable: this.data.paySummary.receivable,
+          checkoutCashAmount: Number(this.data.paySummary.cashReceivedText),
+          checkoutOnlineAmount: Number(this.data.paySummary.onlineReceivedText),
+          mixedPaymentChannel: this.data.paymentMethod === 'mixed' ? this.data.mixedPaymentChannel : ''
         }, UI.checkoutSuccess)
       }
     })

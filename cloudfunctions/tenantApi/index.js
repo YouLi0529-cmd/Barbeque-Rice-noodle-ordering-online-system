@@ -1513,13 +1513,15 @@ async function revokeUserAuthorization(payload) {
     authorizationRevokedAt: db.serverDate(),
     updateTime: db.serverDate()
   }
-  await db.collection('user').doc(user._id).update({ data })
-  await updateAuthSession(payload, auth, {
-    userId: '',
-    userCode: '',
-    phoneNumber: '',
-    verifiedPhoneNumber: ''
-  })
+  await Promise.all([
+    db.collection('user').doc(user._id).update({ data }),
+    updateAuthSession(payload, auth, {
+      userId: '',
+      userCode: '',
+      phoneNumber: '',
+      verifiedPhoneNumber: ''
+    })
+  ])
 
   return {
     success: true,
@@ -2701,6 +2703,32 @@ function getBusinessStatsGroupRevenue(orders = []) {
     : afterDiscount
 }
 
+function getBusinessStatsPaymentBreakdown(orders = [], groupRevenue = 0) {
+  const source = orders.find(order => order.checkoutCashAmount !== undefined || order.checkoutOnlineAmount !== undefined) || {}
+  const cashAmount = Number(source.checkoutCashAmount)
+  const onlineAmount = Number(source.checkoutOnlineAmount)
+  const total = roundMoney(groupRevenue)
+
+  if (Number.isFinite(cashAmount) && cashAmount >= 0 && Number.isFinite(onlineAmount) && onlineAmount >= 0) {
+    const normalizedCash = roundMoney(cashAmount)
+    const normalizedOnline = roundMoney(onlineAmount)
+    const knownAmount = roundMoney(normalizedCash + normalizedOnline)
+    if (knownAmount <= total + 0.01) {
+      return {
+        cash: normalizedCash,
+        online: normalizedOnline,
+        other: roundMoney(Math.max(0, total - knownAmount))
+      }
+    }
+  }
+
+  const paymentMethod = String((orders.find(order => order.paymentMethod || order.payMethod) || {}).paymentMethod ||
+    (orders.find(order => order.payMethod) || {}).payMethod || '').trim()
+  if (paymentMethod === 'cash') return { cash: total, online: 0, other: 0 }
+  if (['wechat_alipay', 'wechat', 'alipay', 'online'].includes(paymentMethod)) return { cash: 0, online: total, other: 0 }
+  return { cash: 0, online: 0, other: total }
+}
+
 function buildBusinessStatsSnapshot(orders = [], range) {
   const startAt = getBusinessStatsRangeStart(range).getTime()
   const endAt = getBusinessStatsRangeEnd(range)
@@ -2726,6 +2754,11 @@ function buildBusinessStatsSnapshot(orders = [], range) {
   })
 
   const dishMap = {}
+  const paymentRevenue = {
+    cash: 0,
+    online: 0,
+    other: 0
+  }
   const groups = Object.keys(groupMap).map(key => groupMap[key])
   const revenue = roundMoney(groups.reduce((sum, group) => {
     group.orders.forEach(order => {
@@ -2749,7 +2782,12 @@ function buildBusinessStatsSnapshot(orders = [], range) {
         dishMap[dishKey].salesAmount = roundMoney(dishMap[dishKey].salesAmount + price * count)
       })
     })
-    return sum + getBusinessStatsGroupRevenue(group.orders)
+    const groupRevenue = getBusinessStatsGroupRevenue(group.orders)
+    const paymentBreakdown = getBusinessStatsPaymentBreakdown(group.orders, groupRevenue)
+    paymentRevenue.cash = roundMoney(paymentRevenue.cash + paymentBreakdown.cash)
+    paymentRevenue.online = roundMoney(paymentRevenue.online + paymentBreakdown.online)
+    paymentRevenue.other = roundMoney(paymentRevenue.other + paymentBreakdown.other)
+    return sum + groupRevenue
   }, 0))
 
   const dishes = Object.keys(dishMap)
@@ -2765,6 +2803,9 @@ function buildBusinessStatsSnapshot(orders = [], range) {
     startAt,
     endAt,
     revenue,
+    cashRevenue: paymentRevenue.cash,
+    onlineRevenue: paymentRevenue.online,
+    otherRevenue: paymentRevenue.other,
     settledTableCount: groups.filter(group => group.scene === 'dineIn').length,
     settledOutdoorOrderCount: groups.filter(group => group.scene === 'camping').length,
     dishes
@@ -2867,7 +2908,8 @@ function getSettlementPaymentText(orders = []) {
     credit: '挂账',
     wechat: '微信',
     alipay: '支付宝',
-    wechat_alipay: '微信/支付宝'
+    wechat_alipay: '微信/支付宝',
+    mixed: '现金 + 微信/支付宝'
   }
   return paymentTexts[paymentMethod] || paymentMethod || '未记录'
 }
@@ -4161,11 +4203,26 @@ function buildAdminCheckoutSummary(orders, payload) {
   const receivable = hasDirectReduction
     ? roundMoney(Math.max(0, priceAfterRateDiscount - directReduceValue))
     : priceAfterRateDiscount
+  const paymentMethod = String(payload.paymentMethod || 'wechat_alipay').trim() || 'wechat_alipay'
+  const mixedPaymentChannel = String(payload.mixedPaymentChannel || '').trim() === 'online' ? 'online' : 'cash'
+  const mixedPaymentAmount = Number(payload.mixedPaymentAmount)
+  const hasValidMixedPaymentAmount = Number.isFinite(mixedPaymentAmount) && mixedPaymentAmount >= 0 && mixedPaymentAmount <= receivable
+  const normalizedMixedPaymentAmount = hasValidMixedPaymentAmount ? roundMoney(mixedPaymentAmount) : 0
+  const cashReceived = paymentMethod === 'mixed'
+    ? (mixedPaymentChannel === 'online' ? roundMoney(receivable - normalizedMixedPaymentAmount) : normalizedMixedPaymentAmount)
+    : (paymentMethod === 'cash' ? receivable : 0)
+  const onlineReceived = paymentMethod === 'mixed'
+    ? (mixedPaymentChannel === 'online' ? normalizedMixedPaymentAmount : roundMoney(receivable - normalizedMixedPaymentAmount))
+    : (['wechat_alipay', 'wechat', 'alipay', 'online'].includes(paymentMethod) ? receivable : 0)
 
   return {
     totalPrice,
     receivable,
-    paymentMethod: String(payload.paymentMethod || 'wechat_alipay').trim() || 'wechat_alipay',
+    paymentMethod,
+    cashReceived,
+    onlineReceived,
+    mixedPaymentChannel: paymentMethod === 'mixed' ? mixedPaymentChannel : '',
+    paymentSplitValid: paymentMethod !== 'mixed' || hasValidMixedPaymentAmount,
     discountType: hasRateDiscount ? 'discount' : (hasDirectReduction ? 'direct_reduce' : ''),
     discountValue: hasRateDiscount ? discountValue : (hasDirectReduction ? directReduceValue : ''),
     directReduceValue: hasDirectReduction ? directReduceValue : ''
@@ -4185,6 +4242,13 @@ async function adminFinishTableCheckout(payload) {
   }
 
   const checkoutSummary = buildAdminCheckoutSummary(targetOrders, payload)
+  if (!checkoutSummary.paymentSplitValid) {
+    return {
+      success: false,
+      code: 'MIXED_PAYMENT_AMOUNT_INVALID',
+      message: 'mixed payment amount must be between 0 and receivable amount'
+    }
+  }
   const checkoutTime = new Date()
   const checkoutBatchId = `checkout_${checkoutTime.getTime()}_${targetOrders.map(order => order._id).sort().join('_')}`
 
@@ -4198,6 +4262,10 @@ async function adminFinishTableCheckout(payload) {
       paymentMethod: checkoutSummary.paymentMethod,
       checkoutTotalPrice: checkoutSummary.totalPrice,
       checkoutReceivable: checkoutSummary.receivable,
+      receivedAmount: checkoutSummary.receivable,
+      checkoutCashAmount: checkoutSummary.cashReceived,
+      checkoutOnlineAmount: checkoutSummary.onlineReceived,
+      mixedPaymentChannel: checkoutSummary.mixedPaymentChannel,
       checkoutDiscountType: checkoutSummary.discountType,
       checkoutDiscountValue: checkoutSummary.discountValue,
       checkoutDirectReduceValue: checkoutSummary.directReduceValue,
@@ -4250,6 +4318,8 @@ async function adminFinishTableCheckout(payload) {
       totalPrice: checkoutSummary.totalPrice,
       receivable: checkoutSummary.receivable,
       paymentMethod: checkoutSummary.paymentMethod,
+      cashReceived: checkoutSummary.cashReceived,
+      onlineReceived: checkoutSummary.onlineReceived,
       sharedCartRemoved: sharedCartClearResult.removed,
       sharedCartTables: sharedCartClearResult.tableNumbers,
       cashierPrintJobs,

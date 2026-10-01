@@ -213,8 +213,14 @@ Page({
       wx.hideLoading()
       wx.showToast({
         title: '预约已提交',
-        icon: 'success'
+        icon: 'success',
+        duration: 1000
       })
+      setTimeout(() => {
+        wx.reLaunch({
+          url: '/pages/covertest/covertest'
+        })
+      }, 1000)
     } catch (err) {
       wx.hideLoading()
       console.error('提交预约失败', err)
