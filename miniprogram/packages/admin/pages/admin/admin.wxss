@@ -23,6 +23,7 @@
   right: 0;
   bottom: 0;
   background: rgba(255, 247, 236, 0.15);
+  pointer-events: none;
 }
 
 .admin-watermark {

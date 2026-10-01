@@ -21,7 +21,7 @@ Component({
     },
     titleText: {
       type: String,
-      value: '授权微信手机号完成下单'
+      value: '授权手机号完成下单'
     },
     descText: {
       type: String,

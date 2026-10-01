@@ -2855,9 +2855,13 @@ function getSettlementTableText(orders = []) {
   return tableText ? `${tableText}号桌` : '未记录桌号'
 }
 
-function getSettlementPaymentText(orders = []) {
-  const paymentMethod = String((orders.find(order => order.paymentMethod || order.payMethod) || {}).paymentMethod ||
+function getSettlementPaymentMethod(orders = []) {
+  return String((orders.find(order => order.paymentMethod || order.payMethod) || {}).paymentMethod ||
     (orders.find(order => order.payMethod) || {}).payMethod || '').trim()
+}
+
+function getSettlementPaymentText(orders = []) {
+  const paymentMethod = getSettlementPaymentMethod(orders)
   const paymentTexts = {
     cash: '现金',
     credit: '挂账',
@@ -2927,6 +2931,7 @@ function buildSettlementRecord(key, orders = []) {
     peopleText: peopleCount > 0 ? `${peopleCount}人` : '未记录',
     totalPrice: getSettlementGroupTotal(orders),
     receivable,
+    paymentMethod: getSettlementPaymentMethod(orders),
     paymentText: getSettlementPaymentText(orders),
     discountText: discount.discountText,
     directReduceText: discount.directReduceText,
@@ -3093,17 +3098,26 @@ async function adminEditSettlement(payload) {
   if (!groupOrders || !groupOrders.length) {
     return { success: false, code: 'SETTLEMENT_RECORD_NOT_FOUND', message: 'settlement record not found' }
   }
+  const recordLevelOperations = ['deleteRecord', 'updatePaymentMethod', 'updateReceivable']
   const target = groupOrders.find(order => order._id === orderId)
-  if (operation !== 'deleteRecord' && (!target || !orderId)) {
+  if (!recordLevelOperations.includes(operation) && (!target || !orderId)) {
     return { success: false, code: 'SETTLEMENT_ORDER_NOT_IN_RECORD', message: 'order does not belong to this settlement record' }
   }
-  if (!['deleteRecord', 'deleteOrder', 'deleteDish', 'addDish'].includes(operation)) {
+  if (!['deleteRecord', 'deleteOrder', 'deleteDish', 'addDish', 'updatePaymentMethod', 'updateReceivable'].includes(operation)) {
     return { success: false, code: 'SETTLEMENT_EDIT_OPERATION_INVALID', message: 'unsupported settlement edit operation' }
   }
   const dishId = String(payload.dishId || '').trim()
   const count = Number(payload.count)
   if (operation === 'addDish' && (!dishId || !Number.isInteger(count) || count < 1 || count > 99)) {
     return { success: false, code: 'SETTLEMENT_DISH_INVALID', message: 'menu dish and quantity are required' }
+  }
+  const paymentMethod = String(payload.paymentMethod || '').trim()
+  if (operation === 'updatePaymentMethod' && !['cash', 'credit', 'wechat_alipay'].includes(paymentMethod)) {
+    return { success: false, code: 'SETTLEMENT_PAYMENT_METHOD_INVALID', message: 'payment method is invalid' }
+  }
+  const receivedAmount = Number(payload.receivedAmount)
+  if (operation === 'updateReceivable' && (!Number.isFinite(receivedAmount) || receivedAmount < 0 || receivedAmount > 1000000)) {
+    return { success: false, code: 'SETTLEMENT_RECEIVABLE_INVALID', message: 'received amount is invalid' }
   }
 
   return db.runTransaction(async transaction => {
@@ -3120,6 +3134,27 @@ async function adminEditSettlement(payload) {
     if (operation === 'deleteRecord') {
       for (const order of currentOrders) await transaction.collection('order').doc(order._id).remove()
       return { success: true, data: { deletedOrders: currentOrders.length } }
+    }
+    if (operation === 'updatePaymentMethod') {
+      for (const order of currentOrders) {
+        await transaction.collection('order').doc(order._id).update({
+          data: { paymentMethod, payMethod: paymentMethod, updateTime: db.serverDate() }
+        })
+      }
+      return { success: true, data: { paymentMethod } }
+    }
+    if (operation === 'updateReceivable') {
+      const normalizedReceivedAmount = roundMoney(receivedAmount)
+      for (const order of currentOrders) {
+        await transaction.collection('order').doc(order._id).update({
+          data: {
+            checkoutReceivable: normalizedReceivedAmount,
+            receivedAmount: normalizedReceivedAmount,
+            updateTime: db.serverDate()
+          }
+        })
+      }
+      return { success: true, data: { receivable: normalizedReceivedAmount } }
     }
     const currentTarget = currentOrders.find(order => order._id === orderId)
     if (!currentTarget) return { success: false, code: 'SETTLEMENT_ORDER_NOT_IN_RECORD', message: 'order does not belong to this settlement record' }

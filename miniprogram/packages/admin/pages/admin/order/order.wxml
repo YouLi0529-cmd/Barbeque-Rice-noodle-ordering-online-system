@@ -51,7 +51,24 @@
           </view>
           <view class="detail-meta-row"><text>{{ui.settledAt}}</text><text>{{detail.paidTimeText}}</text></view>
           <view class="detail-meta-row"><text>{{ui.people}}</text><text>{{detail.peopleText}}</text></view>
-          <view class="detail-meta-row"><text>{{ui.payment}}</text><text>{{detail.paymentText}}</text></view>
+          <view class="detail-meta-row editable-meta payment-selector" bindtap="togglePaymentPicker">
+            <text>{{ui.payment}}</text>
+            <view class="editable-meta-value">
+              <text>{{detail.paymentText}}</text>
+              <text class="editable-meta-mark">{{ui.edit}}</text>
+              <text class="payment-picker-arrow {{showPaymentPicker ? 'open' : ''}}">v</text>
+            </view>
+            <view class="settlement-payment-dropdown" wx:if="{{showPaymentPicker}}" catchtap="stopSettlementPickerTap">
+              <view
+                wx:for="{{paymentOptions}}"
+                wx:key="value"
+                class="settlement-payment-option {{item.value === detail.paymentMethod ? 'selected' : ''}}"
+                data-value="{{item.value}}"
+                catchtap="selectSettlementPayment">
+                {{item.label}}
+              </view>
+            </view>
+          </view>
           <view class="settlement-edit-actions"><view class="edit-action-button danger" bindtap="deleteSettlementRecord">永久删除整笔结算</view></view>
         </view>
 
@@ -59,7 +76,10 @@
           <view class="bill-row"><text>{{ui.total}}</text><text>¥{{detail.totalText}}</text></view>
           <view class="bill-row" wx:if="{{detail.discountText}}"><text>{{ui.discount}}</text><text>{{detail.discountText}}</text></view>
           <view class="bill-row" wx:if="{{detail.directReduceText}}"><text>{{ui.directReduce}}</text><text>-¥{{detail.directReduceText}}</text></view>
-          <view class="bill-row receivable"><text>{{ui.receivable}}</text><text>¥{{detail.receivableText}}</text></view>
+          <view class="bill-row receivable editable-bill-row" bindtap="openSettlementAmountModal">
+            <text>{{ui.receivable}}</text>
+            <view class="editable-bill-value"><text>¥{{detail.receivableText}}</text><text class="editable-meta-mark">{{ui.edit}}</text></view>
+          </view>
         </view>
 
         <view class="order-group" wx:for="{{detail.orderGroups}}" wx:key="id">
@@ -95,5 +115,16 @@
   </view>
 
   <view class="settlement-error" wx:if="{{loadError}}">{{loadError}}</view>
+  <view class="settlement-modal-mask" wx:if="{{showAmountModal}}" catchtap="closeSettlementAmountModal">
+    <view class="settlement-amount-modal" catchtap="stopSettlementAmountModalTap">
+      <view class="settlement-amount-title">{{ui.editReceivable}}</view>
+      <view class="settlement-amount-hint">{{ui.amountHint}}</view>
+      <input class="settlement-amount-input" type="digit" value="{{amountInput}}" focus="{{showAmountModal}}" bindinput="onSettlementAmountInput" bindconfirm="saveSettlementAmount" />
+      <view class="settlement-amount-actions">
+        <view class="settlement-modal-button cancel" bindtap="closeSettlementAmountModal">{{ui.cancel}}</view>
+        <view class="settlement-modal-button confirm" bindtap="saveSettlementAmount">{{ui.confirm}}</view>
+      </view>
+    </view>
+  </view>
   <admin-info-center id="admin-info-center"></admin-info-center>
 </view>

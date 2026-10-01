@@ -215,11 +215,13 @@ Page({
 
     if (!password) {
       this.setData({ authRequiredTip: PASSWORD_REQUIRED_TIP })
+      wx.showToast({ title: PASSWORD_REQUIRED_TIP, icon: 'none' })
       return
     }
 
     if (password.length < 6) {
       this.setData({ authRequiredTip: PASSWORD_LENGTH_TIP })
+      wx.showToast({ title: PASSWORD_LENGTH_TIP, icon: 'none' })
       return
     }
 
@@ -250,9 +252,13 @@ Page({
     } catch (err) {
       wx.hideLoading()
       console.error('admin auth failed', err)
+      const message = err && err.message === 'invalid admin password'
+        ? PASSWORD_ERROR_TIP
+        : (err && err.message) || PASSWORD_ERROR_TIP
       this.setData({
-        authRequiredTip: PASSWORD_ERROR_TIP
+        authRequiredTip: message
       })
+      wx.showToast({ title: message, icon: 'none' })
     }
   },
 

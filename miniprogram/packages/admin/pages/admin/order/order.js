@@ -14,6 +14,12 @@ const UI = {
   directReduce: '\u76f4\u51cf',
   receivable: '\u5b9e\u6536\u91d1\u989d',
   payment: '\u652f\u4ed8\u65b9\u5f0f',
+  editPayment: '\u9009\u62e9\u652f\u4ed8\u65b9\u5f0f',
+  editReceivable: '\u4fee\u6539\u5b9e\u6536\u91d1\u989d',
+  amountHint: '\u8bf7\u8f93\u5165\u5b9e\u9645\u6536\u6b3e\u91d1\u989d',
+  cancel: '\u53d6\u6d88',
+  confirm: '\u786e\u5b9a',
+  edit: '\u4fee\u6539',
   people: '\u7528\u9910\u4eba\u6570',
   settledAt: '\u7ed3\u7b97\u65f6\u95f4',
   loadFailed: '\u7ed3\u7b97\u8bb0\u5f55\u52a0\u8f7d\u5931\u8d25',
@@ -95,7 +101,15 @@ Page({
     addingToOrderId: '',
     addDishForm: { dishId: '', keyword: '', count: '1', selectedDish: null },
     addDishResults: [],
-    addDishSearching: false
+    addDishSearching: false,
+    paymentOptions: [
+      { value: 'cash', label: '\u73b0\u91d1' },
+      { value: 'credit', label: '\u6302\u8d26' },
+      { value: 'wechat_alipay', label: '\u5fae\u4fe1/\u652f\u4ed8\u5b9d' }
+    ],
+    showPaymentPicker: false,
+    showAmountModal: false,
+    amountInput: ''
   },
 
   onAdminTap(event) {
@@ -169,7 +183,9 @@ Page({
     this.setData({
       selectedRecordId: recordId,
       detailLoading: true,
-      detail: null
+      detail: null,
+      showPaymentPicker: false,
+      showAmountModal: false
     })
     try {
       const res = await apiClient.call('admin.settlement.detail', {
@@ -263,7 +279,11 @@ Page({
         ...extra
       })
       wx.hideLoading()
-      this.setData({ addingToOrderId: '' })
+      this.setData({
+        addingToOrderId: '',
+        showPaymentPicker: false,
+        showAmountModal: false
+      })
       await this.loadRecords(true)
       const nextRecord = this.data.records.find(item => item.id === this.data.selectedRecordId)
       if (nextRecord) {
@@ -317,5 +337,52 @@ Page({
       content: '将永久删除该结算记录关联的全部订单，并从营业统计中移除；此操作无法恢复。',
       success: result => { if (result.confirm) this.submitSettlementEdit('deleteRecord') }
     })
+  },
+
+  togglePaymentPicker() {
+    if (!this.data.detail) return
+    this.setData({ showPaymentPicker: !this.data.showPaymentPicker })
+  },
+
+  stopSettlementPickerTap() {},
+
+  selectSettlementPayment(event) {
+    const paymentMethod = String(event.currentTarget.dataset.value || '')
+    if (!paymentMethod) return
+    if (paymentMethod === this.data.detail.paymentMethod) {
+      this.setData({ showPaymentPicker: false })
+      return
+    }
+    this.setData({ showPaymentPicker: false })
+    this.submitSettlementEdit('updatePaymentMethod', { paymentMethod })
+  },
+
+  openSettlementAmountModal() {
+    const detail = this.data.detail
+    if (!detail) return
+    this.setData({
+      showPaymentPicker: false,
+      showAmountModal: true,
+      amountInput: formatMoney(detail.receivable)
+    })
+  },
+
+  closeSettlementAmountModal() {
+    this.setData({ showAmountModal: false })
+  },
+
+  stopSettlementAmountModalTap() {},
+
+  onSettlementAmountInput(event) {
+    this.setData({ amountInput: event.detail.value })
+  },
+
+  saveSettlementAmount() {
+    const receivedAmount = Number(this.data.amountInput)
+    if (!Number.isFinite(receivedAmount) || receivedAmount < 0 || receivedAmount > 1000000) {
+      wx.showToast({ title: '\u8bf7\u8f93\u5165 0-1000000 \u4e4b\u95f4\u7684\u91d1\u989d', icon: 'none' })
+      return
+    }
+    this.submitSettlementEdit('updateReceivable', { receivedAmount })
   }
 })

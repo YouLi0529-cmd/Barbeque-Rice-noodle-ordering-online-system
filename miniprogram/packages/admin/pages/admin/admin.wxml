@@ -1,5 +1,5 @@
 <!-- packages/admin/pages/admin/admin.wxml -->
-<view class="admin-page" capture-bind:tap="onAdminTap">
+<view class="admin-page" bind:tap="onAdminTap">
   <view class="admin-page-shade"></view>
   <view class="admin-watermark">{{ui.heroTitle}}</view>
 
@@ -76,8 +76,8 @@
         <view class="password-hint" wx:if="{{isFirstTime}}">{{ui.firstPasswordHint}}</view>
       </view>
       <view class="modal-footer">
-        <view class="modal-btn cancel" bindtap="closeAuthModal">{{ui.cancel}}</view>
-        <view class="modal-btn confirm" bindtap="confirmAdminAuth">{{isFirstTime ? ui.setup : ui.login}}</view>
+        <view class="modal-btn cancel" data-admin-sound="off" catchtap="closeAuthModal">{{ui.cancel}}</view>
+        <view class="modal-btn confirm" data-admin-sound="off" catchtap="confirmAdminAuth">{{isFirstTime ? ui.setup : ui.login}}</view>
       </view>
     </view>
   </view>

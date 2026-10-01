@@ -911,7 +911,6 @@ Page({
       })
     } catch (err) {
       console.error('加载点单初始数据失败', err)
-      wx.showToast({ title: '加载失败', icon: 'none' })
     } finally {
       if (showLoading) {
         this.stopOrderLoadingAnimation()
