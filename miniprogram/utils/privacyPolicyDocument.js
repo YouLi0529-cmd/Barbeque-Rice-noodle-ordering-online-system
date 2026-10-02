@@ -1,49 +1,57 @@
-const PRIVACY_POLICY_PDF_URL = 'https://zmbbq-d0ggmremua04f027d-1449718669.tcloudbaseapp.com/legal/privacy-policy-v1.pdf'
+const apiClient = require('./apiClient')
+
+const PRIVACY_POLICY_DOCUMENT = 'privacyPolicy'
+
+function writeDocumentFile(fileName, contentBase64) {
+  return new Promise((resolve, reject) => {
+    const filePath = `${wx.env.USER_DATA_PATH}/${fileName}`
+    wx.getFileSystemManager().writeFile({
+      filePath,
+      data: contentBase64,
+      encoding: 'base64',
+      success: () => resolve(filePath),
+      fail: reject
+    })
+  })
+}
 
 function openPrivacyPolicyDocument() {
   wx.showLoading({
-    title: '正在打开政策',
+    title: '\u6b63\u5728\u6253\u5f00\u653f\u7b56',
     mask: true
   })
 
-  wx.downloadFile({
-    url: PRIVACY_POLICY_PDF_URL,
-    success: res => {
-      if (res.statusCode !== 200) {
-        wx.hideLoading()
+  apiClient.call('legal.documentContent', {
+    document: PRIVACY_POLICY_DOCUMENT
+  }).then(result => {
+    const data = result && result.data || {}
+    if (!data.fileName || !data.contentBase64) throw new Error('privacy policy content is unavailable')
+    return writeDocumentFile(data.fileName, data.contentBase64)
+  }).then(filePath => {
+    wx.openDocument({
+      filePath,
+      fileType: 'pdf',
+      showMenu: true,
+      complete: () => wx.hideLoading(),
+      fail: err => {
+        console.error('open privacy policy document failed', err)
         wx.showToast({
-          title: '政策文件暂未发布',
+          title: '\u653f\u7b56\u6587\u4ef6\u6253\u5f00\u5931\u8d25',
           icon: 'none'
         })
-        return
       }
-
-      wx.openDocument({
-        filePath: res.tempFilePath,
-        fileType: 'pdf',
-        showMenu: true,
-        complete: () => wx.hideLoading(),
-        fail: err => {
-          console.error('open privacy policy document failed', err)
-          wx.showToast({
-            title: '政策文件打开失败',
-            icon: 'none'
-          })
-        }
-      })
-    },
-    fail: err => {
-      console.error('download privacy policy document failed', err)
-      wx.hideLoading()
-      wx.showToast({
-        title: '政策文件暂未发布',
-        icon: 'none'
-      })
-    }
+    })
+  }).catch(err => {
+    console.error('open privacy policy document failed', err)
+    wx.hideLoading()
+    wx.showToast({
+      title: '\u653f\u7b56\u6587\u4ef6\u6253\u5f00\u5931\u8d25',
+      icon: 'none'
+    })
   })
 }
 
 module.exports = {
-  PRIVACY_POLICY_PDF_URL,
+  PRIVACY_POLICY_DOCUMENT,
   openPrivacyPolicyDocument
 }

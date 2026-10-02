@@ -3,6 +3,8 @@ const apiClient = require('../../../../utils/apiClient')
 const adminSound = require('../../utils/adminSound')
 
 const ADMIN_ROOT = '/packages/admin/pages/admin'
+const TABLE_BOARD_PREFETCH_KEY = 'adminTableBoardPrefetch'
+const TABLE_BOARD_PREFETCH_INTERVAL_MS = 30000
 const RESERVATION_TIME_OPTIONS = ['11:00', '11:30', '12:00', '18:00', '19:00']
 const RESERVATION_PEOPLE_OPTIONS = [2, 4, 8]
 const RESERVATION_ROOM_OPTIONS = ['大厅', '包间', '天楼']
@@ -164,6 +166,104 @@ Page({
     }
   },
 
+  onShow() {
+    if (this.data.isAuthorized) {
+      this.startTableBoardPrefetch()
+    }
+  },
+
+  onHide() {
+    this.stopTableBoardPrefetch()
+  },
+
+  onUnload() {
+    this.stopTableBoardPrefetch()
+  },
+
+  getTableBoardPrefetch() {
+    try {
+      return wx.getStorageSync(TABLE_BOARD_PREFETCH_KEY) || null
+    } catch (err) {
+      return null
+    }
+  },
+
+  saveTableBoardPrefetch(data = {}) {
+    const sections = Array.isArray(data.sections) ? data.sections : []
+    if (sections.length === 0) return
+    try {
+      wx.setStorageSync(TABLE_BOARD_PREFETCH_KEY, {
+        cachedAt: Date.now(),
+        data: {
+          sections,
+          reservations: Array.isArray(data.reservations) ? data.reservations : [],
+          boardVersion: Number(data.boardVersion || 0),
+          activityStamp: String(data.activityStamp || ''),
+          todayArrival: data.todayArrival || {},
+          unsettledTotal: Number(data.unsettledTotal || 0)
+        }
+      })
+    } catch (err) {
+      console.error('cache table board failed', err)
+    }
+  },
+
+  async prefetchTableBoard() {
+    if (!this.data.isAuthorized || this.tableBoardPrefetchInFlight) return
+    this.tableBoardPrefetchInFlight = true
+    try {
+      const cached = this.getTableBoardPrefetch()
+      const cachedData = cached && cached.data ? cached.data : {}
+      const boardVersion = Number(cachedData.boardVersion || 0)
+      const activityStamp = String(cachedData.activityStamp || '')
+
+      if (this.tableBoardStatusSupported !== false && boardVersion > 0) {
+        try {
+          const statusRes = await apiClient.call('admin.table.status', {
+            boardVersion,
+            activityStamp
+          })
+          const status = statusRes && statusRes.data ? statusRes.data : {}
+          if (!status.changed && Number(status.boardVersion || 0) === boardVersion) {
+            this.saveTableBoardPrefetch({
+              ...cachedData,
+              boardVersion,
+              activityStamp: String(status.activityStamp || activityStamp)
+            })
+            return
+          }
+        } catch (err) {
+          if (String(err && err.message || '').indexOf('unknown action') >= 0) {
+            this.tableBoardStatusSupported = false
+          }
+        }
+      }
+
+      const listRes = await apiClient.call('admin.table.list')
+      this.saveTableBoardPrefetch(listRes && listRes.data ? listRes.data : {})
+    } catch (err) {
+      // The home page prefetch is intentionally silent. The table page still
+      // performs its own refresh and reports a failure when the operator opens it.
+      console.error('prefetch table board failed', err)
+    } finally {
+      this.tableBoardPrefetchInFlight = false
+    }
+  },
+
+  startTableBoardPrefetch() {
+    if (this.tableBoardPrefetchTimer || !this.data.isAuthorized) return
+    this.prefetchTableBoard()
+    this.tableBoardPrefetchTimer = setInterval(() => {
+      this.prefetchTableBoard()
+    }, TABLE_BOARD_PREFETCH_INTERVAL_MS)
+  },
+
+  stopTableBoardPrefetch() {
+    if (!this.tableBoardPrefetchTimer) return
+    clearInterval(this.tableBoardPrefetchTimer)
+    this.tableBoardPrefetchTimer = null
+  },
+
   async prepareAdminAuth() {
     try {
       wx.showLoading({ title: '\u9a8c\u8bc1\u4e2d...' })
@@ -247,6 +347,7 @@ Page({
       }, () => {
         const infoCenter = this.selectComponent('#admin-info-center')
         if (infoCenter) infoCenter.activate()
+        this.startTableBoardPrefetch()
       })
       wx.showToast({ title: '\u767b\u5f55\u6210\u529f', icon: 'success' })
     } catch (err) {

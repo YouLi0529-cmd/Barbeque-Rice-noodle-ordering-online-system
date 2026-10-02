@@ -34,14 +34,17 @@
       data-order="{{order}}">
       <view class="order-card-top">
         <view class="order-card-meta">
-          <view class="order-label">点餐单</view>
+          <view class="order-label">{{order.isDraft ? '预点单' : '点餐单'}}</view>
           <view class="order-time">{{order.createTimeText}}</view>
         </view>
         <view class="order-card-actions">
-          <view class="delete-btn" catchtap="deleteOrder" data-order="{{order}}">
+          <view class="delete-btn" wx:if="{{order.isDraft}}" catchtap="deleteOrderDraft" data-order="{{order}}">
             <view class="trash-icon"></view>
           </view>
-          <view class="order-status {{order.statusClass}}">{{order.statusText}}</view>
+          <view class="delete-btn" wx:else catchtap="deleteOrder" data-order="{{order}}">
+            <view class="trash-icon"></view>
+          </view>
+          <view class="order-status {{order.statusClass}}" wx:if="{{!order.isDraft}}">{{order.statusText}}</view>
         </view>
       </view>
 
