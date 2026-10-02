@@ -339,6 +339,18 @@ page {
   font-size: 11rpx;
 }
 
+.mixed-payment-row {
+  padding-top: 4rpx;
+}
+
+.mixed-payment-edit {
+  display: flex;
+  align-items: center;
+  gap: 5rpx;
+  color: #7A4026;
+  cursor: pointer;
+}
+
 .order-group {
   margin-top: 10rpx;
   overflow: hidden;

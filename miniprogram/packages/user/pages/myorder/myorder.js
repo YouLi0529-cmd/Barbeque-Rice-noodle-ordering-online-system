@@ -11,7 +11,7 @@ Page({
     navContentTop: 0,
     navContentHeight: 44,
     navTitleFontSize: 18,
-    tabs: ['堂食', '露营'],
+    tabs: ['堂食', '露营', '预点单'],
     currentTab: 0,
     orderList: [], // 订单列表
     // 分页相关
@@ -41,8 +41,11 @@ Page({
 
   catchActionLoadingMove() {},
 
-  onLoad() {
+  onLoad(options = {}) {
     this.setData(getCustomNavOptions())
+    if (options.tab === 'draft') {
+      this.setData({ currentTab: 2 })
+    }
     this.loadOrders()
   },
 
@@ -97,7 +100,7 @@ Page({
   },
   // 切换标签
   switchTab(e) {
-    const index = e.currentTarget.dataset.index
+    const index = Number(e.currentTarget.dataset.index)
     this.setData({
       currentTab: index,
       // 重置分页状态
@@ -112,6 +115,11 @@ Page({
   // 加载订单列表
   async loadOrders(append = false) {
     if (this.data.loadingOrders) {
+      return
+    }
+
+    if (this.data.currentTab === 2) {
+      this.loadOrderDraft()
       return
     }
 
@@ -200,6 +208,78 @@ Page({
       this.hideActionLoading()
       this.setData({ loadingOrders: false })
     }
+  },
+
+  async loadOrderDraft() {
+    if (this.data.loadingOrders) return
+    this.setData({
+      loadingOrders: true,
+      ordersLoaded: false,
+      orderHasMore: false
+    })
+    this.showActionLoading('加载中')
+    try {
+      const result = apiClient.isEnabled()
+        ? await apiClient.call('orderDraft.get')
+        : (await wx.cloud.callFunction({ name: 'orderDraft', data: { action: 'get' } })).result
+      const draft = result && result.data
+      const orderList = draft ? [this.normalizeDraft(draft)] : []
+      this.setData({
+        orderList,
+        orderPage: 0,
+        orderHasMore: false,
+        ordersLoaded: true
+      })
+    } catch (err) {
+      console.error('加载预点单失败', err)
+      this.setData({ orderList: [], ordersLoaded: true })
+      wx.showToast({ title: err.message || '加载预点单失败', icon: 'none' })
+    } finally {
+      this.hideActionLoading()
+      this.setData({ loadingOrders: false })
+    }
+  },
+
+  normalizeDraft(draft = {}) {
+    const cart = draft.cart && typeof draft.cart === 'object' ? draft.cart : {}
+    const goods = Object.keys(cart).map((key) => {
+      const item = cart[key] || {}
+      const info = item.info || {}
+      const count = Math.max(1, Math.floor(Number(item.count || 0)))
+      const price = Number(item.displayPrice !== undefined ? item.displayPrice : info.price || 0)
+      return {
+        dishId: item.dishId || info._id || key,
+        dishName: info.name || '菜品',
+        dishImage: info.image || '',
+        price,
+        count,
+        subtotal: Number(item.subtotal !== undefined ? item.subtotal : price * count),
+        tags: Array.isArray(item.tagLabels) ? item.tagLabels : []
+      }
+    }).filter(item => item.dishId)
+    const totalPrice = Number(draft.totalPrice)
+    const total = Number.isFinite(totalPrice)
+      ? totalPrice
+      : goods.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
+    const formatTime = (time) => {
+      const source = time && time.$date ? time.$date : time
+      const date = source instanceof Date ? source : new Date(source)
+      if (Number.isNaN(date.getTime())) return ''
+      const pad = value => (value < 10 ? `0${value}` : String(value))
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+    }
+    return this.normalizeOrder({
+      _id: String(draft._id || 'order-draft'),
+      isDraft: true,
+      savedOnly: true,
+      draftCart: cart,
+      orderScene: 'dineIn',
+      goods,
+      totalPrice: total,
+      finalPrice: total,
+      createTime: draft.updateTime || draft.createTime,
+      expiresAt: draft.expiresAt
+    }, formatTime)
   },
 
   // 触底加载更多
@@ -410,6 +490,9 @@ Page({
   },
 
   getOrderTableText(order) {
+    if (this.isSavedOrder(order)) {
+      return ''
+    }
     if (order.orderScene === 'camping') {
       return '露营订单'
     }
@@ -420,6 +503,10 @@ Page({
   // 查看订单详情
   viewOrderDetail(e) {
     const order = e.currentTarget.dataset.order
+    if (this.isSavedOrder(order)) {
+      this.restoreOrderDraft(order)
+      return
+    }
     if (!order || !order._id) {
       wx.showToast({ title: '订单信息异常', icon: 'none' })
       return
@@ -428,6 +515,46 @@ Page({
     wx.setStorageSync('selectedOrderDetail', order)
     wx.navigateTo({
       url: '/packages/user/pages/orderdetail/orderdetail'
+    })
+  },
+
+  restoreOrderDraft(order) {
+    const cart = order && order.draftCart
+    if (!cart || Object.keys(cart).length === 0) {
+      wx.showToast({ title: '预点单内容已失效', icon: 'none' })
+      return
+    }
+    wx.navigateTo({
+      url: '/packages/order/pages/index/index?restoreDraft=1'
+    })
+  },
+
+  deleteOrderDraft(e) {
+    const order = e.currentTarget.dataset.order
+    if (!this.isSavedOrder(order)) return
+    wx.showModal({
+      title: '删除预点单',
+      content: '删除后无法恢复，确定删除吗？',
+      confirmText: '删除',
+      confirmColor: '#b98535',
+      success: async result => {
+        if (!result.confirm) return
+        this.showActionLoading('处理中')
+        try {
+          if (apiClient.isEnabled()) {
+            await apiClient.call('orderDraft.delete')
+          } else {
+            await wx.cloud.callFunction({ name: 'orderDraft', data: { action: 'delete' } })
+          }
+          this.setData({ orderList: [] })
+          wx.showToast({ title: '已删除', icon: 'success' })
+        } catch (err) {
+          console.error('删除预点单失败', err)
+          wx.showToast({ title: err.message || '删除失败', icon: 'none' })
+        } finally {
+          this.hideActionLoading()
+        }
+      }
     })
   },
 

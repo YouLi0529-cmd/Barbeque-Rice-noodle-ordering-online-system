@@ -17,6 +17,10 @@ const UI = {
   editPayment: '\u9009\u62e9\u652f\u4ed8\u65b9\u5f0f',
   editReceivable: '\u4fee\u6539\u5b9e\u6536\u91d1\u989d',
   amountHint: '\u8bf7\u8f93\u5165\u5b9e\u9645\u6536\u6b3e\u91d1\u989d',
+  mixedCash: '\u73b0\u91d1\u6536\u6b3e',
+  mixedOnline: '\u5fae\u4fe1/\u652f\u4ed8\u5b9d\u6536\u6b3e',
+  mixedHint: '\u53e6\u4e00\u79cd\u65b9\u5f0f\u5c06\u81ea\u52a8\u8865\u8db3\u5b9e\u6536\u91d1\u989d',
+  mixedInvalid: '\u91d1\u989d\u4e0d\u80fd\u5927\u4e8e\u5b9e\u6536\u91d1\u989d',
   cancel: '\u53d6\u6d88',
   confirm: '\u786e\u5b9a',
   edit: '\u4fee\u6539',
@@ -67,11 +71,15 @@ function normalizeRecord(item = {}) {
 }
 
 function normalizeDetail(item = {}) {
+  const cashReceived = Number(item.cashReceived)
+  const onlineReceived = Number(item.onlineReceived)
   return {
     ...item,
     paidTimeText: formatDetailDateTime(item.paidAt),
     totalText: formatMoney(item.totalPrice),
     receivableText: formatMoney(item.receivable),
+    cashReceivedText: formatMoney(Number.isFinite(cashReceived) ? cashReceived : 0),
+    onlineReceivedText: formatMoney(Number.isFinite(onlineReceived) ? onlineReceived : 0),
     directReduceText: item.directReduceText ? formatMoney(item.directReduceText) : '',
     orderGroups: (Array.isArray(item.orderGroups) ? item.orderGroups : []).map(group => ({
       ...group,
@@ -104,12 +112,15 @@ Page({
     addDishSearching: false,
     paymentOptions: [
       { value: 'cash', label: '\u73b0\u91d1' },
-      { value: 'credit', label: '\u6302\u8d26' },
+      { value: 'mixed', label: '\u6df7\u5408\u652f\u4ed8' },
       { value: 'wechat_alipay', label: '\u5fae\u4fe1/\u652f\u4ed8\u5b9d' }
     ],
     showPaymentPicker: false,
     showAmountModal: false,
-    amountInput: ''
+    amountInput: '',
+    showMixedPaymentDialog: false,
+    mixedPaymentEditingChannel: '',
+    mixedPaymentInput: ''
   },
 
   onAdminTap(event) {
@@ -185,7 +196,8 @@ Page({
       detailLoading: true,
       detail: null,
       showPaymentPicker: false,
-      showAmountModal: false
+      showAmountModal: false,
+      showMixedPaymentDialog: false
     })
     try {
       const res = await apiClient.call('admin.settlement.detail', {
@@ -282,7 +294,8 @@ Page({
       this.setData({
         addingToOrderId: '',
         showPaymentPicker: false,
-        showAmountModal: false
+        showAmountModal: false,
+        showMixedPaymentDialog: false
       })
       await this.loadRecords(true)
       const nextRecord = this.data.records.find(item => item.id === this.data.selectedRecordId)
@@ -353,8 +366,59 @@ Page({
       this.setData({ showPaymentPicker: false })
       return
     }
-    this.setData({ showPaymentPicker: false })
+    if (paymentMethod === 'mixed') {
+      this.setData({
+        showPaymentPicker: false,
+        mixedPaymentEditingChannel: 'cash',
+        mixedPaymentInput: '0',
+        showMixedPaymentDialog: true
+      })
+      return
+    }
+    this.setData({ showPaymentPicker: false, showMixedPaymentDialog: false })
     this.submitSettlementEdit('updatePaymentMethod', { paymentMethod })
+  },
+
+  openSettlementMixedPaymentDialog(event) {
+    const detail = this.data.detail
+    if (!detail || detail.paymentMethod !== 'mixed') return
+    const channel = event.currentTarget.dataset.channel === 'online' ? 'online' : 'cash'
+    this.setData({
+      showPaymentPicker: false,
+      mixedPaymentEditingChannel: channel,
+      mixedPaymentInput: channel === 'online' ? detail.onlineReceivedText : detail.cashReceivedText,
+      showMixedPaymentDialog: true
+    })
+  },
+
+  closeSettlementMixedPaymentDialog() {
+    this.setData({
+      showMixedPaymentDialog: false,
+      mixedPaymentEditingChannel: '',
+      mixedPaymentInput: ''
+    })
+  },
+
+  stopSettlementMixedPaymentDialogTap() {},
+
+  onSettlementMixedPaymentInput(event) {
+    this.setData({ mixedPaymentInput: event.detail.value })
+  },
+
+  saveSettlementMixedPayment() {
+    const detail = this.data.detail
+    const amount = Number(this.data.mixedPaymentInput)
+    const receivable = Number(detail && detail.receivable)
+    if (!Number.isFinite(amount) || amount < 0 || !Number.isFinite(receivable) || amount > receivable) {
+      wx.showToast({ title: UI.mixedInvalid, icon: 'none' })
+      return
+    }
+    const channel = this.data.mixedPaymentEditingChannel === 'online' ? 'online' : 'cash'
+    this.submitSettlementEdit('updatePaymentMethod', {
+      paymentMethod: 'mixed',
+      mixedPaymentChannel: channel,
+      mixedPaymentAmount: Math.round(amount * 100) / 100
+    })
   },
 
   openSettlementAmountModal() {

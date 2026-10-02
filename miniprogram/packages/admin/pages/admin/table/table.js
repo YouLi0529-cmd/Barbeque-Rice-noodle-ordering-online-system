@@ -60,6 +60,8 @@ const UI = {
 }
 
 const TABLE_DETAIL_PAGE = '/packages/admin/pages/admin/tableDetail/tableDetail'
+const TABLE_BOARD_PREFETCH_KEY = 'adminTableBoardPrefetch'
+const TABLE_BOARD_PREFETCH_MAX_AGE_MS = 90 * 1000
 
 const STATUS = {
   empty: {
@@ -277,15 +279,20 @@ Page({
     this.tableBoardRefreshInFlight = false
     this.syncTransferState()
     this.syncMergeState()
-    this.refreshTables()
-    this.loadTables()
+    const usedPrefetchedTables = this.restorePrefetchedTables()
+    if (usedPrefetchedTables) {
+      this.refreshTableBoard(true)
+    } else {
+      this.refreshTables()
+      this.loadTables()
+    }
     this.startAutoRefresh()
   },
 
   onShow() {
     this.syncTransferState()
     this.syncMergeState()
-    this.loadTables(true)
+    this.refreshTableBoard(true)
     this.startAutoRefresh()
   },
 
@@ -325,33 +332,9 @@ Page({
       }
 
       const res = await apiClient.call('admin.table.list')
-      const sections = res && res.data && Array.isArray(res.data.sections)
-        ? res.data.sections
-        : []
-      const hasReservations = !!(res && res.data && Array.isArray(res.data.reservations))
-      const reservations = hasReservations ? res.data.reservations : []
-      const boardVersion = Number(res && res.data && res.data.boardVersion)
-      const activityStamp = String(res && res.data && res.data.activityStamp || '')
-      const todayArrivalCount = Math.max(0, Math.floor(Number(
-        res && res.data && res.data.todayArrival && res.data.todayArrival.peopleCount || 0
-      )))
-      const todayTableCount = Math.max(0, Math.floor(Number(
-        res && res.data && res.data.todayArrival && res.data.todayArrival.tableCount || 0
-      )))
-      const unsettledTotalText = formatPrice(res && res.data && res.data.unsettledTotal || 0)
-
-      if (sections.length > 0) {
-        this.rawTables = sections
-        this.refreshTables()
-      }
-      this.setData({ todayArrivalCount, todayTableCount, unsettledTotalText })
-      if (Number.isFinite(boardVersion)) this.tableBoardVersion = boardVersion
-      if (activityStamp) this.tableBoardActivityStamp = activityStamp
-      if (hasReservations) {
-        this.applyReservationReminders(reservations)
-      } else {
-        this.loadReservationReminders(true)
-      }
+      const boardData = res && res.data ? res.data : {}
+      this.applyTableBoardData(boardData)
+      this.cacheTableBoardData(boardData)
     } catch (err) {
       console.error('load admin table orders failed', err)
       this.refreshTables()
@@ -365,6 +348,68 @@ Page({
       if (!silent) {
         this.setData({ loading: false })
       }
+    }
+  },
+
+  applyTableBoardData(data = {}) {
+    const sections = Array.isArray(data.sections) ? data.sections : []
+    const hasReservations = Array.isArray(data.reservations)
+    const reservations = hasReservations ? data.reservations : []
+    const boardVersion = Number(data.boardVersion)
+    const activityStamp = String(data.activityStamp || '')
+    const todayArrivalCount = Math.max(0, Math.floor(Number(
+      data.todayArrival && data.todayArrival.peopleCount || 0
+    )))
+    const todayTableCount = Math.max(0, Math.floor(Number(
+      data.todayArrival && data.todayArrival.tableCount || 0
+    )))
+    const unsettledTotalText = formatPrice(data.unsettledTotal || 0)
+
+    if (sections.length > 0) {
+      this.rawTables = sections
+      this.refreshTables()
+    }
+    this.setData({ todayArrivalCount, todayTableCount, unsettledTotalText })
+    if (Number.isFinite(boardVersion)) this.tableBoardVersion = boardVersion
+    if (activityStamp) this.tableBoardActivityStamp = activityStamp
+    if (hasReservations) {
+      this.applyReservationReminders(reservations)
+    } else {
+      this.loadReservationReminders(true)
+    }
+  },
+
+  cacheTableBoardData(data = {}) {
+    const sections = Array.isArray(data.sections) ? data.sections : []
+    if (sections.length === 0) return
+    try {
+      wx.setStorageSync(TABLE_BOARD_PREFETCH_KEY, {
+        cachedAt: Date.now(),
+        data: {
+          sections,
+          reservations: Array.isArray(data.reservations) ? data.reservations : [],
+          boardVersion: Number(data.boardVersion || 0),
+          activityStamp: String(data.activityStamp || ''),
+          todayArrival: data.todayArrival || {},
+          unsettledTotal: Number(data.unsettledTotal || 0)
+        }
+      })
+    } catch (err) {
+      console.error('cache table board failed', err)
+    }
+  },
+
+  restorePrefetchedTables() {
+    try {
+      const cached = wx.getStorageSync(TABLE_BOARD_PREFETCH_KEY)
+      if (!cached || !cached.data || Date.now() - Number(cached.cachedAt || 0) > TABLE_BOARD_PREFETCH_MAX_AGE_MS) {
+        return false
+      }
+      if (!Array.isArray(cached.data.sections) || cached.data.sections.length === 0) return false
+      this.applyTableBoardData(cached.data)
+      return true
+    } catch (err) {
+      return false
     }
   },
 

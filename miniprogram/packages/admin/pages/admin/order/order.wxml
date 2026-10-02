@@ -80,6 +80,14 @@
             <text>{{ui.receivable}}</text>
             <view class="editable-bill-value"><text>¥{{detail.receivableText}}</text><text class="editable-meta-mark">{{ui.edit}}</text></view>
           </view>
+          <view class="bill-row mixed-payment-row" wx:if="{{detail.paymentMethod === 'mixed'}}">
+            <text>{{ui.mixedCash}}</text>
+            <view class="mixed-payment-edit" data-channel="cash" bindtap="openSettlementMixedPaymentDialog"><text>¥{{detail.cashReceivedText}}</text><text class="editable-meta-mark">{{ui.edit}}</text></view>
+          </view>
+          <view class="bill-row mixed-payment-row" wx:if="{{detail.paymentMethod === 'mixed'}}">
+            <text>{{ui.mixedOnline}}</text>
+            <view class="mixed-payment-edit" data-channel="online" bindtap="openSettlementMixedPaymentDialog"><text>¥{{detail.onlineReceivedText}}</text><text class="editable-meta-mark">{{ui.edit}}</text></view>
+          </view>
         </view>
 
         <view class="order-group" wx:for="{{detail.orderGroups}}" wx:key="id">
@@ -123,6 +131,17 @@
       <view class="settlement-amount-actions">
         <view class="settlement-modal-button cancel" bindtap="closeSettlementAmountModal">{{ui.cancel}}</view>
         <view class="settlement-modal-button confirm" bindtap="saveSettlementAmount">{{ui.confirm}}</view>
+      </view>
+    </view>
+  </view>
+  <view class="settlement-modal-mask" wx:if="{{showMixedPaymentDialog}}" catchtap="closeSettlementMixedPaymentDialog">
+    <view class="settlement-amount-modal" catchtap="stopSettlementMixedPaymentDialogTap">
+      <view class="settlement-amount-title">{{mixedPaymentEditingChannel === 'online' ? ui.mixedOnline : ui.mixedCash}}</view>
+      <view class="settlement-amount-hint">{{ui.mixedHint}}</view>
+      <input class="settlement-amount-input" type="digit" value="{{mixedPaymentInput}}" focus="{{showMixedPaymentDialog}}" bindinput="onSettlementMixedPaymentInput" bindconfirm="saveSettlementMixedPayment" />
+      <view class="settlement-amount-actions">
+        <view class="settlement-modal-button cancel" bindtap="closeSettlementMixedPaymentDialog">{{ui.cancel}}</view>
+        <view class="settlement-modal-button confirm" bindtap="saveSettlementMixedPayment">{{ui.confirm}}</view>
       </view>
     </view>
   </view>

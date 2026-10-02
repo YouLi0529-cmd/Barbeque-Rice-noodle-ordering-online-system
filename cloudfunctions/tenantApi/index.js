@@ -1,6 +1,8 @@
 const cloud = require('wx-server-sdk')
 const crypto = require('crypto')
+const fs = require('fs')
 const https = require('https')
+const path = require('path')
 const { createPrintService } = require('./printService')
 const {
   DEFAULT_DISH_IMAGE_FILES: RECOVERY_DISH_IMAGE_FILES,
@@ -32,14 +34,13 @@ const DISH_IMAGE_TYPES = {
   png: 'image/png',
   webp: 'image/webp'
 }
-const LEGAL_DOCUMENT_TEMP_URL_MAX_AGE = 60 * 60
 const LEGAL_DOCUMENT_FILES = {
   privacyPolicy: {
-    fileID: 'cloud://zmbbq-d0ggmremua04f027d.c9e0-static-zmbbq-d0ggmremua04f027d-1449718669/legal/privacy-policy-v1.pdf',
+    bundledPath: 'legal/privacy-policy-v1.pdf',
     fileName: 'privacy-policy-v1.pdf'
   },
   privacyProtectionGuide: {
-    fileID: 'cloud://zmbbq-d0ggmremua04f027d.c9e0-static-zmbbq-d0ggmremua04f027d-1449718669/legal/privacy-protection-guide-v1.pdf',
+    bundledPath: 'legal/privacy-protection-guide-v1.pdf',
     fileName: 'privacy-protection-guide-v1.pdf'
   }
 }
@@ -2758,6 +2759,42 @@ function getBusinessStatsPaymentBreakdown(orders = [], groupRevenue = 0) {
   return { cash: 0, online: 0, other: total }
 }
 
+function buildSettlementPaymentBreakdown(paymentMethod, receivable, options = {}) {
+  const total = roundMoney(Math.max(0, Number(receivable) || 0))
+  const method = String(paymentMethod || '').trim()
+  const mixedPaymentChannel = String(options.mixedPaymentChannel || '').trim() === 'online' ? 'online' : 'cash'
+  const mixedPaymentAmount = Number(options.mixedPaymentAmount)
+  const hasValidMixedPaymentAmount = Number.isFinite(mixedPaymentAmount) && mixedPaymentAmount >= 0 && mixedPaymentAmount <= total
+
+  if (method === 'mixed') {
+    const selectedAmount = hasValidMixedPaymentAmount ? roundMoney(mixedPaymentAmount) : 0
+    const cash = mixedPaymentChannel === 'online' ? roundMoney(total - selectedAmount) : selectedAmount
+    const online = mixedPaymentChannel === 'online' ? selectedAmount : roundMoney(total - selectedAmount)
+    return {
+      cash,
+      online,
+      mixedPaymentChannel,
+      paymentSplitValid: hasValidMixedPaymentAmount
+    }
+  }
+
+  if (method === 'cash') return { cash: total, online: 0, mixedPaymentChannel: '', paymentSplitValid: true }
+  if (['wechat_alipay', 'wechat', 'alipay', 'online'].includes(method)) {
+    return { cash: 0, online: total, mixedPaymentChannel: '', paymentSplitValid: true }
+  }
+  return { cash: 0, online: 0, mixedPaymentChannel: '', paymentSplitValid: true }
+}
+
+function getSettlementStoredMixedPayment(orders = []) {
+  const source = orders.find(order => order.checkoutCashAmount !== undefined || order.checkoutOnlineAmount !== undefined) || {}
+  const channel = String(source.mixedPaymentChannel || '').trim() === 'online' ? 'online' : 'cash'
+  const amount = channel === 'online' ? Number(source.checkoutOnlineAmount) : Number(source.checkoutCashAmount)
+  return {
+    mixedPaymentChannel: channel,
+    mixedPaymentAmount: Number.isFinite(amount) && amount >= 0 ? roundMoney(amount) : 0
+  }
+}
+
 function buildBusinessStatsSnapshot(orders = [], range) {
   const startAt = getBusinessStatsRangeStart(range).getTime()
   const endAt = getBusinessStatsRangeEnd(range)
@@ -2934,7 +2971,7 @@ function getSettlementPaymentText(orders = []) {
   const paymentMethod = getSettlementPaymentMethod(orders)
   const paymentTexts = {
     cash: '现金',
-    credit: '挂账',
+    credit: '混合支付',
     wechat: '微信',
     alipay: '支付宝',
     wechat_alipay: '微信/支付宝',
@@ -2990,6 +3027,7 @@ function buildSettlementRecord(key, orders = []) {
   const paidAt = Math.max(...orders.map(order => getBusinessStatsPaidTime(order)).filter(Boolean), 0)
   const discount = getSettlementDiscount(orders)
   const receivable = getBusinessStatsGroupRevenue(orders)
+  const paymentBreakdown = getBusinessStatsPaymentBreakdown(orders, receivable)
   const scene = isCampingOrder(orders[0]) ? 'camping' : 'dineIn'
   const peopleCount = getSettlementPeopleCount(orders)
   return {
@@ -3004,6 +3042,8 @@ function buildSettlementRecord(key, orders = []) {
     receivable,
     paymentMethod: getSettlementPaymentMethod(orders),
     paymentText: getSettlementPaymentText(orders),
+    cashReceived: paymentBreakdown.cash,
+    onlineReceived: paymentBreakdown.online,
     discountText: discount.discountText,
     directReduceText: discount.directReduceText,
     orderCount: orders.length
@@ -3183,7 +3223,7 @@ async function adminEditSettlement(payload) {
     return { success: false, code: 'SETTLEMENT_DISH_INVALID', message: 'menu dish and quantity are required' }
   }
   const paymentMethod = String(payload.paymentMethod || '').trim()
-  if (operation === 'updatePaymentMethod' && !['cash', 'credit', 'wechat_alipay'].includes(paymentMethod)) {
+  if (operation === 'updatePaymentMethod' && !['cash', 'mixed', 'wechat_alipay'].includes(paymentMethod)) {
     return { success: false, code: 'SETTLEMENT_PAYMENT_METHOD_INVALID', message: 'payment method is invalid' }
   }
   const receivedAmount = Number(payload.receivedAmount)
@@ -3207,20 +3247,43 @@ async function adminEditSettlement(payload) {
       return { success: true, data: { deletedOrders: currentOrders.length } }
     }
     if (operation === 'updatePaymentMethod') {
+      const receivable = getBusinessStatsGroupRevenue(currentOrders)
+      const paymentBreakdown = buildSettlementPaymentBreakdown(paymentMethod, receivable, payload)
+      if (!paymentBreakdown.paymentSplitValid) {
+        return { success: false, code: 'MIXED_PAYMENT_AMOUNT_INVALID', message: 'mixed payment amount must be between 0 and receivable amount' }
+      }
       for (const order of currentOrders) {
         await transaction.collection('order').doc(order._id).update({
-          data: { paymentMethod, payMethod: paymentMethod, updateTime: db.serverDate() }
+          data: {
+            paymentMethod,
+            payMethod: paymentMethod,
+            checkoutCashAmount: paymentBreakdown.cash,
+            checkoutOnlineAmount: paymentBreakdown.online,
+            mixedPaymentChannel: paymentBreakdown.mixedPaymentChannel,
+            updateTime: db.serverDate()
+          }
         })
       }
-      return { success: true, data: { paymentMethod } }
+      return { success: true, data: { paymentMethod, cashReceived: paymentBreakdown.cash, onlineReceived: paymentBreakdown.online } }
     }
     if (operation === 'updateReceivable') {
       const normalizedReceivedAmount = roundMoney(receivedAmount)
+      const currentPaymentMethod = getSettlementPaymentMethod(currentOrders)
+      const storedMixedPayment = getSettlementStoredMixedPayment(currentOrders)
+      storedMixedPayment.mixedPaymentAmount = Math.min(storedMixedPayment.mixedPaymentAmount, normalizedReceivedAmount)
+      const paymentBreakdown = buildSettlementPaymentBreakdown(
+        currentPaymentMethod,
+        normalizedReceivedAmount,
+        storedMixedPayment
+      )
       for (const order of currentOrders) {
         await transaction.collection('order').doc(order._id).update({
           data: {
             checkoutReceivable: normalizedReceivedAmount,
             receivedAmount: normalizedReceivedAmount,
+            checkoutCashAmount: paymentBreakdown.cash,
+            checkoutOnlineAmount: paymentBreakdown.online,
+            mixedPaymentChannel: paymentBreakdown.mixedPaymentChannel,
             updateTime: db.serverDate()
           }
         })
@@ -3284,11 +3347,21 @@ async function adminEditSettlement(payload) {
     if (!refreshedOrders.length) return { success: true, data: { deletedOrders: 1, receivable: 0 } }
     const totalPrice = roundMoney(refreshedOrders.reduce((sum, order) => sum + getSettlementGoodsTotal(order.goods), 0))
     const checkoutSummary = getEditedSettlementSummary(totalPrice, refreshedOrders)
+    const storedMixedPayment = getSettlementStoredMixedPayment(refreshedOrders)
+    storedMixedPayment.mixedPaymentAmount = Math.min(storedMixedPayment.mixedPaymentAmount, checkoutSummary.receivable)
+    const paymentBreakdown = buildSettlementPaymentBreakdown(
+      getSettlementPaymentMethod(refreshedOrders),
+      checkoutSummary.receivable,
+      storedMixedPayment
+    )
     for (const order of refreshedOrders) {
       await transaction.collection('order').doc(order._id).update({ data: {
         checkoutTotalPrice: totalPrice,
         checkoutReceivable: checkoutSummary.receivable,
         receivedAmount: checkoutSummary.receivable,
+        checkoutCashAmount: paymentBreakdown.cash,
+        checkoutOnlineAmount: paymentBreakdown.online,
+        mixedPaymentChannel: paymentBreakdown.mixedPaymentChannel,
         checkoutDiscountType: checkoutSummary.discountType,
         checkoutDiscountValue: checkoutSummary.discountValue,
         checkoutDirectReduceValue: checkoutSummary.directReduceValue,
@@ -6560,7 +6633,7 @@ function getLegacyDishImageFileID(value) {
   }
 }
 
-async function getLegalDocumentTempUrl(payload = {}) {
+async function getLegalDocumentContent(payload = {}) {
   const documentKey = String(payload.document || '').trim()
   const document = LEGAL_DOCUMENT_FILES[documentKey]
   if (!document) {
@@ -6571,26 +6644,22 @@ async function getLegalDocumentTempUrl(payload = {}) {
     }
   }
 
-  const result = await cloud.getTempFileURL({
-    fileList: [{
-      fileID: document.fileID,
-      maxAge: LEGAL_DOCUMENT_TEMP_URL_MAX_AGE
-    }]
-  })
-  const file = result.fileList && result.fileList[0]
-  if (!file || !file.tempFileURL) {
+  try {
+    const fileContent = fs.readFileSync(path.join(__dirname, document.bundledPath))
+
+    return {
+      success: true,
+      data: {
+        fileName: document.fileName,
+        contentBase64: fileContent.toString('base64')
+      }
+    }
+  } catch (err) {
+    console.error('read legal document content failed', err)
     return {
       success: false,
       code: 'LEGAL_DOCUMENT_UNAVAILABLE',
       message: 'legal document is unavailable'
-    }
-  }
-
-  return {
-    success: true,
-    data: {
-      url: file.tempFileURL,
-      fileName: document.fileName
     }
   }
 }
@@ -8685,7 +8754,7 @@ async function handleAction(action, payload) {
   if (action === 'menu.categoryGoods') return listCategoryGoods(payload)
   if (action === 'menu.search') return searchGoods(payload)
   if (action === 'menu.sync') return syncMenu(payload)
-  if (action === 'legal.documentUrl') return getLegalDocumentTempUrl(payload)
+  if (action === 'legal.documentContent') return getLegalDocumentContent(payload)
   if (action === 'shop.info') return getShopInfo(payload)
   if (action === 'notice.list') return listNotices(payload)
   if (action === 'admin.status') return getAdminStatus(payload)

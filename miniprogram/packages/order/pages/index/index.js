@@ -160,7 +160,11 @@ Page({
     }
     
     this.skipInitialUserInfoReload = true
-    this.loadInitialOrderData()
+    this.loadInitialOrderData().then(() => {
+      if (options.restoreDraft === '1' && !scannedTableNumber) {
+        this.restoreOrderDraft()
+      }
+    })
     this.loadUserInfo()
     if (scannedTableNumber) {
       this.initSharedCart(scannedTableNumber)
@@ -291,12 +295,21 @@ Page({
     }
 
     this.setData(nextData, () => {
-      if (peopleConfirmed && this.data.pendingSettleAfterPeopleConfirm) {
-        this.setData({
-          pendingSettleAfterPeopleConfirm: false
-        }, () => this.navigateToSettle())
+      if (peopleConfirmed) {
+        this.maybePromptDraftImport()
+        this.maybeContinueAfterPeopleConfirm()
       }
     })
+  },
+
+  maybeContinueAfterPeopleConfirm() {
+    if (!this.data.sharedPeopleConfirmed || !this.data.pendingSettleAfterPeopleConfirm) return
+    // A scan started from the pre-order screen used to navigate away here before
+    // its personal draft lookup had a chance to present the import decision.
+    if (this.draftImportCheckPromise || this.pendingDraftImport || this.draftImportPrompted) return
+    this.setData({
+      pendingSettleAfterPeopleConfirm: false
+    }, () => this.navigateToSettle())
   },
 
   requirePeopleBeforeOrder() {
@@ -500,25 +513,12 @@ Page({
         sharedOrderAddOnCount: Number(result.addOnCount || 0),
         orderSessionClosed: false
       })
+      // Read the personal draft as soon as the table session is available.
+      // The diner-count modal and shared-cart hydration can run in parallel;
+      // importing still waits until the diner count is confirmed.
+      this.prepareDraftImport(localCartBeforeJoin)
       this.applySharedPeopleState(result)
-
       await this.fetchSharedCart(false, true)
-      if (localCartBeforeJoin) {
-        const mergedCart = { ...this.data.cart }
-        Object.keys(localCartBeforeJoin).forEach(cartKey => {
-          const localItem = localCartBeforeJoin[cartKey]
-          if (!localItem) return
-          if (mergedCart[cartKey]) {
-            mergedCart[cartKey] = {
-              ...mergedCart[cartKey],
-              count: Number(mergedCart[cartKey].count || 0) + Number(localItem.count || 0)
-            }
-          } else {
-            mergedCart[cartKey] = localItem
-          }
-        })
-        this.updateCart(mergedCart)
-      }
       this.startSharedCartWatch(result.sessionId)
     }).catch(err => {
       console.error('初始化共同点单失败', err)
@@ -528,6 +528,207 @@ Page({
     })
 
     return this.sharedCartInitPromise
+  },
+
+  getCartTotalPrice(cart = {}) {
+    return Object.keys(cart).reduce((sum, key) => {
+      const item = cart[key] || {}
+      const info = item.info || {}
+      const price = Number(item.displayPrice !== undefined ? item.displayPrice : info.price || 0)
+      const count = Math.max(0, Number(item.count || 0))
+      return sum + price * count
+    }, 0)
+  },
+
+  async prepareDraftImport(localCart = null) {
+    if (this.draftImportCheckPromise || !this.data.tableNumber) return
+    const capturedCart = localCart && Object.keys(localCart).length > 0 ? localCart : null
+    this.draftImportDebug = {
+      stage: 'checking',
+      tableNumber: this.data.tableNumber,
+      peopleConfirmed: this.data.sharedPeopleConfirmed
+    }
+    this.draftImportCheckPromise = (async () => {
+      try {
+        let result
+        if (apiClient.isEnabled()) {
+          // Keep this aligned with the "订单 - 预点单" page. A shared-cart
+          // token is unnecessary for a personal draft, but the normal member
+          // token is still refreshed here when a table is first scanned.
+          await this.ensureSharedCartApiAuth()
+          if (capturedCart) {
+            await apiClient.call('orderDraft.save', {
+              cart: capturedCart,
+              totalPrice: this.getCartTotalPrice(capturedCart)
+            })
+          }
+          result = await apiClient.call('orderDraft.get')
+        } else {
+          if (capturedCart) {
+            await wx.cloud.callFunction({
+              name: 'orderDraft',
+              data: {
+                action: 'save',
+                cart: capturedCart,
+                totalPrice: this.getCartTotalPrice(capturedCart)
+              }
+            })
+          }
+          result = (await wx.cloud.callFunction({
+            name: 'orderDraft',
+            data: { action: 'get' }
+          })).result || {}
+        }
+
+        const draft = result && result.data
+        const draftCart = draft && draft.cart
+        if (!draftCart || Object.keys(draftCart).length === 0) {
+          this.draftImportDebug = {
+            stage: 'empty',
+            tableNumber: this.data.tableNumber,
+            peopleConfirmed: this.data.sharedPeopleConfirmed
+          }
+          console.log('[预点单导入]', this.draftImportDebug)
+          return
+        }
+        this.pendingDraftImport = { cart: draftCart }
+        this.draftImportPrompted = false
+        this.draftImportDebug = {
+          stage: 'found',
+          tableNumber: this.data.tableNumber,
+          peopleConfirmed: this.data.sharedPeopleConfirmed,
+          itemCount: Object.keys(draftCart).length
+        }
+        console.log('[预点单导入]', this.draftImportDebug)
+        this.maybePromptDraftImport()
+      } catch (err) {
+        this.draftImportDebug = {
+          stage: 'failed',
+          tableNumber: this.data.tableNumber,
+          message: err && err.message ? err.message : String(err)
+        }
+        console.error('[预点单导入]', this.draftImportDebug)
+        console.error('检测预点单失败', err)
+      } finally {
+        this.draftImportCheckPromise = null
+        this.maybeContinueAfterPeopleConfirm()
+      }
+    })()
+    return this.draftImportCheckPromise
+  },
+
+  maybePromptDraftImport() {
+    const pendingDraft = this.pendingDraftImport
+    if (!pendingDraft || !this.data.tableNumber || !this.data.sharedPeopleConfirmed || this.draftImportPrompted) {
+      if (pendingDraft) {
+        this.draftImportDebug = {
+          stage: 'waiting',
+          tableNumber: this.data.tableNumber,
+          peopleConfirmed: this.data.sharedPeopleConfirmed,
+          prompted: !!this.draftImportPrompted
+        }
+        console.log('[预点单导入]', this.draftImportDebug)
+      }
+      return
+    }
+    this.draftImportPrompted = true
+    this.draftImportDebug = {
+      stage: 'prompting',
+      tableNumber: this.data.tableNumber,
+      peopleConfirmed: this.data.sharedPeopleConfirmed
+    }
+    console.log('[预点单导入]', this.draftImportDebug)
+    wx.showModal({
+      title: '导入预点单',
+      content: '检测到已保存的预点单，是否导入本桌购物车？',
+      confirmText: '导入',
+      cancelText: '暂不导入',
+      success: result => {
+        if (result.confirm) {
+          this.importPendingDraft()
+          return
+        }
+        this.pendingDraftImport = null
+        this.draftImportPrompted = false
+        this.maybeContinueAfterPeopleConfirm()
+      }
+    })
+  },
+
+  mergeDraftCartIntoSharedCart(draftCart = {}) {
+    const mergedCart = { ...(this.data.cart || {}) }
+    Object.keys(draftCart).forEach(cartKey => {
+      const draftItem = draftCart[cartKey]
+      if (!draftItem || Number(draftItem.count || 0) <= 0) return
+      if (mergedCart[cartKey]) {
+        mergedCart[cartKey] = {
+          ...mergedCart[cartKey],
+          count: Number(mergedCart[cartKey].count || 0) + Number(draftItem.count || 0)
+        }
+      } else {
+        mergedCart[cartKey] = draftItem
+      }
+    })
+    return mergedCart
+  },
+
+  async importPendingDraft() {
+    const pendingDraft = this.pendingDraftImport
+    const sessionId = this.data.sharedSessionId
+    if (!pendingDraft || !sessionId || !this.data.tableNumber) return
+
+    const currentCart = this.data.cart || {}
+    const mergedCart = this.mergeDraftCartIntoSharedCart(pendingDraft.cart)
+    const operations = this.buildSharedCartOperations(currentCart, mergedCart)
+    this.showActionLoading('正在导入预点单')
+    try {
+      if (operations.length > 0) {
+        const result = apiClient.isEnabled()
+          ? await this.callSharedCartApi('sharedCart.patch', {
+            sessionId,
+            tableNumber: this.data.tableNumber,
+            operations
+          })
+          : (await wx.cloud.callFunction({
+            name: 'sharedCart',
+            data: {
+              action: 'patch',
+              sessionId,
+              tableNumber: this.data.tableNumber,
+              operations
+            }
+          })).result || {}
+        if (!result.success) throw new Error(result.message || '导入失败')
+        if (this.data.sharedSessionId !== sessionId) return
+        this.updateCart(mergedCart, { skipSync: true })
+        this.setData({
+          sharedCartVersion: Number(result.cartVersion || this.data.sharedCartVersion || 0),
+          sharedCartHydrated: true,
+          sharedCartSyncActive: result.sharedCartSyncActive !== false,
+          sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0)
+        })
+      }
+
+      this.pendingDraftImport = null
+      this.draftImportPrompted = false
+      try {
+        if (apiClient.isEnabled()) {
+          await this.callSharedCartApi('orderDraft.delete')
+        } else {
+          await wx.cloud.callFunction({ name: 'orderDraft', data: { action: 'delete' } })
+        }
+      } catch (err) {
+        console.error('导入后删除预点单失败', err)
+      }
+      wx.showToast({ title: '已导入本桌购物车', icon: 'success' })
+      this.maybeContinueAfterPeopleConfirm()
+    } catch (err) {
+      console.error('导入预点单失败', err)
+      this.draftImportPrompted = false
+      wx.showToast({ title: err.message || '导入失败，请重试', icon: 'none' })
+    } finally {
+      this.hideActionLoading()
+    }
   },
 
   startSharedCartWatch(sessionId) {
@@ -2392,16 +2593,36 @@ Page({
         throw new Error(result && result.message ? result.message : '保存失败')
       }
 
-      wx.showToast({
-        title: '已保存24小时',
-        icon: 'success'
-      })
+      wx.showToast({ title: '预点单已保存', icon: 'success' })
+      setTimeout(() => this.goCover(), 700)
     } catch (err) {
       console.error('保存预点单失败', err)
       wx.showToast({
         title: err.message || '保存失败',
         icon: 'none'
       })
+    } finally {
+      this.hideActionLoading()
+    }
+  },
+
+  async restoreOrderDraft() {
+    this.showActionLoading('正在恢复预点单')
+    try {
+      const result = apiClient.isEnabled()
+        ? await apiClient.call('orderDraft.get')
+        : (await wx.cloud.callFunction({ name: 'orderDraft', data: { action: 'get' } })).result
+      const draft = result && result.data
+      const cart = draft && draft.cart
+      if (!cart || Object.keys(cart).length === 0) {
+        wx.showToast({ title: '预点单已失效', icon: 'none' })
+        return
+      }
+      this.updateCart(cart, { skipSync: true })
+      wx.showToast({ title: '已恢复预点单', icon: 'success' })
+    } catch (err) {
+      console.error('恢复预点单失败', err)
+      wx.showToast({ title: err.message || '恢复预点单失败', icon: 'none' })
     } finally {
       this.hideActionLoading()
     }

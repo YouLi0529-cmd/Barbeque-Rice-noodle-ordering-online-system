@@ -2,17 +2,14 @@ const apiClient = require('./apiClient')
 
 const PRIVACY_PROTECTION_GUIDE_DOCUMENT = 'privacyProtectionGuide'
 
-function downloadDocument(url) {
+function writeDocumentFile(fileName, contentBase64) {
   return new Promise((resolve, reject) => {
-    wx.downloadFile({
-      url,
-      success: res => {
-        if (res.statusCode === 200) {
-          resolve(res.tempFilePath)
-          return
-        }
-        reject(new Error(`document download failed: ${res.statusCode}`))
-      },
+    const filePath = `${wx.env.USER_DATA_PATH}/${fileName}`
+    wx.getFileSystemManager().writeFile({
+      filePath,
+      data: contentBase64,
+      encoding: 'base64',
+      success: () => resolve(filePath),
       fail: reject
     })
   })
@@ -24,12 +21,12 @@ function openPrivacyProtectionGuideDocument() {
     mask: true
   })
 
-  apiClient.call('legal.documentUrl', {
+  apiClient.call('legal.documentContent', {
     document: PRIVACY_PROTECTION_GUIDE_DOCUMENT
   }).then(result => {
-    const url = result && result.data && result.data.url
-    if (!url) throw new Error('privacy protection guide URL is unavailable')
-    return downloadDocument(url)
+    const data = result && result.data || {}
+    if (!data.fileName || !data.contentBase64) throw new Error('privacy protection guide content is unavailable')
+    return writeDocumentFile(data.fileName, data.contentBase64)
   }).then(filePath => {
     wx.openDocument({
       filePath,
@@ -45,10 +42,10 @@ function openPrivacyProtectionGuideDocument() {
       }
     })
   }).catch(err => {
-    console.error('download privacy protection guide failed', err)
+    console.error('open privacy protection guide failed', err)
     wx.hideLoading()
     wx.showToast({
-      title: '\u6307\u5f15\u6587\u4ef6\u6682\u672a\u53d1\u5e03',
+      title: '\u6307\u5f15\u6587\u4ef6\u6253\u5f00\u5931\u8d25',
       icon: 'none'
     })
   })
