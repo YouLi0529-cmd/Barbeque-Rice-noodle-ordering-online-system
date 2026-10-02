@@ -32,6 +32,17 @@ const DISH_IMAGE_TYPES = {
   png: 'image/png',
   webp: 'image/webp'
 }
+const LEGAL_DOCUMENT_TEMP_URL_MAX_AGE = 60 * 60
+const LEGAL_DOCUMENT_FILES = {
+  privacyPolicy: {
+    fileID: 'cloud://zmbbq-d0ggmremua04f027d.c9e0-static-zmbbq-d0ggmremua04f027d-1449718669/legal/privacy-policy-v1.pdf',
+    fileName: 'privacy-policy-v1.pdf'
+  },
+  privacyProtectionGuide: {
+    fileID: 'cloud://zmbbq-d0ggmremua04f027d.c9e0-static-zmbbq-d0ggmremua04f027d-1449718669/legal/privacy-protection-guide-v1.pdf',
+    fileName: 'privacy-protection-guide-v1.pdf'
+  }
+}
 const PRINTER_IDS = {
   FRONT: 'qian1',
   RAW: 'sheng2',
@@ -6549,6 +6560,41 @@ function getLegacyDishImageFileID(value) {
   }
 }
 
+async function getLegalDocumentTempUrl(payload = {}) {
+  const documentKey = String(payload.document || '').trim()
+  const document = LEGAL_DOCUMENT_FILES[documentKey]
+  if (!document) {
+    return {
+      success: false,
+      code: 'LEGAL_DOCUMENT_NOT_FOUND',
+      message: 'legal document not found'
+    }
+  }
+
+  const result = await cloud.getTempFileURL({
+    fileList: [{
+      fileID: document.fileID,
+      maxAge: LEGAL_DOCUMENT_TEMP_URL_MAX_AGE
+    }]
+  })
+  const file = result.fileList && result.fileList[0]
+  if (!file || !file.tempFileURL) {
+    return {
+      success: false,
+      code: 'LEGAL_DOCUMENT_UNAVAILABLE',
+      message: 'legal document is unavailable'
+    }
+  }
+
+  return {
+    success: true,
+    data: {
+      url: file.tempFileURL,
+      fileName: document.fileName
+    }
+  }
+}
+
 async function resolveDishImageUrls(list = []) {
   const dishes = (list || []).map(item => {
     const image = String(item && item.image || '').trim()
@@ -8639,6 +8685,7 @@ async function handleAction(action, payload) {
   if (action === 'menu.categoryGoods') return listCategoryGoods(payload)
   if (action === 'menu.search') return searchGoods(payload)
   if (action === 'menu.sync') return syncMenu(payload)
+  if (action === 'legal.documentUrl') return getLegalDocumentTempUrl(payload)
   if (action === 'shop.info') return getShopInfo(payload)
   if (action === 'notice.list') return listNotices(payload)
   if (action === 'admin.status') return getAdminStatus(payload)
