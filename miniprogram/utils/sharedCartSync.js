@@ -49,6 +49,15 @@ function getSharedItemCountMap(items = []) {
   return counts
 }
 
+function cloneCartForMutation(cart = {}) {
+  const nextCart = {}
+  Object.keys(cart || {}).forEach(cartKey => {
+    const item = cart[cartKey]
+    nextCart[cartKey] = item && typeof item === 'object' ? { ...item } : item
+  })
+  return nextCart
+}
+
 function hasSameCartCounts(cart, items) {
   const expected = getCartCountMap(cart)
   const actual = getSharedItemCountMap(items)
@@ -61,6 +70,7 @@ function hasSameCartCounts(cart, items) {
 module.exports = {
   createPatchId,
   retryWithBackoff,
+  cloneCartForMutation,
   getCartCountMap,
   getSharedItemCountMap,
   hasSameCartCounts

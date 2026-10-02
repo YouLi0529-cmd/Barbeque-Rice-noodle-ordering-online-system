@@ -459,13 +459,13 @@ Page({
 
       if (!doBuyResult || !doBuyResult.success) {
         if (doBuyResult?.code === 'SHARED_CART_CHANGED' || doBuyResult?.code === 'SHARED_CART_ALREADY_SUBMITTED') {
-          if (indexPage && typeof indexPage.fetchSharedCart === 'function') {
-            await indexPage.fetchSharedCart(false, true)
-            wx.navigateBack()
-          }
-          wx.showToast({
-            title: doBuyResult.code === 'SHARED_CART_CHANGED' ? '购物车已更新，请重新提交' : '订单已提交，购物车已更新',
-            icon: 'none'
+          wx.showModal({
+            title: '购物车状态有变化',
+            content: doBuyResult.code === 'SHARED_CART_CHANGED'
+              ? '购物车刚刚发生变化，订单尚未提交。请核对菜品和数量后再提交。'
+              : '这份购物车可能已经提交，请先返回订单页面确认，避免重复下单。',
+            showCancel: false,
+            confirmText: '我知道了'
           })
           return
         }
@@ -561,14 +561,13 @@ Page({
     } catch (err) {
       console.error('创建订单失败', err)
       if (err && (err.code === 'SHARED_CART_CHANGED' || err.code === 'SHARED_CART_ALREADY_SUBMITTED')) {
-        const indexPage = getCurrentPages().find(page => page.route === 'packages/order/pages/index/index')
-        if (indexPage && typeof indexPage.fetchSharedCart === 'function') {
-          await indexPage.fetchSharedCart(false, true)
-          wx.navigateBack()
-        }
-        wx.showToast({
-          title: err.code === 'SHARED_CART_CHANGED' ? '购物车已更新，请重新提交' : '订单已提交，购物车已更新',
-          icon: 'none'
+        wx.showModal({
+          title: '购物车状态有变化',
+          content: err.code === 'SHARED_CART_CHANGED'
+            ? '购物车刚刚发生变化，订单尚未提交。请核对菜品和数量后再提交。'
+            : '这份购物车可能已经提交，请先返回订单页面确认，避免重复下单。',
+          showCancel: false,
+          confirmText: '我知道了'
         })
         return
       }

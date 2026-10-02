@@ -43,6 +43,15 @@ test('matches exact cart keys and quantities before allowing order submission', 
   assert.equal(sharedCartSync.hasSameCartCounts(cart, serverItems.slice(0, 2)), false)
 })
 
+test('cart mutation clone keeps the previous quantity intact for delta syncing', () => {
+  const original = { dishA: { count: 1, info: { _id: 'dishA' } } }
+  const next = sharedCartSync.cloneCartForMutation(original)
+  next.dishA.count += 3
+
+  assert.equal(original.dishA.count, 1)
+  assert.equal(next.dishA.count, 4)
+})
+
 test('customer receipt anchor ignores display labels and uses the first committed order', () => {
   const firstOrder = customerReceiptState.getCustomerReceiptOrderId({}, 'order-first')
   const laterAddOn = customerReceiptState.getCustomerReceiptOrderId({

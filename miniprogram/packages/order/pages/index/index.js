@@ -1093,7 +1093,6 @@ Page({
 
     const sessionId = this.data.sharedSessionId
     let result
-    let latestSnapshot = null
     try {
       result = await sharedCartSync.retryWithBackoff(async () => {
         const response = apiClient.isEnabled()
@@ -1122,7 +1121,6 @@ Page({
           err.code = 'TABLE_SESSION_CLOSED'
           throw err
         }
-        latestSnapshot = snapshot
         if (!sharedCartSync.hasSameCartCounts(this.data.cart, snapshot.items || [])) {
           const err = new Error('\u8d2d\u7269\u8f66\u540c\u6b65\u72b6\u6001\u5c1a\u672a\u786e\u8ba4')
           err.code = 'SHARED_CART_VERIFY_MISMATCH'
@@ -1136,10 +1134,6 @@ Page({
       })
     } catch (cause) {
       if (cause && cause.code === 'SHARED_CART_VERIFY_MISMATCH') {
-        if (latestSnapshot) {
-          this.applySharedCartDocs(latestSnapshot.items || [])
-          this.setData({ sharedCartVersion: Number(latestSnapshot.cartVersion || 0) })
-        }
         const err = new Error('\u8d2d\u7269\u8f66\u5df2\u66f4\u65b0\uff0c\u8bf7\u786e\u8ba4\u540e\u518d\u63d0\u4ea4')
         err.code = 'SHARED_CART_CHANGED'
         throw err
@@ -2013,7 +2007,7 @@ Page({
     if (!this.requirePeopleBeforeOrder()) return
 
     const { currentDish, selectedTags, modalDishCount } = this.data
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     
     // 验证必选标签
     if (currentDish.tags && currentDish.tags.length > 0) {
@@ -2124,7 +2118,7 @@ Page({
     }
     
     // 规格弹窗关闭时，旧标签字段不应阻止直接加入。
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     const cartKey = goods._id
     const minOrderCount = goods.minOrderCount || 1
       
@@ -2149,7 +2143,7 @@ Page({
   // 从菜品列表减少数量（无标签版本）
   reduceDishFromCart(e) {
     const goods = e.currentTarget.dataset.goods
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     const cartKey = goods._id
     const minOrderCount = goods.minOrderCount || 1
     
@@ -2183,7 +2177,7 @@ Page({
     const goods = e.currentTarget.dataset.goods
     if (!goods || !goods._id) return
 
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     const cartKeys = Object.keys(cart).filter(key => cart[key] && cart[key].dishId === goods._id)
 
     if (cartKeys.length > 1 || (cartKeys.length === 1 && cartKeys[0] !== goods._id)) {
@@ -2242,7 +2236,7 @@ Page({
 
   reduceFromCart(e) {
     const cartKey = e.currentTarget.dataset.id
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     
     if (cart[cartKey]) {
       const minOrderCount = cart[cartKey].info && cart[cartKey].info.minOrderCount ? cart[cartKey].info.minOrderCount : 1
@@ -2259,7 +2253,7 @@ Page({
   // 从购物车增加
   addToCartFromCart(e) {
     const cartKey = e.currentTarget.dataset.id
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     
     if (cart[cartKey]) {
       cart[cartKey].count++
@@ -2272,7 +2266,7 @@ Page({
   // 选择标签选项（单选）
   editCartItemCount(e) {
     const cartKey = e.currentTarget.dataset.id
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     const item = cart[cartKey]
     if (!item) return
 
