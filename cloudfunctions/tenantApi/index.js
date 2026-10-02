@@ -1,7 +1,12 @@
 const cloud = require('wx-server-sdk')
 const crypto = require('crypto')
+const fs = require('fs')
 const https = require('https')
+const path = require('path')
 const { createPrintService } = require('./printService')
+const customerReceiptState = require('./customerReceiptState')
+const { getArrivalTableCountKey } = require('./tableArrivalCount')
+const { hasOrderableGoods } = require('./waiterOrderState')
 const {
   DEFAULT_DISH_IMAGE_FILES: RECOVERY_DISH_IMAGE_FILES,
   DISH_IMAGE_NAME_ALIASES: RECOVERY_DISH_IMAGE_NAME_ALIASES
@@ -31,6 +36,16 @@ const DISH_IMAGE_TYPES = {
   jpg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp'
+}
+const LEGAL_DOCUMENT_FILES = {
+  privacyPolicy: {
+    bundledPath: 'legal/privacy-policy-v1.pdf',
+    fileName: 'privacy-policy-v1.pdf'
+  },
+  privacyProtectionGuide: {
+    bundledPath: 'legal/privacy-protection-guide-v1.pdf',
+    fileName: 'privacy-protection-guide-v1.pdf'
+  }
 }
 const PRINTER_IDS = {
   FRONT: 'qian1',
@@ -1204,6 +1219,15 @@ async function createOrder(payload) {
     const savedRootOrderId = rootOrderId || orderRes._id
     await transaction.collection('order').doc(orderRes._id).update({ data: { rootOrderId: savedRootOrderId } })
     const savedOrder = { ...orderData, _id: orderRes._id, rootOrderId: savedRootOrderId }
+    const customerReceiptOrderId = customerReceiptState.getCustomerReceiptOrderId(
+      session,
+      orderRes._id,
+      parentOrderId || savedRootOrderId
+    )
+    const customerReceiptFields = customerReceiptState.buildCustomerReceiptSessionFields(
+      session,
+      customerReceiptOrderId
+    )
 
     if (orderScene === 'dineIn') {
       const sessionRef = transaction.collection('tableOrderSession').doc(sharedSessionId)
@@ -1217,6 +1241,7 @@ async function createOrder(payload) {
         cartVersion: expectedCartVersion + 1,
         lastSubmittedCartVersion: expectedCartVersion,
         lastSubmittedOrderId: orderRes._id,
+        ...customerReceiptFields,
         sharedCartActiveUntil,
         updateTime: db.serverDate()
       } })
@@ -1224,7 +1249,7 @@ async function createOrder(payload) {
 
     return {
       success: true, orderId: orderRes._id, order: savedOrder,
-      firstOrderForVisit, duplicateSubmission: false
+      firstOrderForVisit, customerReceiptOrderId, duplicateSubmission: false
     }
   })
 
@@ -1243,9 +1268,13 @@ async function createOrder(payload) {
         result.kitchenDispatch = { hasDispatchFailure: true, error: err.message || 'kitchen dispatch failed' }
       }
     }
-    if (orderScene !== 'camping' && result.firstOrderForVisit) {
-      result.customerReceipt = await queueSubmittedCustomerReceipt(result.order)
-    }
+  }
+  if (result && result.success && orderScene !== 'camping') {
+    result.customerReceipt = await ensureSessionCustomerReceipt(
+      sharedSessionId,
+      result.customerReceiptOrderId || result.order && result.order.rootOrderId || result.orderId,
+      payload
+    )
   }
 
   return result
@@ -1257,12 +1286,10 @@ async function adminCreateOfflineOrder(payload) {
     return { success: false, code: 'TABLE_NOT_FOUND', message: '桌台不存在' }
   }
 
-  const activeOrders = (await getSingleAdminTableOrders(tableRef.areaKey, tableRef.tableNumber))
-    .filter(order => !isAdminPaidOrder(order) && order.tableCleared !== true && order.deleted !== true && order.status !== 'cancelled')
-  const mode = payload.mode === 'create' ? 'create' : 'add'
+  const activeOrders = (await getAdminTableOrders({ areaKey: tableRef.areaKey, tableNumber: tableRef.tableNumber }))
+    .filter(order => !isAdminPaidOrder(order) && order.tableCleared !== true && order.deleted !== true && order.status !== 'cancelled' && hasOrderableGoods(order))
 
   const parentOrder = activeOrders.find(order => order.isAddOnOrder !== true) || activeOrders[0] || null
-  const rootOrderId = parentOrder ? String(parentOrder.rootOrderId || parentOrder._id) : ''
   const peopleCount = Math.max(1, Math.min(99, Math.floor(Number(
     payload.peopleCount || parentOrder && parentOrder.peopleCount || 1
   ))))
@@ -1282,19 +1309,41 @@ async function adminCreateOfflineOrder(payload) {
     const session = sessionRes.data || null
     const sessionActive = isActiveTableSession(session)
     const sessionRootOrderId = sessionActive ? String(session.activeOrderRootId || '').trim() : ''
-    if (mode === 'create' && (rootOrderId || sessionRootOrderId)) {
-      return { success: false, code: 'TABLE_OCCUPIED', message: 'table already has an active order' }
+    const candidateOrderIds = []
+    activeOrders
+      .slice()
+      .sort((left, right) => Number(left.isAddOnOrder === true) - Number(right.isAddOnOrder === true))
+      .forEach(order => {
+        if (order._id && !candidateOrderIds.includes(String(order._id))) candidateOrderIds.push(String(order._id))
+      })
+    if (sessionRootOrderId && !candidateOrderIds.includes(sessionRootOrderId)) {
+      candidateOrderIds.push(sessionRootOrderId)
     }
-    const effectiveRootOrderId = mode === 'add' ? (sessionRootOrderId || rootOrderId) : ''
-    if (mode === 'add' && !effectiveRootOrderId) {
-      return { success: false, code: 'ORDER_NOT_FOUND', message: 'active table order not found' }
+    let activeAnchorOrder = null
+    for (const candidateId of candidateOrderIds) {
+      const candidateRes = await transaction.collection('order').doc(candidateId).get().catch(() => ({ data: null }))
+      const candidate = candidateRes.data
+      if (!candidate || !isAdminTableOrder(candidate) || isAdminPaidOrder(candidate) ||
+          candidate.tableCleared === true || candidate.deleted === true || candidate.status === 'cancelled' ||
+          !hasOrderableGoods(candidate)) continue
+      activeAnchorOrder = candidate
+      break
     }
+    // Treat the page's create/add choice as a hint. Server state is authoritative:
+    // a live order in this table group becomes an add-on; an empty/cancelled stale
+    // root no longer blocks a fresh order.
+    const effectiveRootOrderId = activeAnchorOrder
+      ? String(activeAnchorOrder.rootOrderId || activeAnchorOrder._id || '')
+      : ''
     const isAddOnOrder = !!effectiveRootOrderId
     const legacyAddOnCount = activeOrders
       .filter(order => String(order.rootOrderId || order._id) === effectiveRootOrderId)
       .reduce((max, order) => Math.max(max, Number(order.addOnIndex || 0)), 0)
     const addOnIndex = isAddOnOrder
-      ? Math.max(Number(sessionActive && session.addOnCount || 0), legacyAddOnCount) + 1
+      ? Math.max(
+        Number(sessionActive && sessionRootOrderId === effectiveRootOrderId && session.addOnCount || 0),
+        legacyAddOnCount
+      ) + 1
       : 0
     const visitId = sessionActive && session.visitId ? String(session.visitId) : crypto.randomBytes(16).toString('hex')
     const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods, { allowPackages: true })
@@ -1335,10 +1384,10 @@ async function adminCreateOfflineOrder(payload) {
       userPhone: '',
       tableNumber: formatAdminTableNumber(tableRef),
       tableVisitId: visitId,
-      ...(parentOrder && parentOrder.tableGroupId ? {
-        tableGroupId: parentOrder.tableGroupId,
-        tableGroupPrimary: parentOrder.tableGroupPrimary || null,
-        tableGroupTables: Array.isArray(parentOrder.tableGroupTables) ? parentOrder.tableGroupTables : []
+      ...(activeAnchorOrder && activeAnchorOrder.tableGroupId ? {
+        tableGroupId: activeAnchorOrder.tableGroupId,
+        tableGroupPrimary: activeAnchorOrder.tableGroupPrimary || null,
+        tableGroupTables: Array.isArray(activeAnchorOrder.tableGroupTables) ? activeAnchorOrder.tableGroupTables : []
       } : {}),
       peopleCount
     }
@@ -1348,6 +1397,16 @@ async function adminCreateOfflineOrder(payload) {
     if (!effectiveRootOrderId) {
       await transaction.collection('order').doc(addRes._id).update({ data: { rootOrderId: savedRootOrderId } })
     }
+    const receiptSession = sessionActive ? session : {}
+    const customerReceiptOrderId = customerReceiptState.getCustomerReceiptOrderId(
+      receiptSession,
+      addRes._id,
+      effectiveRootOrderId || savedRootOrderId
+    )
+    const customerReceiptFields = customerReceiptState.buildCustomerReceiptSessionFields(
+      receiptSession,
+      customerReceiptOrderId
+    )
     const visitHistory = Array.isArray(session && session.visitHistory) ? session.visitHistory.slice() : []
     if (!sessionActive && session && session.visitId) {
       visitHistory.push({
@@ -1365,6 +1424,7 @@ async function adminCreateOfflineOrder(payload) {
       visitHistory: visitHistory.slice(-100),
       memberOpenids: sessionActive && Array.isArray(session.memberOpenids) ? session.memberOpenids : [],
       activeOrderRootId: savedRootOrderId, addOnCount: addOnIndex,
+      ...customerReceiptFields,
       createTime: sessionActive && session.createTime ? session.createTime : db.serverDate(), updateTime: db.serverDate()
     }
     if (session) await sessionRef.update({ data: sessionData })
@@ -1374,6 +1434,7 @@ async function adminCreateOfflineOrder(payload) {
       success: true,
       orderId: addRes._id,
       order: { ...orderData, _id: addRes._id, rootOrderId: savedRootOrderId },
+      customerReceiptOrderId,
       firstOrderForVisit: !isAddOnOrder,
       duplicateSubmission: false
     }
@@ -1395,22 +1456,155 @@ async function adminCreateOfflineOrder(payload) {
         result.kitchenDispatch = { hasDispatchFailure: true, error: err.message || 'kitchen dispatch failed' }
       }
     }
-    if (result.firstOrderForVisit && !result.duplicateSubmission) {
-      result.customerReceipt = await queueSubmittedCustomerReceipt(result.order)
-    }
+    result.customerReceipt = await ensureSessionCustomerReceipt(
+      sessionId,
+      result.customerReceiptOrderId || result.order && result.order.rootOrderId || result.orderId,
+      payload
+    )
   }
   return result
 }
 
-async function queueSubmittedCustomerReceipt(order) {
+async function updateSessionCustomerReceiptState({ sessionId, visitId, orderId, update }) {
+  return db.runTransaction(async transaction => {
+    const sessionRef = transaction.collection('tableOrderSession').doc(sessionId)
+    const sessionRes = await sessionRef.get()
+    const session = sessionRes.data
+    if (!session) return false
+    if (visitId && String(session.visitId || '') !== visitId) return false
+    const currentOrderId = String(session.customerReceiptOrderId || session.activeOrderRootId || '').trim()
+    if (currentOrderId && currentOrderId !== orderId) return false
+    await sessionRef.update({
+      data: {
+        customerReceiptOrderId: orderId,
+        ...update,
+        updateTime: db.serverDate()
+      }
+    })
+    return true
+  })
+}
+
+async function ensureSessionCustomerReceipt(sessionId, fallbackOrderId, payload = {}) {
+  const normalizedSessionId = String(sessionId || '').trim()
+  if (!normalizedSessionId) return { status: 'skipped', reason: 'table session missing' }
+
+  try {
+    const sessionRes = await db.collection('tableOrderSession').doc(normalizedSessionId).get()
+    const session = sessionRes.data
+    if (!session) return { status: 'skipped', reason: 'table session missing' }
+    const visitId = String(session.visitId || '').trim()
+    const receiptOrderId = customerReceiptState.getCustomerReceiptOrderId(session, fallbackOrderId)
+    if (!receiptOrderId) return { status: 'skipped', reason: 'receipt anchor missing' }
+    if ((session.customerReceiptStatus === 'task_created' || session.customerReceiptStatus === 'queued') &&
+        String(session.customerReceiptOrderId || '') === receiptOrderId) {
+      const jobIds = Array.isArray(session.customerReceiptJobIds) ? session.customerReceiptJobIds : []
+      const jobs = await Promise.all(jobIds.map(jobId =>
+        db.collection('printJobs').doc(String(jobId)).get().then(result => result.data).catch(() => null)
+      ))
+      return {
+        status: 'task_created',
+        taskCreated: true,
+        alreadyQueued: true,
+        jobIds,
+        printStatuses: jobs.filter(Boolean).map(job => String(job.status || ''))
+      }
+    }
+
+    const anchorRes = await db.collection('order').doc(receiptOrderId).get().catch(() => ({ data: null }))
+    const anchorOrder = anchorRes.data
+    if (!anchorOrder || anchorOrder.type !== 'order') {
+      await updateSessionCustomerReceiptState({
+        sessionId: normalizedSessionId,
+        visitId,
+        orderId: receiptOrderId,
+        update: {
+          customerReceiptStatus: 'pending',
+          customerReceiptLastError: 'receipt anchor order missing',
+          customerReceiptLastAttemptAt: db.serverDate()
+        }
+      })
+      return { status: 'pending', taskCreated: false, error: 'receipt anchor order missing' }
+    }
+
+    const currentAttempt = String(session.customerReceiptOrderId || '') === receiptOrderId
+      ? Math.max(0, Math.floor(Number(session.customerReceiptAttemptCount) || 0))
+      : 0
+    await updateSessionCustomerReceiptState({
+      sessionId: normalizedSessionId,
+      visitId,
+      orderId: receiptOrderId,
+      update: {
+        customerReceiptStatus: 'pending',
+        customerReceiptAttemptCount: currentAttempt + 1,
+        customerReceiptLastAttemptAt: db.serverDate(),
+        customerReceiptLastError: ''
+      }
+    })
+
+    const eventKey = customerReceiptState.getCustomerReceiptEventKey(receiptOrderId)
+    const receiptResult = await customerReceiptState.retryCustomerReceiptQueue(
+      () => queueSubmittedCustomerReceipt(anchorOrder, {
+        visitId,
+        eventKey,
+        storeId: getTenantId(payload)
+      }),
+      { maxAttempts: 3, delays: [200, 500] }
+    )
+    const jobs = Array.isArray(receiptResult.jobs) ? receiptResult.jobs : []
+    if (receiptResult && !receiptResult.error && !receiptResult.skipped && jobs.length > 0) {
+      const jobIds = jobs.map(job => String(job && job._id || '')).filter(Boolean)
+      const marked = await updateSessionCustomerReceiptState({
+        sessionId: normalizedSessionId,
+        visitId,
+        orderId: receiptOrderId,
+        update: {
+          customerReceiptStatus: 'task_created',
+          customerReceiptJobIds: jobIds,
+          customerReceiptQueuedAt: db.serverDate(),
+          customerReceiptLastError: ''
+        }
+      })
+      return {
+        status: marked ? 'task_created' : 'stale_session',
+        taskCreated: true,
+        jobIds,
+        printStatuses: jobs.map(job => String(job && job.status || ''))
+      }
+    }
+
+    const error = receiptResult.error || receiptResult.reason || 'cashier receipt printer unavailable'
+    await updateSessionCustomerReceiptState({
+      sessionId: normalizedSessionId,
+      visitId,
+      orderId: receiptOrderId,
+      update: {
+        customerReceiptStatus: 'pending',
+        customerReceiptLastError: String(error).slice(0, 500),
+        customerReceiptLastAttemptAt: db.serverDate()
+      }
+    })
+    return {
+      status: 'pending',
+      taskCreated: false,
+      skipped: !!(receiptResult && receiptResult.skipped),
+      error
+    }
+  } catch (err) {
+    console.error('ensure first customer receipt failed', err)
+    return { status: 'pending', taskCreated: false, error: err.message || 'customer receipt task creation failed' }
+  }
+}
+
+async function queueSubmittedCustomerReceipt(order, options = {}) {
   const rootOrderId = String(order.rootOrderId || order._id || '').trim()
-  if (!rootOrderId) return { skipped: true, reason: 'order root missing' }
+  if (!rootOrderId) return { jobs: [], skipped: true, reason: 'order root missing' }
   try {
     const tableRef = getOrderTableRef(order)
     const records = tableRef
       ? await getAdminTableOrders({ areaKey: tableRef.areaKey, tableNumber: tableRef.tableNumber })
       : (await db.collection('order').where({ rootOrderId }).limit(100).get()).data || []
-    const orders = records.filter(item =>
+    let orders = records.filter(item =>
       item.type === 'order' &&
       item.storeId === order.storeId &&
       item.tableCleared !== true &&
@@ -1418,17 +1612,27 @@ async function queueSubmittedCustomerReceipt(order) {
       item.status !== 'cancelled' &&
       !isAdminPaidOrder(item)
     )
+    if (options.visitId) {
+      orders = orders.filter(item =>
+        String(item.tableVisitId || '') === options.visitId ||
+        (!item.tableVisitId && String(item.rootOrderId || item._id || '') === rootOrderId)
+      )
+    }
     if (!orders.some(item => item._id === order._id)) orders.push(order)
     const printed = await printService.queueCashierReceipt({
-      id: order.storeId,
+      id: options.storeId || order.storeId,
       ticketType: 'customer_order',
       orders,
-      eventKey: `auto-submit:${order._id}`
+      eventKey: options.eventKey || customerReceiptState.getCustomerReceiptEventKey(order._id)
     })
-    return { jobs: (printed.jobs || []).map(job => job._id), skipped: !!printed.skipped, reason: printed.reason || '' }
+    return {
+      jobs: (printed.jobs || []),
+      skipped: !!printed.skipped,
+      reason: printed.reason || ''
+    }
   } catch (err) {
     console.error('auto customer receipt job failed', err)
-    return { jobs: [], error: err.message || 'customer receipt job failed' }
+    return { jobs: [], error: err.message || 'customer receipt task creation failed' }
   }
 }
 
@@ -2569,8 +2773,8 @@ function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'tod
     const groupKey = getArrivalOrderKey(order)
     if (!groupKey) return
     if (order.status !== 'cancelled' && (order.tableCleared !== true || isAdminPaidOrder(order))) {
-      const visitId = String(order.tableVisitId || '').trim()
-      countedTableKeys.add(visitId ? `visit:${visitId}` : groupKey)
+      const tableCountKey = getArrivalTableCountKey(order, { rootOrderGroupKeys })
+      if (tableCountKey) countedTableKeys.add(tableCountKey)
     }
     const rootOrderId = String(order.rootOrderId || order._id || '').trim()
     if (rootOrderId) rootOrderGroupKeys[rootOrderId] = groupKey
@@ -2590,9 +2794,8 @@ function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'tod
     const arrivedAt = getTimeValue(session.peopleConfirmedAt || session.createTime || session.updateTime)
     if (!arrivedAt || arrivedAt < startAt || (endAt && arrivedAt >= endAt)) return
     if (isActiveTableSession(session)) {
-      const visitId = String(session.visitId || '').trim()
-      const activeRoot = String(session.activeOrderRootId || '').trim()
-      countedTableKeys.add(visitId ? `visit:${visitId}` : (activeRoot ? `order:${activeRoot}` : `session:${String(session._id || session.tableNumber || '').trim()}`))
+      const tableCountKey = getArrivalTableCountKey(session, { isSession: true, rootOrderGroupKeys })
+      if (tableCountKey) countedTableKeys.add(tableCountKey)
     }
 
     const rootOrderId = String(session.activeOrderRootId || '').trim()
@@ -2745,6 +2948,42 @@ function getBusinessStatsPaymentBreakdown(orders = [], groupRevenue = 0) {
   if (paymentMethod === 'cash') return { cash: total, online: 0, other: 0 }
   if (['wechat_alipay', 'wechat', 'alipay', 'online'].includes(paymentMethod)) return { cash: 0, online: total, other: 0 }
   return { cash: 0, online: 0, other: total }
+}
+
+function buildSettlementPaymentBreakdown(paymentMethod, receivable, options = {}) {
+  const total = roundMoney(Math.max(0, Number(receivable) || 0))
+  const method = String(paymentMethod || '').trim()
+  const mixedPaymentChannel = String(options.mixedPaymentChannel || '').trim() === 'online' ? 'online' : 'cash'
+  const mixedPaymentAmount = Number(options.mixedPaymentAmount)
+  const hasValidMixedPaymentAmount = Number.isFinite(mixedPaymentAmount) && mixedPaymentAmount >= 0 && mixedPaymentAmount <= total
+
+  if (method === 'mixed') {
+    const selectedAmount = hasValidMixedPaymentAmount ? roundMoney(mixedPaymentAmount) : 0
+    const cash = mixedPaymentChannel === 'online' ? roundMoney(total - selectedAmount) : selectedAmount
+    const online = mixedPaymentChannel === 'online' ? selectedAmount : roundMoney(total - selectedAmount)
+    return {
+      cash,
+      online,
+      mixedPaymentChannel,
+      paymentSplitValid: hasValidMixedPaymentAmount
+    }
+  }
+
+  if (method === 'cash') return { cash: total, online: 0, mixedPaymentChannel: '', paymentSplitValid: true }
+  if (['wechat_alipay', 'wechat', 'alipay', 'online'].includes(method)) {
+    return { cash: 0, online: total, mixedPaymentChannel: '', paymentSplitValid: true }
+  }
+  return { cash: 0, online: 0, mixedPaymentChannel: '', paymentSplitValid: true }
+}
+
+function getSettlementStoredMixedPayment(orders = []) {
+  const source = orders.find(order => order.checkoutCashAmount !== undefined || order.checkoutOnlineAmount !== undefined) || {}
+  const channel = String(source.mixedPaymentChannel || '').trim() === 'online' ? 'online' : 'cash'
+  const amount = channel === 'online' ? Number(source.checkoutOnlineAmount) : Number(source.checkoutCashAmount)
+  return {
+    mixedPaymentChannel: channel,
+    mixedPaymentAmount: Number.isFinite(amount) && amount >= 0 ? roundMoney(amount) : 0
+  }
 }
 
 function buildBusinessStatsSnapshot(orders = [], range) {
@@ -2923,7 +3162,7 @@ function getSettlementPaymentText(orders = []) {
   const paymentMethod = getSettlementPaymentMethod(orders)
   const paymentTexts = {
     cash: '现金',
-    credit: '挂账',
+    credit: '混合支付',
     wechat: '微信',
     alipay: '支付宝',
     wechat_alipay: '微信/支付宝',
@@ -2979,6 +3218,7 @@ function buildSettlementRecord(key, orders = []) {
   const paidAt = Math.max(...orders.map(order => getBusinessStatsPaidTime(order)).filter(Boolean), 0)
   const discount = getSettlementDiscount(orders)
   const receivable = getBusinessStatsGroupRevenue(orders)
+  const paymentBreakdown = getBusinessStatsPaymentBreakdown(orders, receivable)
   const scene = isCampingOrder(orders[0]) ? 'camping' : 'dineIn'
   const peopleCount = getSettlementPeopleCount(orders)
   return {
@@ -2993,6 +3233,8 @@ function buildSettlementRecord(key, orders = []) {
     receivable,
     paymentMethod: getSettlementPaymentMethod(orders),
     paymentText: getSettlementPaymentText(orders),
+    cashReceived: paymentBreakdown.cash,
+    onlineReceived: paymentBreakdown.online,
     discountText: discount.discountText,
     directReduceText: discount.directReduceText,
     orderCount: orders.length
@@ -3172,7 +3414,7 @@ async function adminEditSettlement(payload) {
     return { success: false, code: 'SETTLEMENT_DISH_INVALID', message: 'menu dish and quantity are required' }
   }
   const paymentMethod = String(payload.paymentMethod || '').trim()
-  if (operation === 'updatePaymentMethod' && !['cash', 'credit', 'wechat_alipay'].includes(paymentMethod)) {
+  if (operation === 'updatePaymentMethod' && !['cash', 'mixed', 'wechat_alipay'].includes(paymentMethod)) {
     return { success: false, code: 'SETTLEMENT_PAYMENT_METHOD_INVALID', message: 'payment method is invalid' }
   }
   const receivedAmount = Number(payload.receivedAmount)
@@ -3196,20 +3438,43 @@ async function adminEditSettlement(payload) {
       return { success: true, data: { deletedOrders: currentOrders.length } }
     }
     if (operation === 'updatePaymentMethod') {
+      const receivable = getBusinessStatsGroupRevenue(currentOrders)
+      const paymentBreakdown = buildSettlementPaymentBreakdown(paymentMethod, receivable, payload)
+      if (!paymentBreakdown.paymentSplitValid) {
+        return { success: false, code: 'MIXED_PAYMENT_AMOUNT_INVALID', message: 'mixed payment amount must be between 0 and receivable amount' }
+      }
       for (const order of currentOrders) {
         await transaction.collection('order').doc(order._id).update({
-          data: { paymentMethod, payMethod: paymentMethod, updateTime: db.serverDate() }
+          data: {
+            paymentMethod,
+            payMethod: paymentMethod,
+            checkoutCashAmount: paymentBreakdown.cash,
+            checkoutOnlineAmount: paymentBreakdown.online,
+            mixedPaymentChannel: paymentBreakdown.mixedPaymentChannel,
+            updateTime: db.serverDate()
+          }
         })
       }
-      return { success: true, data: { paymentMethod } }
+      return { success: true, data: { paymentMethod, cashReceived: paymentBreakdown.cash, onlineReceived: paymentBreakdown.online } }
     }
     if (operation === 'updateReceivable') {
       const normalizedReceivedAmount = roundMoney(receivedAmount)
+      const currentPaymentMethod = getSettlementPaymentMethod(currentOrders)
+      const storedMixedPayment = getSettlementStoredMixedPayment(currentOrders)
+      storedMixedPayment.mixedPaymentAmount = Math.min(storedMixedPayment.mixedPaymentAmount, normalizedReceivedAmount)
+      const paymentBreakdown = buildSettlementPaymentBreakdown(
+        currentPaymentMethod,
+        normalizedReceivedAmount,
+        storedMixedPayment
+      )
       for (const order of currentOrders) {
         await transaction.collection('order').doc(order._id).update({
           data: {
             checkoutReceivable: normalizedReceivedAmount,
             receivedAmount: normalizedReceivedAmount,
+            checkoutCashAmount: paymentBreakdown.cash,
+            checkoutOnlineAmount: paymentBreakdown.online,
+            mixedPaymentChannel: paymentBreakdown.mixedPaymentChannel,
             updateTime: db.serverDate()
           }
         })
@@ -3273,11 +3538,21 @@ async function adminEditSettlement(payload) {
     if (!refreshedOrders.length) return { success: true, data: { deletedOrders: 1, receivable: 0 } }
     const totalPrice = roundMoney(refreshedOrders.reduce((sum, order) => sum + getSettlementGoodsTotal(order.goods), 0))
     const checkoutSummary = getEditedSettlementSummary(totalPrice, refreshedOrders)
+    const storedMixedPayment = getSettlementStoredMixedPayment(refreshedOrders)
+    storedMixedPayment.mixedPaymentAmount = Math.min(storedMixedPayment.mixedPaymentAmount, checkoutSummary.receivable)
+    const paymentBreakdown = buildSettlementPaymentBreakdown(
+      getSettlementPaymentMethod(refreshedOrders),
+      checkoutSummary.receivable,
+      storedMixedPayment
+    )
     for (const order of refreshedOrders) {
       await transaction.collection('order').doc(order._id).update({ data: {
         checkoutTotalPrice: totalPrice,
         checkoutReceivable: checkoutSummary.receivable,
         receivedAmount: checkoutSummary.receivable,
+        checkoutCashAmount: paymentBreakdown.cash,
+        checkoutOnlineAmount: paymentBreakdown.online,
+        mixedPaymentChannel: paymentBreakdown.mixedPaymentChannel,
         checkoutDiscountType: checkoutSummary.discountType,
         checkoutDiscountValue: checkoutSummary.discountValue,
         checkoutDirectReduceValue: checkoutSummary.directReduceValue,
@@ -5922,6 +6197,12 @@ async function joinSharedCart(payload) {
       updateData.cartVersion = 0
       updateData.activeOrderRootId = ''
       updateData.addOnCount = 0
+      updateData.customerReceiptOrderId = ''
+      updateData.customerReceiptStatus = ''
+      updateData.customerReceiptJobIds = []
+      updateData.customerReceiptAttemptCount = 0
+      updateData.customerReceiptLastAttemptAt = null
+      updateData.customerReceiptLastError = ''
       await clearSharedCartItemsBySessionId(sessionId)
       clearedForNewSession = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date())
     }
@@ -5940,6 +6221,10 @@ async function joinSharedCart(payload) {
         visitHistory: [],
         activeOrderRootId: '',
         addOnCount: 0,
+        customerReceiptOrderId: '',
+        customerReceiptStatus: '',
+        customerReceiptJobIds: [],
+        customerReceiptAttemptCount: 0,
         sharedCartActiveUntil
       }
       : {
@@ -5961,6 +6246,10 @@ async function joinSharedCart(payload) {
         visitHistory: [],
         activeOrderRootId: inferredOrderContext.activeOrderRootId || '',
         addOnCount: inferredOrderContext.addOnCount || 0,
+        customerReceiptOrderId: '',
+        customerReceiptStatus: '',
+        customerReceiptJobIds: [],
+        customerReceiptAttemptCount: 0,
         sharedCartActiveUntil,
         memberOpenids: [auth.data.openid],
         createTime: db.serverDate(),
@@ -5977,6 +6266,10 @@ async function joinSharedCart(payload) {
       visitId: newVisitId(),
       activeOrderRootId: inferredOrderContext.activeOrderRootId || '',
       addOnCount: inferredOrderContext.addOnCount || 0,
+      customerReceiptOrderId: '',
+      customerReceiptStatus: '',
+      customerReceiptJobIds: [],
+      customerReceiptAttemptCount: 0,
       sharedCartActiveUntil
     }
   }
@@ -6174,6 +6467,7 @@ async function patchSharedCart(payload) {
   const tableNumber = normalizeTableNumber(payload.tableNumber)
   const sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
   const operations = Array.isArray(payload.operations) ? payload.operations : []
+  const patchId = String(payload.patchId || '').trim().slice(0, 100)
 
   if (!sessionId || !tableNumber) {
     return {
@@ -6199,10 +6493,16 @@ async function patchSharedCart(payload) {
     }
   }
 
-  const nextVersion = await db.runTransaction(async transaction => {
+  const transactionResult = await db.runTransaction(async transaction => {
     const txSessionRef = transaction.collection('tableOrderSession').doc(sessionId)
     const txSessionRes = await txSessionRef.get()
     if (!isActiveTableSession(txSessionRes.data)) throw new Error('TABLE_SESSION_CLOSED')
+    const session = txSessionRes.data || {}
+    const currentVersion = Math.max(0, Math.floor(Number(session.cartVersion || 0)))
+    const appliedPatchIds = Array.isArray(session.appliedCartPatchIds) ? session.appliedCartPatchIds : []
+    if (patchId && appliedPatchIds.includes(patchId)) {
+      return { cartVersion: currentVersion, duplicate: true }
+    }
     for (const operation of operations) {
       const cartKey = String(operation.cartKey || '').trim()
       const delta = Math.floor(Number(operation.delta) || 0)
@@ -6250,23 +6550,26 @@ async function patchSharedCart(payload) {
         })
       }
     }
+    const nextVersion = currentVersion + 1
     await txSessionRef.update({
       data: {
         tableNumber,
         memberOpenids: _.addToSet(auth.data.openid),
-        cartVersion: _.inc(1),
+        cartVersion: nextVersion,
+        ...(patchId ? { appliedCartPatchIds: appliedPatchIds.concat(patchId).slice(-64) } : {}),
         sharedCartActiveUntil: new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS),
         updateTime: db.serverDate()
       }
     })
-    return Math.max(0, Math.floor(Number(txSessionRes.data.cartVersion || 0))) + 1
+    return { cartVersion: nextVersion, duplicate: false }
   })
 
   const sharedCartActiveUntil = new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS)
 
   return {
     success: true,
-    cartVersion: nextVersion,
+    cartVersion: transactionResult.cartVersion,
+    duplicatePatch: transactionResult.duplicate,
     sharedCartSyncActive: true,
     sharedCartActiveUntil: sharedCartActiveUntil.getTime()
   }
@@ -6546,6 +6849,37 @@ function getLegacyDishImageFileID(value) {
     return cloudPath ? `${DEFAULT_DISH_IMAGE_FILE_ID_PREFIX}/${cloudPath}` : ''
   } catch (err) {
     return ''
+  }
+}
+
+async function getLegalDocumentContent(payload = {}) {
+  const documentKey = String(payload.document || '').trim()
+  const document = LEGAL_DOCUMENT_FILES[documentKey]
+  if (!document) {
+    return {
+      success: false,
+      code: 'LEGAL_DOCUMENT_NOT_FOUND',
+      message: 'legal document not found'
+    }
+  }
+
+  try {
+    const fileContent = fs.readFileSync(path.join(__dirname, document.bundledPath))
+
+    return {
+      success: true,
+      data: {
+        fileName: document.fileName,
+        contentBase64: fileContent.toString('base64')
+      }
+    }
+  } catch (err) {
+    console.error('read legal document content failed', err)
+    return {
+      success: false,
+      code: 'LEGAL_DOCUMENT_UNAVAILABLE',
+      message: 'legal document is unavailable'
+    }
   }
 }
 
@@ -8639,6 +8973,7 @@ async function handleAction(action, payload) {
   if (action === 'menu.categoryGoods') return listCategoryGoods(payload)
   if (action === 'menu.search') return searchGoods(payload)
   if (action === 'menu.sync') return syncMenu(payload)
+  if (action === 'legal.documentContent') return getLegalDocumentContent(payload)
   if (action === 'shop.info') return getShopInfo(payload)
   if (action === 'notice.list') return listNotices(payload)
   if (action === 'admin.status') return getAdminStatus(payload)

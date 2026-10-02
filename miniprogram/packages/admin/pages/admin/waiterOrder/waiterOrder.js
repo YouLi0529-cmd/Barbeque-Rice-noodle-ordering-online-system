@@ -421,6 +421,22 @@ Page({
         return
       }
       this.pendingSubmissionId = ''
+      const receiptJobFailed = result && result.customerReceipt &&
+        Array.isArray(result.customerReceipt.printStatuses) &&
+        result.customerReceipt.printStatuses.some(status => status === 'failed' || status === 'cancelled')
+      if (result && result.customerReceipt && (result.customerReceipt.status === 'pending' || receiptJobFailed)) {
+        wx.showModal({
+          title: result.customerReceipt.status === 'pending'
+            ? '\u8ba2\u5355\u5df2\u6210\u529f\uff0c\u5ba2\u5355\u4efb\u52a1\u5f85\u8865\u5efa'
+            : '\u8ba2\u5355\u5df2\u6210\u529f\uff0c\u5ba2\u5355\u53d1\u9001\u5931\u8d25',
+          content: result.customerReceipt.status === 'pending'
+            ? '\u7cfb\u7edf\u4f1a\u5728\u540e\u7eed\u63d0\u4ea4\u65f6\u5b89\u5168\u91cd\u8bd5\u3002\u5982\u9700\u7acb\u5373\u6253\u5370\uff0c\u53ef\u5728\u684c\u53f0\u8d26\u5355\u4e2d\u70b9\u51fb\u201c\u6253\u5370\u5ba2\u5355\u201d\u3002'
+            : '\u5ba2\u5355\u4efb\u52a1\u5df2\u521b\u5efa\uff0c\u4f46\u6253\u5370\u8bbe\u5907\u672a\u786e\u8ba4\u6253\u5370\u6210\u529f\u3002\u8bf7\u5728\u6253\u5370\u4efb\u52a1\u4e2d\u68c0\u67e5\u72b6\u6001\uff0c\u907f\u514d\u91cd\u590d\u5f00\u5355\u3002',
+          showCancel: false,
+          success: () => setTimeout(() => wx.navigateBack(), 300)
+        })
+        return
+      }
       wx.showToast({ title: this.data.mode === 'create' ? '开单成功' : '加菜成功', icon: 'success' })
       setTimeout(() => wx.navigateBack(), 500)
     } catch (err) {

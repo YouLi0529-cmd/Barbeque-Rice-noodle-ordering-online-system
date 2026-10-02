@@ -302,6 +302,7 @@ async function patchCart(openid, event) {
   const sessionId = String(event.sessionId || '').trim()
   const tableNumber = normalizeTableNumber(event.tableNumber)
   const operations = Array.isArray(event.operations) ? event.operations : []
+  const patchId = String(event.patchId || '').trim().slice(0, 100)
 
   if (!sessionId || !tableNumber) {
     return {
@@ -326,7 +327,16 @@ async function patchCart(openid, event) {
     }
   }
 
-  await db.runTransaction(async transaction => {
+  const transactionResult = await db.runTransaction(async transaction => {
+    const sessionRef = transaction.collection('tableOrderSession').doc(sessionId)
+    const sessionRes = await sessionRef.get()
+    const session = sessionRes.data || {}
+    if (buildSessionState(session).sessionClosed) throw new Error('SESSION_CLOSED')
+    const appliedPatchIds = Array.isArray(session.appliedCartPatchIds) ? session.appliedCartPatchIds : []
+    if (patchId && appliedPatchIds.includes(patchId)) {
+      return { duplicate: true }
+    }
+
     for (const operation of operations) {
       const cartKey = String(operation.cartKey || '').trim()
       const delta = Math.floor(Number(operation.delta) || 0)
@@ -374,18 +384,20 @@ async function patchCart(openid, event) {
         })
       }
     }
-  })
-
-  await sessionRef.update({
-    data: {
-      tableNumber,
-      memberOpenids: _.addToSet(openid),
-      updateTime: db.serverDate()
-    }
+    await sessionRef.update({
+      data: {
+        tableNumber,
+        memberOpenids: _.addToSet(openid),
+        ...(patchId ? { appliedCartPatchIds: appliedPatchIds.concat(patchId).slice(-64) } : {}),
+        updateTime: db.serverDate()
+      }
+    })
+    return { duplicate: false }
   })
 
   return {
-    success: true
+    success: true,
+    duplicatePatch: transactionResult.duplicate
   }
 }
 

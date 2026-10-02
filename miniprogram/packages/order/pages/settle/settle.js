@@ -423,8 +423,8 @@ Page({
         orderCardTitle: this.data.currentCardTitle
       }
       const indexPage = getCurrentPages().find(page => page.route === 'packages/order/pages/index/index')
-      if (indexPage && indexPage.sharedCartPatchPromise) {
-        await indexPage.sharedCartPatchPromise
+      if (indexPage && this.data.orderScene !== 'camping' && typeof indexPage.ensureSharedCartReadyForSubmit === 'function') {
+        await indexPage.ensureSharedCartReadyForSubmit()
         orderPayload.cartVersion = Number(indexPage.data.sharedCartVersion || orderPayload.cartVersion || 0)
       }
       // The settle page receives an earlier snapshot when it opens. Use the
@@ -553,7 +553,9 @@ Page({
       this.saveActiveOrderSession(orderCards, orderId)
 
       wx.showToast({
-        title: '提交成功',
+        title: doBuyResult.customerReceipt && doBuyResult.customerReceipt.status === 'pending'
+          ? '\u8ba2\u5355\u5df2\u63d0\u4ea4\uff0c\u8bf7\u544a\u77e5\u670d\u52a1\u5458\u786e\u8ba4\u5ba2\u5355'
+          : '提交成功',
         icon: 'success'
       })
     } catch (err) {
