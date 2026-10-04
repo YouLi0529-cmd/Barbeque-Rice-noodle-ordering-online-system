@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const { parsePositiveInteger } = require('../../../../../utils/quantityInput')
 const adminSound = require('../../../utils/adminSound')
 
 const CACHE_KEY = 'adminWaiterMenuCacheV2'
@@ -284,6 +285,70 @@ Page({
   onRemarkInput(event) { this.setData({ remark: String(event.detail.value || '').slice(0, 20) }) },
   increaseModalCount() { this.setData({ modalCount: this.data.modalCount + 1 }) },
   decreaseModalCount() { this.setData({ modalCount: Math.max(1, this.data.modalCount - 1) }) },
+  promptQuantity(initialValue, onConfirm) {
+    wx.showModal({
+      title: '修改份数',
+      editable: true,
+      placeholderText: '请输入份数',
+      content: String(initialValue || 1),
+      success: result => {
+        if (!result.confirm) return
+        const count = parsePositiveInteger(result.content)
+        if (count == null) {
+          wx.showToast({ title: '请输入1到999之间的整数', icon: 'none' })
+          return
+        }
+        onConfirm(count)
+      }
+    })
+  },
+  editModalCount() {
+    this.promptQuantity(this.data.modalCount, count => this.setData({ modalCount: count }))
+  },
+  editDishCount(event) {
+    const dishId = String(event.currentTarget.dataset.id || '')
+    const dish = this.findCachedDish(dishId)
+    if (!dish || dish.needSpec !== false) return
+
+    const cart = this.data.cart || {}
+    const matchingItems = Object.keys(cart)
+      .map(key => ({ key, item: cart[key] }))
+      .filter(entry => entry.item.dishId === dishId)
+    const currentCount = matchingItems.reduce((sum, entry) => sum + Number(entry.item.count || 0), 0)
+    if (currentCount <= 0) return
+
+    this.promptQuantity(currentCount, count => {
+      const packagedCount = matchingItems.reduce((sum, entry) => (
+        sum + (entry.item.packageId ? Number(entry.item.count || 0) : 0)
+      ), 0)
+      if (count < packagedCount) {
+        wx.showToast({ title: `套餐内已包含${packagedCount}份，不能调低到该数量`, icon: 'none' })
+        return
+      }
+
+      const directCount = count - packagedCount
+      const nextCart = { ...this.data.cart }
+      const directEntries = matchingItems.filter(entry => !entry.item.packageId)
+      if (directCount <= 0) {
+        directEntries.forEach(entry => { delete nextCart[entry.key] })
+      } else if (directEntries.length > 0) {
+        nextCart[directEntries[0].key] = { ...directEntries[0].item, count: directCount }
+        directEntries.slice(1).forEach(entry => { delete nextCart[entry.key] })
+      } else {
+        const key = `${dish._id}_`
+        nextCart[key] = {
+          key,
+          dishId: dish._id,
+          info: dish,
+          count: directCount,
+          tags: {},
+          tagLabels: [],
+          tagText: ''
+        }
+      }
+      this.updateCart(nextCart)
+    })
+  },
   closeSpecModal() { this.setData({ showSpecModal: false, currentDish: null }) },
   stopTap() {},
 
@@ -421,6 +486,22 @@ Page({
         return
       }
       this.pendingSubmissionId = ''
+      const receiptJobFailed = result && result.customerReceipt &&
+        Array.isArray(result.customerReceipt.printStatuses) &&
+        result.customerReceipt.printStatuses.some(status => status === 'failed' || status === 'cancelled')
+      if (result && result.customerReceipt && (result.customerReceipt.status === 'pending' || receiptJobFailed)) {
+        wx.showModal({
+          title: result.customerReceipt.status === 'pending'
+            ? '\u8ba2\u5355\u5df2\u6210\u529f\uff0c\u5ba2\u5355\u4efb\u52a1\u5f85\u8865\u5efa'
+            : '\u8ba2\u5355\u5df2\u6210\u529f\uff0c\u5ba2\u5355\u53d1\u9001\u5931\u8d25',
+          content: result.customerReceipt.status === 'pending'
+            ? '\u7cfb\u7edf\u4f1a\u5728\u540e\u7eed\u63d0\u4ea4\u65f6\u5b89\u5168\u91cd\u8bd5\u3002\u5982\u9700\u7acb\u5373\u6253\u5370\uff0c\u53ef\u5728\u684c\u53f0\u8d26\u5355\u4e2d\u70b9\u51fb\u201c\u6253\u5370\u5ba2\u5355\u201d\u3002'
+            : '\u5ba2\u5355\u4efb\u52a1\u5df2\u521b\u5efa\uff0c\u4f46\u6253\u5370\u8bbe\u5907\u672a\u786e\u8ba4\u6253\u5370\u6210\u529f\u3002\u8bf7\u5728\u6253\u5370\u4efb\u52a1\u4e2d\u68c0\u67e5\u72b6\u6001\uff0c\u907f\u514d\u91cd\u590d\u5f00\u5355\u3002',
+          showCancel: false,
+          success: () => setTimeout(() => wx.navigateBack(), 300)
+        })
+        return
+      }
       wx.showToast({ title: this.data.mode === 'create' ? '开单成功' : '加菜成功', icon: 'success' })
       setTimeout(() => wx.navigateBack(), 500)
     } catch (err) {

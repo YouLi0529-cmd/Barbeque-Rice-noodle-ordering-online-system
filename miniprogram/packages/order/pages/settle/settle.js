@@ -423,8 +423,8 @@ Page({
         orderCardTitle: this.data.currentCardTitle
       }
       const indexPage = getCurrentPages().find(page => page.route === 'packages/order/pages/index/index')
-      if (indexPage && indexPage.sharedCartPatchPromise) {
-        await indexPage.sharedCartPatchPromise
+      if (indexPage && this.data.orderScene !== 'camping' && typeof indexPage.ensureSharedCartReadyForSubmit === 'function') {
+        await indexPage.ensureSharedCartReadyForSubmit()
         orderPayload.cartVersion = Number(indexPage.data.sharedCartVersion || orderPayload.cartVersion || 0)
       }
       // The settle page receives an earlier snapshot when it opens. Use the
@@ -458,14 +458,23 @@ Page({
         })).result
 
       if (!doBuyResult || !doBuyResult.success) {
+        if (doBuyResult?.code === 'TABLE_SESSION_CLOSED') {
+          wx.showModal({
+            title: '本次用餐已结束',
+            content: '这桌已完成结账。当前购物车没有提交，请重新扫描桌码开启新一轮点餐。',
+            showCancel: false,
+            confirmText: '我知道了'
+          })
+          return
+        }
         if (doBuyResult?.code === 'SHARED_CART_CHANGED' || doBuyResult?.code === 'SHARED_CART_ALREADY_SUBMITTED') {
-          if (indexPage && typeof indexPage.fetchSharedCart === 'function') {
-            await indexPage.fetchSharedCart(false, true)
-            wx.navigateBack()
-          }
-          wx.showToast({
-            title: doBuyResult.code === 'SHARED_CART_CHANGED' ? '购物车已更新，请重新提交' : '订单已提交，购物车已更新',
-            icon: 'none'
+          wx.showModal({
+            title: '购物车状态有变化',
+            content: doBuyResult.code === 'SHARED_CART_CHANGED'
+              ? '购物车刚刚发生变化，订单尚未提交。请核对菜品和数量后再提交。'
+              : '这份购物车可能已经提交，请先返回订单页面确认，避免重复下单。',
+            showCancel: false,
+            confirmText: '我知道了'
           })
           return
         }
@@ -553,20 +562,30 @@ Page({
       this.saveActiveOrderSession(orderCards, orderId)
 
       wx.showToast({
-        title: '提交成功',
+        title: doBuyResult.customerReceipt && doBuyResult.customerReceipt.status === 'pending'
+          ? '\u8ba2\u5355\u5df2\u63d0\u4ea4\uff0c\u8bf7\u544a\u77e5\u670d\u52a1\u5458\u786e\u8ba4\u5ba2\u5355'
+          : '提交成功',
         icon: 'success'
       })
     } catch (err) {
       console.error('创建订单失败', err)
+      if (err && err.code === 'TABLE_SESSION_CLOSED') {
+        wx.showModal({
+          title: '本次用餐已结束',
+          content: '这桌已完成结账。当前购物车没有提交，请重新扫描桌码开启新一轮点餐。',
+          showCancel: false,
+          confirmText: '我知道了'
+        })
+        return
+      }
       if (err && (err.code === 'SHARED_CART_CHANGED' || err.code === 'SHARED_CART_ALREADY_SUBMITTED')) {
-        const indexPage = getCurrentPages().find(page => page.route === 'packages/order/pages/index/index')
-        if (indexPage && typeof indexPage.fetchSharedCart === 'function') {
-          await indexPage.fetchSharedCart(false, true)
-          wx.navigateBack()
-        }
-        wx.showToast({
-          title: err.code === 'SHARED_CART_CHANGED' ? '购物车已更新，请重新提交' : '订单已提交，购物车已更新',
-          icon: 'none'
+        wx.showModal({
+          title: '购物车状态有变化',
+          content: err.code === 'SHARED_CART_CHANGED'
+            ? '购物车刚刚发生变化，订单尚未提交。请核对菜品和数量后再提交。'
+            : '这份购物车可能已经提交，请先返回订单页面确认，避免重复下单。',
+          showCancel: false,
+          confirmText: '我知道了'
         })
         return
       }

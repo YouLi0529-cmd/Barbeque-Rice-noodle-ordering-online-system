@@ -172,7 +172,9 @@ function formatTable(item, mergeSelectedMap = {}, mergeSource = null, selectedTa
     tableKey,
     statusText: status.text,
     statusClass: status.className,
-    priceText: formatPrice(item.totalPrice),
+    priceText: formatPrice(item.status === 'paid' && item.settlementSummary
+      ? item.settlementSummary.receivedTotal
+      : item.totalPrice),
     peopleText: `${Number(item.peopleCount || 0)}/${Number(item.maxPeople || 0)}`,
     diningTimeText: getDiningTime(item.scannedAt, item.finishedAt),
     hasMergedTable,

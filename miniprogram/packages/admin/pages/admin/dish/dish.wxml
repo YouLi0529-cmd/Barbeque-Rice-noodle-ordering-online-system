@@ -38,6 +38,7 @@
         wx:key="_id"
         bindtap="switchCategory"
         data-id="{{item._id}}">
+        <text class="category-drag-handle" data-index="{{index}}" catchtouchstart="startCategoryDrag" catchtouchmove="moveCategoryDrag" catchtouchend="endCategoryDrag" catchtouchcancel="endCategoryDrag">≡</text>
         <text class="category-name">{{item.name}}</text>
         <view class="category-actions">
           <text class="action-icon edit" catchtap="showEditCategoryModal" data-category="{{item}}">{{ui.edit}}</text>

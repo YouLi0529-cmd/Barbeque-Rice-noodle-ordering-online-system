@@ -4,6 +4,7 @@ const apiClient = require('../../../../utils/apiClient')
 const db = apiClient.isEnabled() ? null : wx.cloud.database()
 const _ = db ? db.command : null
 const { getCustomNavOptions } = require('../../../../utils/customNav')
+const sharedCartSync = require('../../../../utils/sharedCartSync')
 const SHARED_CART_ACTIVE_POLL_MS = 2000
 const SHARED_CART_IDLE_POLL_MS = 20000
 // Non-breaking spaces are preserved by the mini program text renderer.
@@ -981,28 +982,72 @@ Page({
 
     const operations = this.buildSharedCartOperations(prevCart, nextCart)
     if (operations.length === 0) return
-
-    const sendPatch = () => apiClient.isEnabled()
-      ? this.callSharedCartApi('sharedCart.patch', {
-        action: 'patch',
-        sessionId: this.data.sharedSessionId,
-        tableNumber: this.data.tableNumber,
-        operations
-      })
-      : wx.cloud.callFunction({
-        name: 'sharedCart',
-        data: {
-          action: 'patch',
-          sessionId: this.data.sharedSessionId,
-          tableNumber: this.data.tableNumber,
-          operations
-        }
-      })
+    const patch = {
+      patchId: sharedCartSync.createPatchId(),
+      sessionId: this.data.sharedSessionId,
+      tableNumber: this.data.tableNumber,
+      operations
+    }
+    if (!Array.isArray(this.sharedCartPendingPatches)) this.sharedCartPendingPatches = []
+    this.sharedCartPendingPatches.push(patch)
 
     const previousPatch = this.sharedCartPatchPromise || Promise.resolve()
-    const pending = previousPatch.catch(() => {}).then(sendPatch).then(res => {
-      const result = apiClient.isEnabled() ? (res || {}) : (res.result || {})
-      if (result && Number.isFinite(Number(result.cartVersion))) {
+    const pending = previousPatch.catch(() => {}).then(() => this.flushSharedCartPatches()).catch(err => {
+      console.error('shared cart patch failed', err)
+      if (err.code === 'SESSION_CLOSED' ||
+          err.code === 'TABLE_SESSION_CLOSED' ||
+          /session closed/i.test(err.message || '')) {
+        this.handleSharedSessionClosed(err.message || '\u672c\u684c\u8ba2\u5355\u5df2\u7ed3\u8d26\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u5f00\u53f0')
+        return
+      }
+      this.startSharedCartFallback()
+    })
+    this.sharedCartPatchPromise = pending
+    return pending
+  },
+
+  async flushSharedCartPatches() {
+    const pendingPatches = this.sharedCartPendingPatches || []
+    while (pendingPatches.length) {
+      const patch = pendingPatches[0]
+      if (patch.sessionId !== this.data.sharedSessionId) {
+        pendingPatches.shift()
+        continue
+      }
+      const sendPatch = async () => {
+        const response = apiClient.isEnabled()
+          ? await this.callSharedCartApi('sharedCart.patch', {
+            action: 'patch',
+            sessionId: patch.sessionId,
+            tableNumber: patch.tableNumber,
+            patchId: patch.patchId,
+            operations: patch.operations
+          })
+          : await wx.cloud.callFunction({
+            name: 'sharedCart',
+            data: {
+              action: 'patch',
+              sessionId: patch.sessionId,
+              tableNumber: patch.tableNumber,
+              patchId: patch.patchId,
+              operations: patch.operations
+            }
+          }).then(result => result.result || {})
+        const result = response || {}
+        if (!result.success) {
+          const err = new Error(result.message || 'shared cart patch failed')
+          err.code = result.code || 'SHARED_CART_PATCH_FAILED'
+          throw err
+        }
+        return result
+      }
+      const result = await sharedCartSync.retryWithBackoff(sendPatch, {
+        maxAttempts: 3,
+        delays: [250, 600],
+        shouldRetry: err => !err.code || err.statusCode >= 500 || err.statusCode === 429
+      })
+      pendingPatches.shift()
+      if (Number.isFinite(Number(result.cartVersion))) {
         this.setData({
           sharedCartVersion: Number(result.cartVersion),
           sharedCartHydrated: true,
@@ -1011,22 +1056,103 @@ Page({
             : this.data.sharedCartSyncActive,
           sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0)
         })
-        this.stopSharedCartFallback()
-        this.startSharedCartFallback()
       }
-    }).catch(err => {
-      console.error('同步共同点单购物车失败', err)
-      if (err.code === 'SESSION_CLOSED' ||
-          err.code === 'TABLE_SESSION_CLOSED' ||
-          /已结账|重新扫码|session closed/i.test(err.message || '')) {
-        this.handleSharedSessionClosed(err.message || '本桌订单已结账，请重新扫码开台')
-        return
+    }
+    this.stopSharedCartFallback()
+    this.startSharedCartFallback()
+  },
+
+  async ensureSharedCartReadyForSubmit() {
+    if (!this.isSharedCartMode()) return true
+
+    let pendingError = null
+    if (this.sharedCartPatchPromise) {
+      try {
+        await this.sharedCartPatchPromise
+      } catch (err) {
+        pendingError = err
       }
-      this.startSharedCartFallback()
-      wx.showToast({ title: '同步稍慢，正在重试', icon: 'none' })
-    })
-    this.sharedCartPatchPromise = pending
-    return pending
+    }
+    if ((this.sharedCartPendingPatches || []).length) {
+      try {
+        await this.flushSharedCartPatches()
+        pendingError = null
+      } catch (err) {
+        pendingError = err
+      }
+    }
+    if (pendingError || (this.sharedCartPendingPatches || []).length) {
+      if (pendingError && (pendingError.code === 'SESSION_CLOSED' || pendingError.code === 'TABLE_SESSION_CLOSED')) {
+        throw pendingError
+      }
+      const err = new Error('\u7f51\u7edc\u4e0d\u7a33\u5b9a\uff0c\u8d2d\u7269\u8f66\u6b63\u5728\u540c\u6b65\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5')
+      err.code = 'SHARED_CART_SYNC_UNAVAILABLE'
+      err.cause = pendingError || null
+      throw err
+    }
+
+    const sessionId = this.data.sharedSessionId
+    let result
+    try {
+      result = await sharedCartSync.retryWithBackoff(async () => {
+        const response = apiClient.isEnabled()
+          ? await this.callSharedCartApi('sharedCart.get', {
+            action: 'get',
+            sessionId,
+            tableNumber: this.data.tableNumber,
+            force: true
+          })
+          : await wx.cloud.callFunction({
+            name: 'sharedCart',
+            data: {
+              action: 'get',
+              sessionId,
+              tableNumber: this.data.tableNumber
+            }
+          })
+        const snapshot = apiClient.isEnabled() ? response : (response.result || {})
+        if (!snapshot || !snapshot.success) {
+          const err = new Error(snapshot && snapshot.message || '\u65e0\u6cd5\u786e\u8ba4\u8d2d\u7269\u8f66\u540c\u6b65\u72b6\u6001')
+          err.code = snapshot && snapshot.code || 'SHARED_CART_VERIFY_FAILED'
+          throw err
+        }
+        if (this.isSharedSessionClosed(snapshot)) {
+          const err = new Error('\u672c\u684c\u8ba2\u5355\u5df2\u7ed3\u8d26\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u5f00\u53f0')
+          err.code = 'TABLE_SESSION_CLOSED'
+          throw err
+        }
+        if (!sharedCartSync.hasSameCartCounts(this.data.cart, snapshot.items || [])) {
+          const err = new Error('\u8d2d\u7269\u8f66\u540c\u6b65\u72b6\u6001\u5c1a\u672a\u786e\u8ba4')
+          err.code = 'SHARED_CART_VERIFY_MISMATCH'
+          throw err
+        }
+        return snapshot
+      }, {
+        maxAttempts: 3,
+        delays: [250, 600],
+        shouldRetry: err => err.code === 'SHARED_CART_VERIFY_MISMATCH' || !err.code || err.statusCode >= 500 || err.statusCode === 429
+      })
+    } catch (cause) {
+      if (cause && cause.code === 'SHARED_CART_VERIFY_MISMATCH') {
+        const err = new Error('\u8d2d\u7269\u8f66\u5df2\u66f4\u65b0\uff0c\u8bf7\u786e\u8ba4\u540e\u518d\u63d0\u4ea4')
+        err.code = 'SHARED_CART_CHANGED'
+        throw err
+      }
+      if (cause && (cause.code === 'SESSION_CLOSED' || cause.code === 'TABLE_SESSION_CLOSED')) throw cause
+      const err = new Error('\u7f51\u7edc\u4e0d\u7a33\u5b9a\uff0c\u6682\u65f6\u65e0\u6cd5\u786e\u8ba4\u8d2d\u7269\u8f66\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5')
+      err.code = 'SHARED_CART_SYNC_UNAVAILABLE'
+      err.cause = cause
+      throw err
+    }
+
+    if (this.data.sharedSessionId !== sessionId) {
+      const err = new Error('\u70b9\u5355\u684c\u6b21\u5df2\u53d8\u5316\uff0c\u8bf7\u91cd\u65b0\u786e\u8ba4\u8d2d\u7269\u8f66')
+      err.code = 'SHARED_CART_CHANGED'
+      throw err
+    }
+
+    this.setData({ sharedCartVersion: Number(result.cartVersion || 0) })
+    return true
   },
 
   startOrderLoadingAnimation() {
@@ -1881,7 +2007,7 @@ Page({
     if (!this.requirePeopleBeforeOrder()) return
 
     const { currentDish, selectedTags, modalDishCount } = this.data
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     
     // 验证必选标签
     if (currentDish.tags && currentDish.tags.length > 0) {
@@ -1992,7 +2118,7 @@ Page({
     }
     
     // 规格弹窗关闭时，旧标签字段不应阻止直接加入。
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     const cartKey = goods._id
     const minOrderCount = goods.minOrderCount || 1
       
@@ -2017,7 +2143,7 @@ Page({
   // 从菜品列表减少数量（无标签版本）
   reduceDishFromCart(e) {
     const goods = e.currentTarget.dataset.goods
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     const cartKey = goods._id
     const minOrderCount = goods.minOrderCount || 1
     
@@ -2051,7 +2177,7 @@ Page({
     const goods = e.currentTarget.dataset.goods
     if (!goods || !goods._id) return
 
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     const cartKeys = Object.keys(cart).filter(key => cart[key] && cart[key].dishId === goods._id)
 
     if (cartKeys.length > 1 || (cartKeys.length === 1 && cartKeys[0] !== goods._id)) {
@@ -2110,7 +2236,7 @@ Page({
 
   reduceFromCart(e) {
     const cartKey = e.currentTarget.dataset.id
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     
     if (cart[cartKey]) {
       const minOrderCount = cart[cartKey].info && cart[cartKey].info.minOrderCount ? cart[cartKey].info.minOrderCount : 1
@@ -2127,7 +2253,7 @@ Page({
   // 从购物车增加
   addToCartFromCart(e) {
     const cartKey = e.currentTarget.dataset.id
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     
     if (cart[cartKey]) {
       cart[cartKey].count++
@@ -2140,7 +2266,7 @@ Page({
   // 选择标签选项（单选）
   editCartItemCount(e) {
     const cartKey = e.currentTarget.dataset.id
-    const cart = { ...this.data.cart }
+    const cart = sharedCartSync.cloneCartForMutation(this.data.cart)
     const item = cart[cartKey]
     if (!item) return
 

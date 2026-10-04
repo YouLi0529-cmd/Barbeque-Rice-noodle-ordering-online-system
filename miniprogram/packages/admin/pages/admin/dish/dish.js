@@ -717,6 +717,52 @@ Page({
     }
   },
 
+  startCategoryDrag(event) {
+    const index = Number(event.currentTarget.dataset.index)
+    if (!Number.isInteger(index)) return
+    this.categoryDragIndex = index
+    this.categoryDragChanged = false
+    this.categoryDragRects = []
+    wx.createSelectorQuery().in(this).selectAll('.category-item').boundingClientRect(rects => {
+      this.categoryDragRects = Array.isArray(rects) ? rects : []
+    }).exec()
+  },
+
+  moveCategoryDrag(event) {
+    const touch = event.touches && event.touches[0]
+    if (!touch || !this.categoryDragRects || !this.categoryDragRects.length || this.categoryDragIndex == null) return
+    const targetIndex = this.categoryDragRects.findIndex(rect => touch.clientY >= rect.top && touch.clientY <= rect.bottom)
+    const from = this.categoryDragIndex
+    if (targetIndex < 0 || targetIndex === from) return
+    const categories = this.data.categories.slice()
+    const moved = categories.splice(from, 1)[0]
+    categories.splice(targetIndex, 0, moved)
+    this.categoryDragIndex = targetIndex
+    this.categoryDragChanged = true
+    this.setData({ categories })
+  },
+
+  async endCategoryDrag() {
+    const moved = this.categoryDragChanged === true
+    this.categoryDragIndex = null
+    this.categoryDragChanged = false
+    this.categoryDragRects = []
+    if (!moved) return
+    const categoryIds = this.data.categories.map(item => item._id)
+    try {
+      await apiClient.call('admin.category.reorder', {
+        menuType: this.data.currentMenuType,
+        categoryIds
+      })
+      await this.loadCategories()
+      showToast(UI.saved, 'success')
+    } catch (err) {
+      console.error('reorder categories failed', err)
+      showToast(err.message || UI.failed)
+      await this.loadCategories()
+    }
+  },
+
   async loadPrintStations() {
     try {
       const res = await apiClient.call('admin.print.stations.list')

@@ -49,7 +49,8 @@
                 <text class="dish-price">￥{{item.price}}</text>
                 <view class="dish-stepper">
                   <view class="dish-qty-btn minus {{item.cartCount ? '' : 'hidden'}}" data-id="{{item._id}}" bindtap="reduceDish">−</view>
-                  <text class="dish-count" wx:if="{{item.cartCount}}">{{item.cartCount}}</text>
+                  <text class="dish-count dish-count-editable" wx:if="{{item.cartCount && item.needSpec === false}}" data-id="{{item._id}}" bindtap="editDishCount">{{item.cartCount}}</text>
+                  <text class="dish-count" wx:elif="{{item.cartCount}}">{{item.cartCount}}</text>
                   <view class="dish-qty-btn add" data-dish="{{item}}" bindtap="selectDish">+</view>
                 </view>
               </view>
@@ -124,7 +125,7 @@
         <view class="spec-group" wx:for="{{optionGroups}}" wx:key="id"><view class="group-title">{{item.title}}</view><view class="option-row"><view class="option {{selectedOptions[item.id] === option ? 'active' : ''}}" wx:for="{{item.options}}" wx:for-item="option" wx:key="*this" data-id="{{item.id}}" data-value="{{option}}" bindtap="chooseGroupOption">{{option}}</view></view></view>
         <input class="remark" value="{{remark}}" maxlength="20" placeholder="备注（可选）" bindinput="onRemarkInput" />
       </scroll-view>
-      <view class="spec-footer"><view class="modal-qty"><view bindtap="decreaseModalCount">−</view><text>{{modalCount}}</text><view bindtap="increaseModalCount">+</view></view><view class="spec-confirm" bindtap="confirmSpec">加入已选</view></view>
+      <view class="spec-footer"><view class="modal-qty"><view bindtap="decreaseModalCount">−</view><text bindtap="editModalCount">{{modalCount}}</text><view bindtap="increaseModalCount">+</view></view><view class="spec-confirm" bindtap="confirmSpec">加入已选</view></view>
     </view>
   </view>
 </view>

@@ -16,6 +16,9 @@
             <text>{{ui.diningTime}} {{table.diningTimeText}}</text>
             <text class="meta-price">{{ui.moneySymbol}}{{totalPriceText}}</text>
           </view>
+          <view class="paid-settlement-summary" wx:if="{{table.status === 'paid' && table.settlementSummary}}">
+            <text class="paid-settlement-received">{{ui.actualReceived}} {{ui.moneySymbol}}{{table.settlementSummary.receivedTotal}}</text>
+          </view>
           <view class="merged-table-row" wx:if="{{table.mergedTableText}}">
             <text>{{ui.mergedTables}}</text>
             <text class="merged-table-text">{{table.mergedTableText}}</text>

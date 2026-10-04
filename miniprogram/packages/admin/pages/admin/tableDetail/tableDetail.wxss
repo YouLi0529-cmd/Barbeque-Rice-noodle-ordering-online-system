@@ -97,6 +97,15 @@ page {
   overflow: hidden;
 }
 
+.paid-settlement-summary {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10rpx 0 14rpx;
+  color: #9a4f12;
+  font-size: 22rpx;
+  font-weight: 800;
+}
+
 .meta-strong {
   color: #2C1A12;
   font-size: 12rpx;
