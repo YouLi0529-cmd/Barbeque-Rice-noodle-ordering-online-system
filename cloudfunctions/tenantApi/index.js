@@ -27,6 +27,8 @@ const RESERVATION_COOLDOWN_MS = 4 * 60 * 60 * 1000
 const SHARED_CART_ACCESS_TOKEN_TTL_MS = 4 * 60 * 60 * 1000
 const SHARED_CART_ACTIVE_WINDOW_MS = 2 * 60 * 1000
 const ADMIN_TABLE_BOARD_STATE_ID = '__admin_table_board__'
+const ADMIN_TABLE_BOARD_SIGNAL_COLLECTION = 'tableBoardSignal'
+const ADMIN_TABLE_BOARD_SIGNAL_ID = DEFAULT_TENANT_ID
 const MAX_DISH_IMAGE_SIZE = 1024 * 1024
 const DISH_IMAGE_TEMP_URL_MAX_AGE = 60 * 60 * 24
 const DISH_IMAGE_TYPES = {
@@ -5876,6 +5878,36 @@ async function touchAdminTableBoard() {
       console.error('touch admin table board failed', setErr)
     }
   }
+
+  // This document contains no order or table data. The admin table page watches
+  // it as a lightweight real-time refresh signal, then fetches protected details
+  // through tenantApi as usual.
+  const signalRef = db.collection(ADMIN_TABLE_BOARD_SIGNAL_COLLECTION)
+    .doc(ADMIN_TABLE_BOARD_SIGNAL_ID)
+  try {
+    await signalRef.update({
+      data: {
+        version: _.inc(1),
+        updateTime: db.serverDate()
+      }
+    })
+  } catch (err) {
+    try {
+      await signalRef.set({
+        data: {
+          tenantId: DEFAULT_TENANT_ID,
+          type: 'admin_table_board_signal',
+          version: 1,
+          createTime: db.serverDate(),
+          updateTime: db.serverDate()
+        }
+      })
+    } catch (setErr) {
+      // The real-time signal is an optimization. Keep ordering available until
+      // the tableBoardSignal collection has been created in CloudBase.
+      console.error('touch admin table board signal failed', setErr)
+    }
+  }
 }
 
 function normalizeSharedCartItem(item) {
@@ -8834,7 +8866,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.collection.save') return completeReservationMutation(adminCollectionSave(payload), payload)
   if (action === 'admin.collection.update') return completeReservationMutation(adminCollectionUpdate(payload), payload)
   if (action === 'admin.collection.delete') return completeReservationMutation(adminCollectionDelete(payload), payload)
-  if (action === 'admin.collection.batchDelete') return adminCollectionBatchDelete(payload)
+  if (action === 'admin.collection.batchDelete') return completeReservationMutation(adminCollectionBatchDelete(payload), payload)
   if (action.indexOf('admin.print.') === 0) {
     const printResult = await printService.handleAdminAction(action, payload)
     if (printResult) return printResult
@@ -8851,7 +8883,11 @@ async function handleAction(action, payload) {
   if (action === 'user.revokeAuthorization') return revokeUserAuthorization(payload)
   if (action === 'phone.getNumber') return getPhoneNumber(payload)
   if (action === 'feedback.create') return createFeedback(payload)
-  if (action === 'reservation.create') return createReservation(payload)
+  if (action === 'reservation.create') {
+    const result = await createReservation(payload)
+    if (result && result.success) await touchAdminTableBoard()
+    return result
+  }
   if (action === 'order.create') {
     const result = await createOrder(payload)
     const isDineIn = payload.orderScene !== 'camping' && payload.orderType !== 'camping'
