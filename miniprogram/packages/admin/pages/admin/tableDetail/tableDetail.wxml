@@ -17,8 +17,6 @@
             <text class="meta-price">{{ui.moneySymbol}}{{totalPriceText}}</text>
           </view>
           <view class="paid-settlement-summary" wx:if="{{table.status === 'paid' && table.settlementSummary}}">
-            <text>{{ui.originalAmount}} {{ui.moneySymbol}}{{table.settlementSummary.originalTotal}}</text>
-            <text>{{ui.reductionAmount}} {{ui.moneySymbol}}{{table.settlementSummary.reductionTotal}}</text>
             <text class="paid-settlement-received">{{ui.actualReceived}} {{ui.moneySymbol}}{{table.settlementSummary.receivedTotal}}</text>
           </view>
           <view class="merged-table-row" wx:if="{{table.mergedTableText}}">

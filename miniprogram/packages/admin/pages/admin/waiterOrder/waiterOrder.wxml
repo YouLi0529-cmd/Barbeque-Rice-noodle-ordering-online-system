@@ -49,7 +49,8 @@
                 <text class="dish-price">￥{{item.price}}</text>
                 <view class="dish-stepper">
                   <view class="dish-qty-btn minus {{item.cartCount ? '' : 'hidden'}}" data-id="{{item._id}}" bindtap="reduceDish">−</view>
-                  <text class="dish-count" wx:if="{{item.cartCount}}">{{item.cartCount}}</text>
+                  <text class="dish-count dish-count-editable" wx:if="{{item.cartCount && item.needSpec === false}}" data-id="{{item._id}}" bindtap="editDishCount">{{item.cartCount}}</text>
+                  <text class="dish-count" wx:elif="{{item.cartCount}}">{{item.cartCount}}</text>
                   <view class="dish-qty-btn add" data-dish="{{item}}" bindtap="selectDish">+</view>
                 </view>
               </view>

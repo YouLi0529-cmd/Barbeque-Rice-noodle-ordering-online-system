@@ -6,7 +6,12 @@ const path = require('path')
 const { createPrintService } = require('./printService')
 const customerReceiptState = require('./customerReceiptState')
 const { getTableSettlementSummary } = require('./tableSettlementSummary')
-const { getArrivalTableCountKey } = require('./tableArrivalCount')
+const { runTransactionSequentially, runTransactionWithBusyRetry } = require('./tableCheckoutTransaction')
+const {
+  getArrivalTableCountKey,
+  shouldCountArrivalPeopleFromOrder,
+  shouldCountArrivalPeopleFromSession
+} = require('./tableArrivalCount')
 const { hasOrderableGoods } = require('./waiterOrderState')
 const {
   DEFAULT_DISH_IMAGE_FILES: RECOVERY_DISH_IMAGE_FILES,
@@ -2786,19 +2791,22 @@ function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'tod
 
     const groupKey = getArrivalOrderKey(order)
     if (!groupKey) return
-    if (order.status !== 'cancelled' && (order.tableCleared !== true || isAdminPaidOrder(order))) {
+    const countPeople = shouldCountArrivalPeopleFromOrder(order, isAdminPaidOrder(order))
+    if (countPeople) {
       const tableCountKey = getArrivalTableCountKey(order, { rootOrderGroupKeys })
       if (tableCountKey) countedTableKeys.add(tableCountKey)
     }
     const rootOrderId = String(order.rootOrderId || order._id || '').trim()
     if (rootOrderId) rootOrderGroupKeys[rootOrderId] = groupKey
-    if (!groups[groupKey]) {
-      groups[groupKey] = { peopleCount: 0, arrivedAt }
+    if (countPeople) {
+      if (!groups[groupKey]) {
+        groups[groupKey] = { peopleCount: 0, arrivedAt }
+      }
+      groups[groupKey].peopleCount = Math.max(
+        groups[groupKey].peopleCount,
+        Math.max(0, Math.floor(Number(order.peopleCount || 0)))
+      )
     }
-    groups[groupKey].peopleCount = Math.max(
-      groups[groupKey].peopleCount,
-      Math.max(0, Math.floor(Number(order.peopleCount || 0)))
-    )
   })
 
   ;(tableSessions || []).forEach(session => {
@@ -2807,10 +2815,13 @@ function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'tod
     if (!tableRef) return
     const arrivedAt = getTimeValue(session.peopleConfirmedAt || session.createTime || session.updateTime)
     if (!arrivedAt || arrivedAt < startAt || (endAt && arrivedAt >= endAt)) return
-    if (isActiveTableSession(session)) {
+    const sessionIsActive = isActiveTableSession(session)
+    if (sessionIsActive) {
       const tableCountKey = getArrivalTableCountKey(session, { isSession: true, rootOrderGroupKeys })
       if (tableCountKey) countedTableKeys.add(tableCountKey)
     }
+
+    if (!shouldCountArrivalPeopleFromSession(session, sessionIsActive)) return
 
     const rootOrderId = String(session.activeOrderRootId || '').trim()
     const groupKey = rootOrderId
@@ -4560,12 +4571,18 @@ async function adminFinishTableCheckout(payload) {
   // Payment, session closure, and merge-group closure commit together. This
   // prevents order.create from observing a paid root while its table session
   // still points at that root as an active add-on target.
-  const checkoutResult = await db.runTransaction(async transaction => {
-    const [orderSnapshots, sessionSnapshots, groupSnapshots] = await Promise.all([
-      Promise.all(targetOrders.map(order => transaction.collection('order').doc(order._id).get().catch(() => ({ data: null })))),
-      Promise.all(sessionIds.map(sessionId => transaction.collection('tableOrderSession').doc(sessionId).get().catch(() => ({ data: null })))),
-      Promise.all(groupIds.map(groupId => transaction.collection('tableGroup').doc(groupId).get().catch(() => ({ data: null }))))
-    ])
+  const checkoutTransaction = async transaction => {
+    // CloudBase transaction handles are single-flight: parallel operations on
+    // the same handle can fail with ResourceUnavailable.TransactionBusy.
+    const orderSnapshots = await runTransactionSequentially(targetOrders, order => (
+      transaction.collection('order').doc(order._id).get().catch(() => ({ data: null }))
+    ))
+    const sessionSnapshots = await runTransactionSequentially(sessionIds, sessionId => (
+      transaction.collection('tableOrderSession').doc(sessionId).get().catch(() => ({ data: null }))
+    ))
+    const groupSnapshots = await runTransactionSequentially(groupIds, groupId => (
+      transaction.collection('tableGroup').doc(groupId).get().catch(() => ({ data: null }))
+    ))
     const currentOrders = orderSnapshots.map(snapshot => snapshot && snapshot.data).filter(Boolean)
     if (currentOrders.length !== targetOrders.length || currentOrders.some(isAdminPaidOrder)) {
       return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u8ba2\u5355\u72b6\u6001\u5df2\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u91cd\u8bd5' }
@@ -4594,9 +4611,9 @@ async function adminFinishTableCheckout(payload) {
     if (hasNewAddOnSinceCheckoutRead) {
       return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u8fd9\u684c\u6709\u83dc\u54c1\u521a\u63d0\u4ea4\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u7ed3\u8d26' }
     }
-    const externalRootSnapshots = await Promise.all(activeRootsToCheck.map(rootId => (
+    const externalRootSnapshots = await runTransactionSequentially(activeRootsToCheck, rootId => (
       transaction.collection('order').doc(rootId).get().catch(() => ({ data: null }))
-    )))
+    ))
     const hasUnsettledOrderOutsideCheckout = externalRootSnapshots.some(snapshot => {
       const order = snapshot && snapshot.data
       return order && !isAdminPaidOrder(order) && order.tableCleared !== true && order.deleted !== true
@@ -4610,7 +4627,7 @@ async function adminFinishTableCheckout(payload) {
       return { success: false, code: 'MIXED_PAYMENT_AMOUNT_INVALID', message: 'mixed payment amount must be between 0 and receivable amount' }
     }
 
-    await Promise.all(currentOrders.map(order => transaction.collection('order').doc(order._id).update({
+    await runTransactionSequentially(currentOrders, order => transaction.collection('order').doc(order._id).update({
       data: {
         pay_status: true,
         payStatus: true,
@@ -4631,9 +4648,9 @@ async function adminFinishTableCheckout(payload) {
         checkoutAt: checkoutTime,
         updateTime: db.serverDate()
       }
-    })))
+    }))
 
-    await Promise.all(sessionIds.map((sessionId, index) => {
+    await runTransactionSequentially(sessionIds, (sessionId, index) => {
       const session = sessionSnapshots[index] && sessionSnapshots[index].data
       const data = {
         status: 'finished',
@@ -4655,9 +4672,9 @@ async function adminFinishTableCheckout(payload) {
           createTime: checkoutTime,
           ...data
         } })
-    }))
+    })
 
-    await Promise.all(groupIds.map((groupId, index) => {
+    await runTransactionSequentially(groupIds, (groupId, index) => {
       const group = groupSnapshots[index] && groupSnapshots[index].data
       const data = {
         status: 'inactive',
@@ -4668,10 +4685,14 @@ async function adminFinishTableCheckout(payload) {
       return group
         ? groupRef.update({ data })
         : groupRef.set({ data: { tableGroupId: groupId, ...data } })
-    }))
+    })
 
     return { success: true, orders: currentOrders }
-  })
+  }
+  const checkoutResult = await runTransactionWithBusyRetry(
+    callback => db.runTransaction(callback),
+    checkoutTransaction
+  )
 
   if (!checkoutResult || !checkoutResult.success) return checkoutResult || {
     success: false,

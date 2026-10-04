@@ -99,7 +99,6 @@
             <text class="money-icon">{{ui.moneySymbol}}</text>
             <text class="price-value">{{table.priceText}}</text>
           </view>
-          <view class="table-settlement-compact" wx:if="{{table.settlementCompactText}}">{{table.settlementCompactText}}</view>
 
           <view class="compact-line people-line">
             <view class="info-icon people-icon"></view>

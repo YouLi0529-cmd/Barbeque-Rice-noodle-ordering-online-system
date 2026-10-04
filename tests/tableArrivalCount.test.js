@@ -1,6 +1,10 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { getArrivalTableCountKey } = require('../cloudfunctions/tenantApi/tableArrivalCount')
+const {
+  getArrivalTableCountKey,
+  shouldCountArrivalPeopleFromOrder,
+  shouldCountArrivalPeopleFromSession
+} = require('../cloudfunctions/tenantApi/tableArrivalCount')
 
 test('joined tables count once even when each side has a different visit id', () => {
   const keys = new Set([
@@ -63,4 +67,17 @@ test('ordinary tables remain distinct by visit, with session fallback when no vi
     getArrivalTableCountKey({ _id: 'session-empty', tableNumber: '5' }, { isSession: true }),
     'session:session-empty'
   )
+})
+
+test('cleared unpaid tables are excluded from arrival people but paid tables remain counted', () => {
+  assert.equal(shouldCountArrivalPeopleFromOrder({ peopleCount: 4, tableCleared: true }, false), false)
+  assert.equal(shouldCountArrivalPeopleFromOrder({ peopleCount: 4, tableCleared: false }, false), true)
+  assert.equal(shouldCountArrivalPeopleFromOrder({ peopleCount: 4, tableCleared: true }, true), true)
+  assert.equal(shouldCountArrivalPeopleFromOrder({ peopleCount: 4, status: 'cancelled' }, true), false)
+})
+
+test('only active confirmed table sessions contribute arrival people', () => {
+  assert.equal(shouldCountArrivalPeopleFromSession({ peopleConfirmed: true }, true), true)
+  assert.equal(shouldCountArrivalPeopleFromSession({ peopleConfirmed: true, status: 'finished' }, false), false)
+  assert.equal(shouldCountArrivalPeopleFromSession({ peopleConfirmed: false }, true), false)
 })

@@ -2,6 +2,15 @@ function text(value) {
   return String(value || '').trim()
 }
 
+function shouldCountArrivalPeopleFromOrder(order = {}, isPaid = false) {
+  if (!order || order.status === 'cancelled') return false
+  return order.tableCleared !== true || isPaid === true
+}
+
+function shouldCountArrivalPeopleFromSession(session = {}, isActive = false) {
+  return session.peopleConfirmed === true && isActive === true
+}
+
 function getArrivalTableCountKey(record = {}, options = {}) {
   const isSession = options.isSession === true
   const rootOrderGroupKeys = options.rootOrderGroupKeys || {}
@@ -26,4 +35,8 @@ function getArrivalTableCountKey(record = {}, options = {}) {
   return sessionId ? `session:${sessionId}` : ''
 }
 
-module.exports = { getArrivalTableCountKey }
+module.exports = {
+  getArrivalTableCountKey,
+  shouldCountArrivalPeopleFromOrder,
+  shouldCountArrivalPeopleFromSession
+}

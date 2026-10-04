@@ -1,4 +1,5 @@
 const apiClient = require('../../../../../utils/apiClient')
+const { parsePositiveInteger } = require('../../../../../utils/quantityInput')
 const adminSound = require('../../../utils/adminSound')
 
 const CACHE_KEY = 'adminWaiterMenuCacheV2'
@@ -284,22 +285,68 @@ Page({
   onRemarkInput(event) { this.setData({ remark: String(event.detail.value || '').slice(0, 20) }) },
   increaseModalCount() { this.setData({ modalCount: this.data.modalCount + 1 }) },
   decreaseModalCount() { this.setData({ modalCount: Math.max(1, this.data.modalCount - 1) }) },
-  editModalCount() {
+  promptQuantity(initialValue, onConfirm) {
     wx.showModal({
       title: '修改份数',
       editable: true,
       placeholderText: '请输入份数',
-      content: String(this.data.modalCount || 1),
+      content: String(initialValue || 1),
       success: result => {
         if (!result.confirm) return
-        const raw = String(result.content || '').trim()
-        const count = Number(raw)
-        if (!/^\\d+$/.test(raw) || !Number.isSafeInteger(count) || count < 1 || count > 999) {
+        const count = parsePositiveInteger(result.content)
+        if (count == null) {
           wx.showToast({ title: '请输入1到999之间的整数', icon: 'none' })
           return
         }
-        this.setData({ modalCount: count })
+        onConfirm(count)
       }
+    })
+  },
+  editModalCount() {
+    this.promptQuantity(this.data.modalCount, count => this.setData({ modalCount: count }))
+  },
+  editDishCount(event) {
+    const dishId = String(event.currentTarget.dataset.id || '')
+    const dish = this.findCachedDish(dishId)
+    if (!dish || dish.needSpec !== false) return
+
+    const cart = this.data.cart || {}
+    const matchingItems = Object.keys(cart)
+      .map(key => ({ key, item: cart[key] }))
+      .filter(entry => entry.item.dishId === dishId)
+    const currentCount = matchingItems.reduce((sum, entry) => sum + Number(entry.item.count || 0), 0)
+    if (currentCount <= 0) return
+
+    this.promptQuantity(currentCount, count => {
+      const packagedCount = matchingItems.reduce((sum, entry) => (
+        sum + (entry.item.packageId ? Number(entry.item.count || 0) : 0)
+      ), 0)
+      if (count < packagedCount) {
+        wx.showToast({ title: `套餐内已包含${packagedCount}份，不能调低到该数量`, icon: 'none' })
+        return
+      }
+
+      const directCount = count - packagedCount
+      const nextCart = { ...this.data.cart }
+      const directEntries = matchingItems.filter(entry => !entry.item.packageId)
+      if (directCount <= 0) {
+        directEntries.forEach(entry => { delete nextCart[entry.key] })
+      } else if (directEntries.length > 0) {
+        nextCart[directEntries[0].key] = { ...directEntries[0].item, count: directCount }
+        directEntries.slice(1).forEach(entry => { delete nextCart[entry.key] })
+      } else {
+        const key = `${dish._id}_`
+        nextCart[key] = {
+          key,
+          dishId: dish._id,
+          info: dish,
+          count: directCount,
+          tags: {},
+          tagLabels: [],
+          tagText: ''
+        }
+      }
+      this.updateCart(nextCart)
     })
   },
   closeSpecModal() { this.setData({ showSpecModal: false, currentDish: null }) },

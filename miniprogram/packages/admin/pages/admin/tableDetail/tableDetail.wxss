@@ -99,16 +99,10 @@ page {
 
 .paid-settlement-summary {
   display: flex;
-  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 24rpx;
   padding: 10rpx 0 14rpx;
-  color: #8b7768;
-  font-size: 22rpx;
-}
-
-.paid-settlement-received {
   color: #9a4f12;
+  font-size: 22rpx;
   font-weight: 800;
 }
 
