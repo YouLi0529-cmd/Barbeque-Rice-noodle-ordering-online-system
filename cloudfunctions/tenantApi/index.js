@@ -5,6 +5,7 @@ const https = require('https')
 const path = require('path')
 const { createPrintService } = require('./printService')
 const customerReceiptState = require('./customerReceiptState')
+const { getTableSettlementSummary } = require('./tableSettlementSummary')
 const { getArrivalTableCountKey } = require('./tableArrivalCount')
 const { hasOrderableGoods } = require('./waiterOrderState')
 const {
@@ -1103,7 +1104,7 @@ async function createOrder(payload) {
       const sessionRes = await sessionRef.get()
       session = sessionRes.data
       if (!isActiveTableSession(session)) {
-        return { success: false, code: 'TABLE_SESSION_CLOSED', message: '\u672c\u684c\u8ba2\u5355\u5df2\u7ed3\u8d26\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u5f00\u53f0' }
+        return { success: false, code: 'TABLE_SESSION_CLOSED', message: '\u672c\u684c\u672c\u6b21\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u5f00\u53f0' }
       }
       if (!buildSharedCartPeopleState(session).peopleConfirmed) {
         return { success: false, code: 'TABLE_PEOPLE_REQUIRED', message: '\u8bf7\u5148\u786e\u8ba4\u7528\u9910\u4eba\u6570' }
@@ -1166,7 +1167,20 @@ async function createOrder(payload) {
       const parentRes = await transaction.collection('order').doc(parentOrderId).get()
       const parentOrder = parentRes.data
       if (!parentOrder || parentOrder.orderScene !== orderScene || isAdminPaidOrder(parentOrder)) {
-        return { success: false, code: 'ACTIVE_ORDER_INVALID', message: '\u5f53\u524d\u684c\u53f0\u8ba2\u5355\u72b6\u6001\u5df2\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5' }
+        if (orderScene === 'dineIn' && session) {
+          await transaction.collection('tableOrderSession').doc(sharedSessionId).update({ data: {
+            status: 'finished',
+            checkoutStatus: 'finished',
+            finishedAt: new Date(),
+            sharedCartActiveUntil: null,
+            activeOrderRootId: '',
+            addOnCount: 0,
+            cartVersion: _.inc(1),
+            updateTime: db.serverDate()
+          } })
+          return { success: false, code: 'TABLE_SESSION_CLOSED', message: '\u8fd9\u684c\u7684\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u5f00\u53f0\u540e\u518d\u70b9\u83dc' }
+        }
+        return { success: false, code: 'ACTIVE_ORDER_INVALID', message: '\u5f53\u524d\u8ba2\u5355\u72b6\u6001\u5df2\u53d8\u5316\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u5f00\u53f0' }
       }
       const sessionOwnsParent = orderScene === 'dineIn' && session &&
         String(session.activeOrderRootId || '') === parentOrderId &&
@@ -3649,11 +3663,13 @@ function summarizeAdminTable(table, orders, tableGroup, tableSession) {
   const status = activeOrders.length > 0
     ? getAdminTableStatus(activeOrders)
     : (hasConfirmedSession ? 'submitted' : 'empty')
+  const settlementSummary = status === 'paid' ? getTableSettlementSummary(activeOrders) : null
 
   return {
     ...table,
     status,
     totalPrice,
+    settlementSummary,
     peopleCount,
     scannedAt,
     finishedAt: status === 'paid' ? finishedAt : 0,
@@ -4534,66 +4550,149 @@ async function adminFinishTableCheckout(payload) {
     }
   }
 
-  const checkoutSummary = buildAdminCheckoutSummary(targetOrders, payload)
-  if (!checkoutSummary.paymentSplitValid) {
-    return {
-      success: false,
-      code: 'MIXED_PAYMENT_AMOUNT_INVALID',
-      message: 'mixed payment amount must be between 0 and receivable amount'
-    }
-  }
   const checkoutTime = new Date()
   const checkoutBatchId = `checkout_${checkoutTime.getTime()}_${targetOrders.map(order => order._id).sort().join('_')}`
-
-  await Promise.all(targetOrders.map(order => db.collection('order').doc(order._id).update({
-    data: {
-      pay_status: true,
-      payStatus: true,
-      status: 'completed',
-      checkoutStatus: 'finished',
-      payMethod: checkoutSummary.paymentMethod,
-      paymentMethod: checkoutSummary.paymentMethod,
-      checkoutTotalPrice: checkoutSummary.totalPrice,
-      checkoutReceivable: checkoutSummary.receivable,
-      receivedAmount: checkoutSummary.receivable,
-      checkoutCashAmount: checkoutSummary.cashReceived,
-      checkoutOnlineAmount: checkoutSummary.onlineReceived,
-      mixedPaymentChannel: checkoutSummary.mixedPaymentChannel,
-      checkoutDiscountType: checkoutSummary.discountType,
-      checkoutDiscountValue: checkoutSummary.discountValue,
-      checkoutDirectReduceValue: checkoutSummary.directReduceValue,
-      checkoutBatchId,
-      checkoutAt: checkoutTime,
-      updateTime: db.serverDate()
-    }
-  })))
-
+  const tableNumbers = getCheckoutSharedCartTableNumbers(targetOrders, payload)
+  const sessionIds = Array.from(new Set(tableNumbers.map(getSharedCartSessionId)))
   const groupIds = Array.from(new Set(targetOrders.map(order => String(order.tableGroupId || '').trim()).filter(Boolean)))
-  await Promise.all(groupIds.map(groupId => db.collection('tableGroup').doc(groupId).update({
-    data: {
-      status: 'inactive',
-      finishedAt: checkoutTime,
-      updateTime: db.serverDate()
-    }
-  }).catch(() => db.collection('tableGroup').doc(groupId).set({
-    data: {
-      tableGroupId: groupId,
-      status: 'inactive',
-      finishedAt: checkoutTime,
-      updateTime: db.serverDate()
-    }
-  }))))
+  let checkoutSummary = null
 
-  const sharedCartClearResult = await clearCheckoutSharedCarts(targetOrders, payload, checkoutTime)
+  // Payment, session closure, and merge-group closure commit together. This
+  // prevents order.create from observing a paid root while its table session
+  // still points at that root as an active add-on target.
+  const checkoutResult = await db.runTransaction(async transaction => {
+    const [orderSnapshots, sessionSnapshots, groupSnapshots] = await Promise.all([
+      Promise.all(targetOrders.map(order => transaction.collection('order').doc(order._id).get().catch(() => ({ data: null })))),
+      Promise.all(sessionIds.map(sessionId => transaction.collection('tableOrderSession').doc(sessionId).get().catch(() => ({ data: null })))),
+      Promise.all(groupIds.map(groupId => transaction.collection('tableGroup').doc(groupId).get().catch(() => ({ data: null }))))
+    ])
+    const currentOrders = orderSnapshots.map(snapshot => snapshot && snapshot.data).filter(Boolean)
+    if (currentOrders.length !== targetOrders.length || currentOrders.some(isAdminPaidOrder)) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u8ba2\u5355\u72b6\u6001\u5df2\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u91cd\u8bd5' }
+    }
+
+    const targetRootIds = new Set(currentOrders.map(order => String(order.rootOrderId || order._id)))
+    const maxAddOnByRoot = new Map()
+    currentOrders.forEach(order => {
+      const rootId = String(order.rootOrderId || order._id)
+      const addOnIndex = Math.max(0, Math.floor(Number(order.addOnIndex || 0)))
+      maxAddOnByRoot.set(rootId, Math.max(maxAddOnByRoot.get(rootId) || 0, addOnIndex))
+    })
+    const currentTableNumbers = getCheckoutSharedCartTableNumbers(currentOrders, payload).sort()
+    if (currentTableNumbers.join('|') !== tableNumbers.slice().sort().join('|')) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u684c\u53f0\u5173\u8054\u5173\u7cfb\u5df2\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u91cd\u8bd5' }
+    }
+    const activeRootsToCheck = Array.from(new Set(sessionSnapshots
+      .map(snapshot => String(snapshot && snapshot.data && snapshot.data.activeOrderRootId || '').trim())
+      .filter(rootId => rootId && !targetRootIds.has(rootId))))
+    const hasNewAddOnSinceCheckoutRead = sessionSnapshots.some(snapshot => {
+      const session = snapshot && snapshot.data
+      const rootId = String(session && session.activeOrderRootId || '').trim()
+      return rootId && targetRootIds.has(rootId) &&
+        Math.floor(Number(session.addOnCount || 0)) > (maxAddOnByRoot.get(rootId) || 0)
+    })
+    if (hasNewAddOnSinceCheckoutRead) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u8fd9\u684c\u6709\u83dc\u54c1\u521a\u63d0\u4ea4\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u7ed3\u8d26' }
+    }
+    const externalRootSnapshots = await Promise.all(activeRootsToCheck.map(rootId => (
+      transaction.collection('order').doc(rootId).get().catch(() => ({ data: null }))
+    )))
+    const hasUnsettledOrderOutsideCheckout = externalRootSnapshots.some(snapshot => {
+      const order = snapshot && snapshot.data
+      return order && !isAdminPaidOrder(order) && order.tableCleared !== true && order.deleted !== true
+    })
+    if (hasUnsettledOrderOutsideCheckout) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u8fd9\u684c\u6709\u65b0\u8ba2\u5355\u521a\u63d0\u4ea4\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u7ed3\u8d26' }
+    }
+
+    checkoutSummary = buildAdminCheckoutSummary(currentOrders, payload)
+    if (!checkoutSummary.paymentSplitValid) {
+      return { success: false, code: 'MIXED_PAYMENT_AMOUNT_INVALID', message: 'mixed payment amount must be between 0 and receivable amount' }
+    }
+
+    await Promise.all(currentOrders.map(order => transaction.collection('order').doc(order._id).update({
+      data: {
+        pay_status: true,
+        payStatus: true,
+        status: 'completed',
+        checkoutStatus: 'finished',
+        payMethod: checkoutSummary.paymentMethod,
+        paymentMethod: checkoutSummary.paymentMethod,
+        checkoutTotalPrice: checkoutSummary.totalPrice,
+        checkoutReceivable: checkoutSummary.receivable,
+        receivedAmount: checkoutSummary.receivable,
+        checkoutCashAmount: checkoutSummary.cashReceived,
+        checkoutOnlineAmount: checkoutSummary.onlineReceived,
+        mixedPaymentChannel: checkoutSummary.mixedPaymentChannel,
+        checkoutDiscountType: checkoutSummary.discountType,
+        checkoutDiscountValue: checkoutSummary.discountValue,
+        checkoutDirectReduceValue: checkoutSummary.directReduceValue,
+        checkoutBatchId,
+        checkoutAt: checkoutTime,
+        updateTime: db.serverDate()
+      }
+    })))
+
+    await Promise.all(sessionIds.map((sessionId, index) => {
+      const session = sessionSnapshots[index] && sessionSnapshots[index].data
+      const data = {
+        status: 'finished',
+        checkoutStatus: 'finished',
+        finishedAt: checkoutTime,
+        sharedCartActiveUntil: null,
+        activeOrderRootId: '',
+        addOnCount: 0,
+        cartVersion: Math.max(0, Math.floor(Number(session && session.cartVersion || 0))) + 1,
+        updateTime: db.serverDate()
+      }
+      const sessionRef = transaction.collection('tableOrderSession').doc(sessionId)
+      return session
+        ? sessionRef.update({ data })
+        : sessionRef.set({ data: {
+          tableNumber: tableNumbers[index],
+          memberOpenids: [],
+          visitHistory: [],
+          createTime: checkoutTime,
+          ...data
+        } })
+    }))
+
+    await Promise.all(groupIds.map((groupId, index) => {
+      const group = groupSnapshots[index] && groupSnapshots[index].data
+      const data = {
+        status: 'inactive',
+        finishedAt: checkoutTime,
+        updateTime: db.serverDate()
+      }
+      const groupRef = transaction.collection('tableGroup').doc(groupId)
+      return group
+        ? groupRef.update({ data })
+        : groupRef.set({ data: { tableGroupId: groupId, ...data } })
+    }))
+
+    return { success: true, orders: currentOrders }
+  })
+
+  if (!checkoutResult || !checkoutResult.success) return checkoutResult || {
+    success: false,
+    code: 'CHECKOUT_FAILED',
+    message: '\u7ed3\u8d26\u5931\u8d25\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5'
+  }
+
+  const settledOrders = checkoutResult.orders || targetOrders
+  // Do not delete cart documents after releasing the transaction: a new scan
+  // may already have opened the next visit under the same session document id.
+  // joinSharedCart clears the old visit's cart before exposing the new visit.
+  const sharedCartClearResult = { removed: 0, tableNumbers }
   let cashierPrintJobs = []
   let cashierPrintError = ''
   try {
     const printResult = await printService.queueCashierReceipt({
       id: getTenantId(payload),
       ticketType: 'checkout',
-      orders: targetOrders,
+      orders: settledOrders,
       checkoutSummary,
-      eventKey: `checkout:${targetOrders.map(order => order._id).sort().join(',')}`
+      eventKey: `checkout:${settledOrders.map(order => order._id).sort().join(',')}`
     })
     cashierPrintJobs = (printResult.jobs || []).map(job => job._id)
     if (printResult.skipped || cashierPrintJobs.length === 0) {
@@ -4607,7 +4706,7 @@ async function adminFinishTableCheckout(payload) {
   return {
     success: true,
     data: {
-      updated: targetOrders.length,
+      updated: settledOrders.length,
       totalPrice: checkoutSummary.totalPrice,
       receivable: checkoutSummary.receivable,
       paymentMethod: checkoutSummary.paymentMethod,
@@ -5950,21 +6049,6 @@ async function autoClearPaidTableOrdersForNewSession(tableNumber, clearedAt) {
   return {
     clearedOrders: paidOrders.length,
     clearedGroups: groupIds.length
-  }
-}
-
-async function clearCheckoutSharedCarts(orders, payload, finishedAt) {
-  const tableNumbers = getCheckoutSharedCartTableNumbers(orders, payload)
-  const results = []
-
-  for (const tableNumber of tableNumbers) {
-    results.push(await clearSharedCartSessionByTableNumber(tableNumber, finishedAt))
-  }
-
-  return {
-    tableNumbers,
-    removed: results.reduce((sum, item) => sum + Number(item.removed || 0), 0),
-    results
   }
 }
 
@@ -8019,6 +8103,25 @@ async function adminSaveCategory(payload) {
   }
 }
 
+async function adminReorderCategories(payload) {
+  const menuType = getMenuType(payload.menuType)
+  const categoryIds = Array.isArray(payload.categoryIds)
+    ? payload.categoryIds.map(id => String(id || '').trim()).filter(Boolean)
+    : []
+  const existing = await db.collection('dishCategory')
+    .where({ menuType: getMenuTypeWhere(menuType) })
+    .limit(100)
+    .get()
+  const existingIds = new Set((existing.data || []).map(item => item._id))
+  if (categoryIds.length !== existingIds.size || new Set(categoryIds).size !== categoryIds.length || categoryIds.some(id => !existingIds.has(id))) {
+    return { success: false, code: 'CATEGORY_ORDER_STALE', message: 'category list changed; refresh and try again' }
+  }
+  await Promise.all(categoryIds.map((id, sort) => db.collection('dishCategory').doc(id).update({
+    data: { sort, updateTime: db.serverDate() }
+  })))
+  return { success: true, data: { categoryIds } }
+}
+
 async function adminDeleteCategory(payload) {
   const categoryId = String(payload.categoryId || payload._id || '').trim()
   if (!categoryId) {
@@ -9002,6 +9105,7 @@ async function handleAction(action, payload) {
 
   if (action === 'admin.category.list') return adminListCategories(payload)
   if (action === 'admin.category.save') return adminSaveCategory(payload)
+  if (action === 'admin.category.reorder') return adminReorderCategories(payload)
   if (action === 'admin.category.delete') return adminDeleteCategory(payload)
   if (action === 'admin.dish.list') return adminListDishes(payload)
   if (action === 'admin.dish.save') return adminSaveDish(payload)

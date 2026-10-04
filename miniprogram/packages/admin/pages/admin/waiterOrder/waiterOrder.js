@@ -284,6 +284,24 @@ Page({
   onRemarkInput(event) { this.setData({ remark: String(event.detail.value || '').slice(0, 20) }) },
   increaseModalCount() { this.setData({ modalCount: this.data.modalCount + 1 }) },
   decreaseModalCount() { this.setData({ modalCount: Math.max(1, this.data.modalCount - 1) }) },
+  editModalCount() {
+    wx.showModal({
+      title: '修改份数',
+      editable: true,
+      placeholderText: '请输入份数',
+      content: String(this.data.modalCount || 1),
+      success: result => {
+        if (!result.confirm) return
+        const raw = String(result.content || '').trim()
+        const count = Number(raw)
+        if (!/^\\d+$/.test(raw) || !Number.isSafeInteger(count) || count < 1 || count > 999) {
+          wx.showToast({ title: '请输入1到999之间的整数', icon: 'none' })
+          return
+        }
+        this.setData({ modalCount: count })
+      }
+    })
+  },
   closeSpecModal() { this.setData({ showSpecModal: false, currentDish: null }) },
   stopTap() {},
 

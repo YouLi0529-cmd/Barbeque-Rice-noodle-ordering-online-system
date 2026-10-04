@@ -458,6 +458,15 @@ Page({
         })).result
 
       if (!doBuyResult || !doBuyResult.success) {
+        if (doBuyResult?.code === 'TABLE_SESSION_CLOSED') {
+          wx.showModal({
+            title: '本次用餐已结束',
+            content: '这桌已完成结账。当前购物车没有提交，请重新扫描桌码开启新一轮点餐。',
+            showCancel: false,
+            confirmText: '我知道了'
+          })
+          return
+        }
         if (doBuyResult?.code === 'SHARED_CART_CHANGED' || doBuyResult?.code === 'SHARED_CART_ALREADY_SUBMITTED') {
           wx.showModal({
             title: '购物车状态有变化',
@@ -560,6 +569,15 @@ Page({
       })
     } catch (err) {
       console.error('创建订单失败', err)
+      if (err && err.code === 'TABLE_SESSION_CLOSED') {
+        wx.showModal({
+          title: '本次用餐已结束',
+          content: '这桌已完成结账。当前购物车没有提交，请重新扫描桌码开启新一轮点餐。',
+          showCancel: false,
+          confirmText: '我知道了'
+        })
+        return
+      }
       if (err && (err.code === 'SHARED_CART_CHANGED' || err.code === 'SHARED_CART_ALREADY_SUBMITTED')) {
         wx.showModal({
           title: '购物车状态有变化',

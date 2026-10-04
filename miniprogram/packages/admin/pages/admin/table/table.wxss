@@ -541,6 +541,13 @@ page {
   min-width: 0;
 }
 
+.table-settlement-compact {
+  margin: -4rpx 0 6rpx;
+  color: #8b7768;
+  font-size: 18rpx;
+  line-height: 1.2;
+}
+
 .money-icon {
   color: #9A642A;
   font-size: 10rpx;
