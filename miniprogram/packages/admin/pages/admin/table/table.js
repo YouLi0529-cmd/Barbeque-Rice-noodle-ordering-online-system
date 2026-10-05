@@ -1,5 +1,4 @@
 const apiClient = require('../../../../../utils/apiClient')
-const tableBoardSignal = require('../../../../../utils/tableBoardSignal')
 const adminSound = require('../../../utils/adminSound')
 
 const UI = {
@@ -63,8 +62,6 @@ const UI = {
 const TABLE_DETAIL_PAGE = '/packages/admin/pages/admin/tableDetail/tableDetail'
 const TABLE_BOARD_PREFETCH_KEY = 'adminTableBoardPrefetch'
 const TABLE_BOARD_PREFETCH_MAX_AGE_MS = 90 * 1000
-const TABLE_BOARD_SIGNAL_DEBOUNCE_MS = 300
-const TABLE_BOARD_SIGNAL_FALLBACK_INTERVAL_MS = 60 * 1000
 const TABLE_BOARD_POLLING_INTERVAL_MS = 10 * 1000
 
 const STATUS = {
@@ -283,9 +280,6 @@ Page({
     this.tableBoardActivityStamp = ''
     this.tableBoardStatusSupported = true
     this.tableBoardRefreshInFlight = false
-    this.tableBoardSignalSupported = true
-    this.tableBoardSignalVersion = 0
-    this.tableBoardSignalRunId = 0
     this.syncTransferState()
     this.syncMergeState()
     const usedPrefetchedTables = this.restorePrefetchedTables()
@@ -315,10 +309,9 @@ Page({
 
   startAutoRefresh() {
     if (this.timer) return
-    this.startTableBoardSignal()
-    this.startTableBoardPolling(this.tableBoardSignalWatcher
-      ? TABLE_BOARD_SIGNAL_FALLBACK_INTERVAL_MS
-      : TABLE_BOARD_POLLING_INTERVAL_MS)
+    // Refresh through tenantApi. Direct CloudBase realtime is not available in
+    // every environment/account, so it must not gate table board freshness.
+    this.startTableBoardPolling(TABLE_BOARD_POLLING_INTERVAL_MS)
     this.clockTimer = setInterval(() => {
       this.refreshTables()
     }, 60000)
@@ -331,57 +324,6 @@ Page({
     }, interval)
   },
 
-  startTableBoardSignal() {
-    if (this.tableBoardSignalWatcher || this.tableBoardSignalSupported === false) return
-
-    const signalRunId = this.tableBoardSignalRunId + 1
-    this.tableBoardSignalRunId = signalRunId
-    let initialSnapshot = true
-    this.tableBoardSignalWatcher = tableBoardSignal.watch((signal) => {
-      if (signalRunId !== this.tableBoardSignalRunId) return
-      const version = Number(signal && signal.version || 0)
-      if (initialSnapshot) {
-        initialSnapshot = false
-        if (Number.isFinite(version)) this.tableBoardSignalVersion = version
-        return
-      }
-
-      if (!Number.isFinite(version) || version <= this.tableBoardSignalVersion) return
-      this.tableBoardSignalVersion = version
-      this.queueTableBoardSignalRefresh()
-    }, err => {
-      if (signalRunId !== this.tableBoardSignalRunId) return
-      console.error('watch table board signal failed', err)
-      this.tableBoardSignalSupported = false
-      this.stopTableBoardSignal()
-      if (this.timer) this.startTableBoardPolling(TABLE_BOARD_POLLING_INTERVAL_MS)
-    })
-
-    if (!this.tableBoardSignalWatcher) {
-      this.tableBoardSignalSupported = false
-    }
-  },
-
-  stopTableBoardSignal() {
-    this.tableBoardSignalRunId += 1
-    if (this.tableBoardSignalRefreshTimer) {
-      clearTimeout(this.tableBoardSignalRefreshTimer)
-      this.tableBoardSignalRefreshTimer = null
-    }
-    if (this.tableBoardSignalWatcher && typeof this.tableBoardSignalWatcher.close === 'function') {
-      this.tableBoardSignalWatcher.close()
-    }
-    this.tableBoardSignalWatcher = null
-  },
-
-  queueTableBoardSignalRefresh() {
-    if (this.tableBoardSignalRefreshTimer) return
-    this.tableBoardSignalRefreshTimer = setTimeout(() => {
-      this.tableBoardSignalRefreshTimer = null
-      this.loadTables(true)
-    }, TABLE_BOARD_SIGNAL_DEBOUNCE_MS)
-  },
-
   stopAutoRefresh() {
     if (this.timer) {
       clearInterval(this.timer)
@@ -391,7 +333,6 @@ Page({
       clearInterval(this.clockTimer)
       this.clockTimer = null
     }
-    this.stopTableBoardSignal()
   },
 
   async loadTables(silent = false) {

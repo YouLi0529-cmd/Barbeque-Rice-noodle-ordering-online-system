@@ -3,7 +3,6 @@ const apiClient = require('./utils/apiClient')
 
 const PRIVACY_CONSENT_KEY = 'privacyPolicyConsentV1'
 const COVER_ROUTE = 'pages/covertest/covertest'
-const CLOUD_ENV_ID = 'zmbbq-d0ggmremua04f027d'
 const PRIVACY_SCAN_ROUTES = [
   'packages/order/pages/index/index',
   'packages/camping/pages/campingorderfood/campingorderfood'
@@ -11,19 +10,6 @@ const PRIVACY_SCAN_ROUTES = [
 
 App({
   onLaunch: async function () {
-    if (wx.cloud) {
-      try {
-        wx.cloud.init({
-          env: CLOUD_ENV_ID,
-          traceUser: true
-        })
-      } catch (err) {
-        // tenantApi remains available when the CloudBase direct SDK is not
-        // configured. The table board falls back to its HTTP refresh cycle.
-        console.error('initialize CloudBase realtime client failed', err)
-      }
-    }
-
     if (apiClient.isEnabled()) {
       this.globalData = {
         openid: '',
