@@ -20,6 +20,18 @@ function getTableSettlementSummary(orders = []) {
 
   let originalTotal = 0
   let receivedTotal = 0
+  const partialAmountsByRoot = {}
+  ;(orders || []).forEach(order => {
+    if (!order || order.deleted === true) return
+    const rootId = String(order.rootOrderId || order._id || '').trim()
+    if (!rootId || partialAmountsByRoot[rootId] !== undefined) return
+    const root = String(order._id || '') === rootId ? order : null
+    if (!root) return
+    const amount = Number(root.partialReceivedAmount !== undefined
+      ? root.partialReceivedAmount
+      : root.partialSettlementAmount)
+    partialAmountsByRoot[rootId] = Number.isFinite(amount) && amount > 0 ? roundMoney(amount) : 0
+  })
   batches.forEach(batchOrders => {
     const storedOriginal = batchOrders.map(order => Number(order.checkoutTotalPrice))
       .filter(value => Number.isFinite(value) && value >= 0)
@@ -33,7 +45,9 @@ function getTableSettlementSummary(orders = []) {
     )).filter(value => Number.isFinite(value) && value >= 0)
     const received = storedReceived.length ? Math.max(...storedReceived) : original
     originalTotal = roundMoney(originalTotal + original)
-    receivedTotal = roundMoney(receivedTotal + received)
+    const rootIds = new Set(batchOrders.map(order => String(order.rootOrderId || order._id || '').trim()).filter(Boolean))
+    const partialReceived = Array.from(rootIds).reduce((sum, rootId) => sum + Number(partialAmountsByRoot[rootId] || 0), 0)
+    receivedTotal = roundMoney(receivedTotal + received + partialReceived)
   })
   return {
     originalTotal,

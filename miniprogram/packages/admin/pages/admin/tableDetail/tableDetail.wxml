@@ -19,6 +19,10 @@
           <view class="paid-settlement-summary" wx:if="{{table.status === 'paid' && table.settlementSummary}}">
             <text class="paid-settlement-received">{{ui.actualReceived}} {{ui.moneySymbol}}{{table.settlementSummary.receivedTotal}}</text>
           </view>
+          <view class="paid-settlement-summary" wx:if="{{table.status !== 'paid' && table.settledAmount > 0}}">
+            <text class="paid-settlement-received">{{ui.settledAmount}} {{ui.moneySymbol}}{{table.settledAmount}}</text>
+            <text class="partial-settlement-outstanding">{{ui.outstandingAmount}} {{ui.moneySymbol}}{{table.outstandingAmount}}</text>
+          </view>
           <view class="merged-table-row" wx:if="{{table.mergedTableText}}">
             <text>{{ui.mergedTables}}</text>
             <text class="merged-table-text">{{table.mergedTableText}}</text>
@@ -167,6 +171,14 @@
           <text>{{ui.priceTotal}}</text>
           <text>{{ui.moneySymbol}}{{paySummary.totalText}}</text>
         </view>
+        <view class="summary-row combined-checkout-summary" wx:if="{{combinedCheckoutTableText}}">
+          <text>{{ui.combinedCheckoutSelected}}</text>
+          <text>{{combinedCheckoutTableText}}</text>
+        </view>
+        <view class="summary-row combined-checkout-summary" wx:if="{{combinedCheckoutTableText}}">
+          <text>{{ui.combinedCheckoutPendingAmount}}</text>
+          <text>{{ui.moneySymbol}}{{combinedCheckoutOutstandingAmount}}</text>
+        </view>
         <view class="summary-row strong-row">
           <view class="discount-summary-label">
             <text>{{ui.receivable}}</text>
@@ -244,6 +256,23 @@
       <view class="mixed-payment-actions">
         <view class="mixed-payment-action cancel" bindtap="closeMixedPaymentDialog">{{ui.discountCancel}}</view>
         <view class="mixed-payment-action confirm" bindtap="confirmMixedPaymentDialog">{{ui.discountConfirm}}</view>
+      </view>
+    </view>
+  </view>
+  <view class="combined-checkout-mask" wx:if="{{showCombinedCheckoutDialog}}" catchtap="closeCombinedCheckoutDialog">
+    <view class="combined-checkout-dialog" catchtap="stopCombinedCheckoutDialogTap">
+      <view class="combined-checkout-title">{{ui.combinedCheckoutDialogTitle}}</view>
+      <input
+        class="combined-checkout-input"
+        value="{{combinedCheckoutInput}}"
+        placeholder="{{ui.combinedCheckoutInputPlaceholder}}"
+        focus="{{showCombinedCheckoutDialog}}"
+        bindinput="onCombinedCheckoutInput"
+      />
+      <view class="combined-checkout-hint">{{ui.combinedCheckoutInputHint}}</view>
+      <view class="combined-checkout-actions">
+        <view class="combined-checkout-action cancel" bindtap="closeCombinedCheckoutDialog">{{ui.discountCancel}}</view>
+        <view class="combined-checkout-action confirm" bindtap="confirmCombinedCheckoutDialog">{{ui.discountConfirm}}</view>
       </view>
     </view>
   </view>

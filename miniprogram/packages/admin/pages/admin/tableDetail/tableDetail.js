@@ -32,6 +32,7 @@ const UI = {
   refundDish: '\u9000\u83dc',
   giftDish: '\u8d60\u83dc',
   mergeTable: '\u62fc\u684c',
+  combinedCheckout: '\u4e00\u8d77\u7ed3\u8d26',
   changeTable: '\u8f6c\u53f0',
   reprintGuestBill: '\u8865\u6253\u5ba2\u5355',
   changeTableStarted: '\u8bf7\u9009\u62e9\u65b0\u684c\u53f0',
@@ -118,6 +119,15 @@ const UI = {
   mixedPaymentInputPlaceholder: '\u8bf7\u8f93\u5165\u91d1\u989d',
   mixedPaymentAutoFill: '\u53e6\u4e00\u9879\u5c06\u81ea\u52a8\u8865\u8db3',
   mixedPaymentInvalid: '\u6536\u6b3e\u91d1\u989d\u4e0d\u80fd\u5c0f\u4e8e 0 \u6216\u5927\u4e8e\u5e94\u6536',
+  combinedCheckoutDialogTitle: '\u4e00\u8d77\u7ed3\u8d26',
+  combinedCheckoutInputPlaceholder: '\u8f93\u5165\u684c\u53f7\uff0c\u5982 10\u300111',
+  combinedCheckoutInputHint: '\u53ef\u4e00\u6b21\u8f93\u5165\u591a\u4e2a\u684c\u53f7',
+  combinedCheckoutSelected: '\u4e00\u8d77\u7ed3\u8d26\u684c\u53f0',
+  combinedCheckoutRequired: '\u8bf7\u5148\u8f93\u5165\u8981\u4e00\u8d77\u7ed3\u8d26\u7684\u684c\u53f7',
+  combinedCheckoutPendingAmount: '\u5176\u4ed6\u684c\u5f85\u7ed3',
+  combinedCheckoutPreviewFailed: '\u8bfb\u53d6\u4e00\u8d77\u7ed3\u8d26\u684c\u53f0\u5931\u8d25',
+  settledAmount: '\u5df2\u7ed3\u83dc\u54c1\u91d1\u989d',
+  outstandingAmount: '\u672a\u7ed3\u91d1\u989d',
   discountInvalid: '\u8bf7\u8f93\u5165 0-10 \u4e4b\u95f4\u7684\u6298\u6263',
   directReduceInvalid: '\u76f4\u51cf\u91d1\u989d\u4e0d\u80fd\u8d85\u8fc7\u6298\u540e\u91d1\u989d',
   editDishTitle: '\u4fee\u6539\u83dc\u54c1',
@@ -156,11 +166,12 @@ const DISH_ACTIONS = [
   UI.refundDish,
   UI.giftDish,
   UI.reprintGuestBill,
+  UI.combinedCheckout,
   UI.mergeTable,
   UI.changeTable
 ]
 
-const TABLE_ACTIONS = new Set([UI.sendKitchen, UI.reprintGuestBill, UI.mergeTable, UI.changeTable])
+const TABLE_ACTIONS = new Set([UI.sendKitchen, UI.reprintGuestBill, UI.combinedCheckout, UI.mergeTable, UI.changeTable])
 
 const DISCOUNT_OPTIONS = [
   { value: 'discount', label: '\u6253\u6298' },
@@ -225,6 +236,8 @@ function buildTable(options) {
     statusClass: status.className,
     totalPrice,
     settlementSummary: options.settlementSummary || null,
+    settledAmount: getNumber(options.settledAmount),
+    outstandingAmount: getNumber(options.outstandingAmount, totalPrice),
     peopleCount,
     maxPeople,
     priceText: formatPrice(totalPrice),
@@ -247,6 +260,8 @@ function buildServerTable(table) {
     status: table.status,
     totalPrice: table.totalPrice,
     settlementSummary: table.settlementSummary,
+    settledAmount: table.settledAmount,
+    outstandingAmount: table.outstandingAmount,
     peopleCount: table.peopleCount,
     maxPeople: table.maxPeople,
     scannedAt: table.scannedAt,
@@ -361,6 +376,25 @@ function getSafeTableRef(table) {
   }
 }
 
+function normalizeCombinedCheckoutTableToken(value) {
+  const source = String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\u53f7\u684c]/g, '')
+  const match = source.match(/^([VT]?)(\d{1,2})$/)
+  if (!match) return ''
+  return `${match[1]}${String(Number(match[2])).padStart(2, '0')}`
+}
+
+function parseCombinedCheckoutTables(value, currentTable) {
+  const current = normalizeCombinedCheckoutTableToken(currentTable && currentTable.tableNumber)
+  const seen = {}
+  return String(value || '')
+    .split(/[\s,\uff0c\u3001;\uff1b]+/)
+    .map(normalizeCombinedCheckoutTableToken)
+    .filter(tableNumber => tableNumber && tableNumber !== current && !seen[tableNumber] && (seen[tableNumber] = true))
+}
+
 function formatMergeTableSections(sections, currentTable, selectedMap = {}) {
   return (sections || []).map(section => {
     const tables = (section.tables || [])
@@ -424,6 +458,12 @@ Page({
     mergeTableSections: [],
     selectedMergeTableMap: {},
     selectedMergeTableCount: 0,
+    showCombinedCheckoutDialog: false,
+    combinedCheckoutInput: '',
+    combinedCheckoutTables: [],
+    combinedCheckoutTableText: '',
+    combinedCheckoutOutstandingAmount: 0,
+    loadingCombinedCheckout: false,
     peopleInput: '',
     paymentMethod: 'wechat_alipay',
     mixedPaymentChannel: 'cash',
@@ -460,7 +500,7 @@ Page({
       billGroups: [],
       itemCount: 0,
       totalPriceText: table.priceText,
-      paySummary: buildPaySummary(table.totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
+      paySummary: buildPaySummary(getNumber(table.outstandingAmount, table.totalPrice), this.data.paymentMethod, this.data.discountType, this.data.discountValue, this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
     })
     this.loadDetail()
   },
@@ -469,6 +509,26 @@ Page({
     if (this.data.table && this.data.table.tableNumber) {
       this.loadDetail(true)
     }
+  },
+
+  getCombinedCheckoutTableTokens() {
+    return (this.data.combinedCheckoutTables || [])
+      .map(table => {
+        if (typeof table === 'string') return table
+        return table.tableNumber || table.inputToken || ''
+      })
+      .filter(Boolean)
+  },
+
+  getCheckoutBaseAmount(extraTables) {
+    const table = this.data.table || {}
+    const sourceAmount = Math.max(0, getNumber(table.outstandingAmount, table.totalPrice))
+    const combinedTables = Array.isArray(extraTables) ? extraTables : (this.data.combinedCheckoutTables || [])
+    const combinedAmount = combinedTables.reduce((sum, item) => {
+      if (!item || typeof item === 'string') return sum
+      return sum + Math.max(0, getNumber(item.outstandingAmount))
+    }, 0)
+    return Math.round((sourceAmount + combinedAmount) * 100) / 100
   },
 
   startWaiterOrder() {
@@ -537,7 +597,10 @@ Page({
         selectedDishCount: 0,
         selectedDishText: UI.noSelectedDish,
         selectedGroupId: '',
-        paySummary: buildPaySummary(totalPrice, this.data.paymentMethod, this.data.discountType, this.data.discountValue, this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
+        combinedCheckoutTables: [],
+        combinedCheckoutTableText: '',
+        combinedCheckoutOutstandingAmount: 0,
+        paySummary: buildPaySummary(getNumber(nextTable.outstandingAmount, totalPrice), this.data.paymentMethod, this.data.discountType, this.data.discountValue, this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
       })
     } catch (err) {
       console.error('load admin table detail failed', err)
@@ -1113,6 +1176,10 @@ Page({
       this.startMergeTable()
       return
     }
+    if (action === UI.combinedCheckout) {
+      this.openCombinedCheckoutDialog()
+      return
+    }
     if (action === UI.changeTable) {
       this.startChangeTable()
       return
@@ -1124,9 +1191,98 @@ Page({
     })
   },
 
+  openCombinedCheckoutDialog() {
+    const selected = this.getCombinedCheckoutTableTokens()
+    this.setData({
+      showCombinedCheckoutDialog: true,
+      combinedCheckoutInput: selected.join('\u3001')
+    })
+  },
+
+  closeCombinedCheckoutDialog() {
+    this.setData({
+      showCombinedCheckoutDialog: false,
+      combinedCheckoutInput: this.getCombinedCheckoutTableTokens().join('\u3001')
+    })
+  },
+
+  stopCombinedCheckoutDialogTap() {},
+
+  onCombinedCheckoutInput(event) {
+    this.setData({
+      combinedCheckoutInput: event.detail.value
+    })
+  },
+
+  async confirmCombinedCheckoutDialog() {
+    const tables = parseCombinedCheckoutTables(this.data.combinedCheckoutInput, this.data.table)
+    if (tables.length === 0) {
+      if ((this.data.combinedCheckoutTables || []).length > 0) {
+        this.setData({
+          showCombinedCheckoutDialog: false,
+          combinedCheckoutInput: '',
+          combinedCheckoutTables: [],
+          combinedCheckoutTableText: '',
+          combinedCheckoutOutstandingAmount: 0,
+          paySummary: buildPaySummary(
+            this.getCheckoutBaseAmount([]),
+            this.data.paymentMethod,
+            this.data.discountType,
+            this.data.discountValue,
+            this.data.directReduceValue,
+            this.data.mixedPaymentChannel,
+            this.data.mixedPaymentAmount
+          )
+        })
+        return
+      }
+      wx.showToast({ title: UI.combinedCheckoutRequired, icon: 'none' })
+      return
+    }
+    const table = this.data.table || {}
+    try {
+      this.setData({ loadingCombinedCheckout: true })
+      const res = await apiClient.call('admin.table.combinedCheckoutPreview', {
+        areaKey: table.areaKey,
+        tableNumber: table.tableNumber,
+        combinedTableNumbers: tables
+      })
+      const data = res.data || {}
+      const previewTables = Array.isArray(data.tables) ? data.tables : []
+      if (previewTables.length !== tables.length) {
+        throw new Error(UI.combinedCheckoutPreviewFailed)
+      }
+      const tableText = previewTables.map(item => item.label || item.tableNumber).filter(Boolean).join('\u3001')
+      this.setData({
+        showCombinedCheckoutDialog: false,
+        combinedCheckoutInput: tables.join('\u3001'),
+        combinedCheckoutTables: previewTables,
+        combinedCheckoutTableText: tableText,
+        combinedCheckoutOutstandingAmount: getNumber(data.outstandingAmount),
+        paySummary: buildPaySummary(
+          this.getCheckoutBaseAmount(previewTables),
+          this.data.paymentMethod,
+          this.data.discountType,
+          this.data.discountValue,
+          this.data.directReduceValue,
+          this.data.mixedPaymentChannel,
+          this.data.mixedPaymentAmount
+        )
+      })
+    } catch (err) {
+      console.error('preview combined checkout failed', err)
+      wx.showToast({
+        title: err.message || UI.combinedCheckoutPreviewFailed,
+        icon: 'none'
+      })
+    } finally {
+      this.setData({ loadingCombinedCheckout: false })
+    }
+  },
+
   selectDiscount(event) {
     const value = event.currentTarget.dataset.value || 'discount'
-    const totalPrice = this.data.table.totalPrice
+    const totalPrice = this.getCheckoutBaseAmount()
     if (value === 'direct_reduce' && this.data.directReduceValue !== '') {
       this.setData({
         directReduceValue: '',
@@ -1174,7 +1330,7 @@ Page({
   confirmDiscountDialog() {
     const value = Number(this.data.discountInput)
     const type = this.data.discountDialogType || 'discount'
-    const totalPrice = getNumber(this.data.table.totalPrice)
+    const totalPrice = this.getCheckoutBaseAmount()
     const isDirectReduction = type === 'direct_reduce'
     const activeRateValue = type === 'discount' ? value : Number(this.data.discountValue)
     const hasActiveRate = type === 'discount'
@@ -1212,14 +1368,14 @@ Page({
       directReduceValue: nextDirectReduceValue,
       discountDialogType: '',
       showDiscountDialog: false,
-        paySummary: buildPaySummary(this.data.table.totalPrice, this.data.paymentMethod, nextDiscountType, nextDiscountValue, nextDirectReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
+        paySummary: buildPaySummary(this.getCheckoutBaseAmount(), this.data.paymentMethod, nextDiscountType, nextDiscountValue, nextDirectReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
     })
   },
   selectPayment(event) {
     const value = event.currentTarget.dataset.value || 'wechat_alipay'
     this.setData({
       paymentMethod: value,
-      paySummary: buildPaySummary(this.data.table.totalPrice, value, this.data.discountType, this.data.discountValue, this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
+      paySummary: buildPaySummary(this.getCheckoutBaseAmount(), value, this.data.discountType, this.data.discountValue, this.data.directReduceValue, this.data.mixedPaymentChannel, this.data.mixedPaymentAmount)
     })
   },
 
@@ -1265,7 +1421,7 @@ Page({
       mixedPaymentInput: '',
       showMixedPaymentDialog: false,
       paySummary: buildPaySummary(
-        this.data.table.totalPrice,
+        this.getCheckoutBaseAmount(),
         this.data.paymentMethod,
         this.data.discountType,
         this.data.discountValue,
@@ -1844,6 +2000,7 @@ Page({
   async finishCheckout() {
     if (this.data.checkingOut) return
     const table = this.data.table || {}
+    const combinedTableNumbers = this.getCombinedCheckoutTableTokens()
     if (!table.tableNumber || this.data.billGroups.length === 0) {
       wx.showToast({
         title: UI.noOrder,
@@ -1855,7 +2012,9 @@ Page({
     const confirmed = await new Promise(resolve => {
       wx.showModal({
         title: UI.checkoutConfirmTitle,
-        content: UI.checkoutConfirmContent,
+        content: combinedTableNumbers.length
+          ? UI.checkoutConfirmContent + '\n' + UI.combinedCheckoutSelected + ': ' + this.data.combinedCheckoutTableText
+          : UI.checkoutConfirmContent,
         confirmText: '\u7ed3\u8d26',
         cancelText: '\u53d6\u6d88',
         success: res => resolve(res.confirm === true),
@@ -1866,16 +2025,20 @@ Page({
 
     try {
       this.setData({ checkingOut: true })
-      const checkoutResult = await apiClient.call('admin.table.finishCheckout', {
+      const checkoutResult = await apiClient.call(
+        combinedTableNumbers.length ? 'admin.table.finishCombinedCheckout' : 'admin.table.finishCheckout',
+        {
         areaKey: table.areaKey,
         tableNumber: table.tableNumber,
+        combinedTableNumbers,
         paymentMethod: this.data.paymentMethod,
         discountType: this.data.discountType,
         discountValue: this.data.discountValue,
         directReduceValue: this.data.directReduceValue,
         mixedPaymentChannel: this.data.mixedPaymentChannel,
         mixedPaymentAmount: this.data.mixedPaymentAmount
-      })
+        }
+      )
       await this.loadDetail(true)
       const receipt = checkoutResult && checkoutResult.data || {}
       const printError = receipt.cashierPrintError || (Array.isArray(receipt.cashierPrintJobs) && !receipt.cashierPrintJobs.length

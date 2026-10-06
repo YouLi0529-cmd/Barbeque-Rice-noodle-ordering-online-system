@@ -100,9 +100,16 @@ page {
 .paid-settlement-summary {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 12rpx;
   padding: 10rpx 0 14rpx;
   color: #9a4f12;
   font-size: 22rpx;
+  font-weight: 800;
+}
+
+.partial-settlement-outstanding {
+  color: rgba(58, 36, 24, 0.58);
   font-weight: 800;
 }
 
@@ -605,6 +612,10 @@ page {
   padding: 4rpx 0;
 }
 
+.combined-checkout-summary {
+  color: #8A5426;
+}
+
 .mixed-payment-values {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -693,6 +704,7 @@ page {
 }
 .discount-mask,
 .mixed-payment-mask,
+.combined-checkout-mask,
 .people-mask,
 .edit-dish-mask,
 .refund-dish-mask,
@@ -711,6 +723,7 @@ page {
 
 .discount-dialog,
 .mixed-payment-dialog,
+.combined-checkout-dialog,
 .people-dialog {
   width: 260rpx;
   padding: 18rpx;
@@ -740,6 +753,7 @@ page {
 
 .discount-title,
 .mixed-payment-title,
+.combined-checkout-title,
 .people-title {
   color: #2C1A12;
   font-size: 15rpx;
@@ -799,6 +813,14 @@ page {
   text-align: center;
 }
 
+.combined-checkout-hint {
+  margin-top: 6rpx;
+  color: rgba(58, 36, 24, 0.52);
+  font-size: 8rpx;
+  font-weight: 800;
+  text-align: center;
+}
+
 .edit-dish-form {
   margin-top: 10rpx;
 }
@@ -816,6 +838,7 @@ page {
 
 .discount-input,
 .mixed-payment-input,
+.combined-checkout-input,
 .people-input {
   height: 38rpx;
   margin-top: 14rpx;
@@ -853,6 +876,7 @@ page {
 
 .discount-actions,
 .mixed-payment-actions,
+.combined-checkout-actions,
 .people-actions {
   margin-top: 14rpx;
   display: grid;
@@ -876,6 +900,7 @@ page {
 
 .discount-action,
 .mixed-payment-action,
+.combined-checkout-action,
 .people-action {
   height: 34rpx;
   display: flex;
@@ -908,6 +933,7 @@ page {
 
 .discount-action.cancel,
 .mixed-payment-action.cancel,
+.combined-checkout-action.cancel,
 .people-action.cancel {
   color: #6B4B34;
   background: #FFF7EC;
@@ -925,6 +951,7 @@ page {
 
 .discount-action.confirm,
 .mixed-payment-action.confirm,
+.combined-checkout-action.confirm,
 .people-action.confirm {
   color: #FFF7EC;
   background: #B15B18;

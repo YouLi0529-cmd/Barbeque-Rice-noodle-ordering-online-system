@@ -236,6 +236,7 @@ Page({
       const savedCards = activeOrderSession ? activeOrderSession.cards : []
       const addOnIndex = activeOrderSession ? Number(activeOrderSession.addOnCount || Math.max(savedCards.length - 1, 0)) + 1 : 0
       const currentCardTitle = activeOrderSession ? `加菜单${addOnIndex}` : '首单'
+      const viewingSubmittedOrder = !!(activeOrderSession && savedCards.length > 0 && goodsList.length === 0)
       const pendingCard = this.buildOrderCard({
         cardId: 'pending-current-order',
         title: currentCardTitle,
@@ -246,6 +247,7 @@ Page({
         submitted: false,
         isAddOnOrder: !!activeOrderSession
       })
+      const visibleOrderCards = viewingSubmittedOrder ? savedCards : savedCards.concat(pendingCard)
 
       this.setData({
         orderGoods: goodsList,
@@ -266,7 +268,9 @@ Page({
         addOnIndex,
         currentCardTitle,
         previousOrderCards: savedCards,
-        ...this.getOrderCardsData([pendingCard])
+        orderSubmitted: viewingSubmittedOrder,
+        submittedOrderId: viewingSubmittedOrder ? activeOrderSession.rootOrderId : '',
+        ...this.getOrderCardsData(visibleOrderCards)
       })
 
       wx.removeStorageSync('settleCartData')

@@ -1398,7 +1398,9 @@ function createPrintService({ db, _, defaultTenantId }) {
   function formatTicketTableNumber(value) {
     const tableNumber = text(value).trim()
     const skyMatch = tableNumber.match(/^(?:T|SKY|TIAN|TL|\u5929\u697c|\u5929)[-\s_]?0*(\d+)$/i)
-    if (skyMatch) return `\u5929${Number(skyMatch[1])}`
+    if (skyMatch) return `T${String(Number(skyMatch[1])).padStart(2, '0')}`
+    const vipMatch = tableNumber.match(/^(?:VIP|V)[-\s_]?0*(\d+)$/i)
+    if (vipMatch) return `V${String(Number(vipMatch[1])).padStart(2, '0')}`
     const numbered = tableNumber.match(/^(.*?)(\d+)(\D*)$/)
     if (!numbered) return tableNumber
     const numericValue = Number(numbered[2])
@@ -1552,7 +1554,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     return { results, byDishIndex, skipped }
   }
 
-  async function queueCashierReceipt({ id, ticketType, orders, checkoutSummary = {}, eventKey = '' }) {
+  async function queueCashierReceipt({ id, ticketType, orders, checkoutSummary = {}, tableLabel = '', eventKey = '' }) {
     await ensureDefaults(id)
     const configs = await listDocs('cashierPrintConfigs', { storeId: id })
     const config = configs.find(item => item.ticketType === ticketType)
@@ -1580,18 +1582,19 @@ function createPrintService({ db, _, defaultTenantId }) {
       ? buildCashierSettlementTicketData(checkoutSummary, fallbackOrderAmount, printer.paperWidth)
       : {}
     const template = await findTemplate(id, ticketType, { printerId: printer._id })
+    const displayTableLabel = text(tableLabel) || formatTicketTableNumber(first.tableNumber)
     const jobResult = await createJob(id, {
       printer,
       ticketType,
       ticketName: template.name,
       orderId: first._id || '',
       orderNumber: first.rootOrderId || first._id || '',
-      tableNumber: formatTicketTableNumber(first.tableNumber),
+      tableNumber: displayTableLabel,
       template,
       ticketData: {
         title: template.name,
         shopName: first.shopName || '',
-        tableNumber: first.tableNumber ? `桌号：${formatTicketTableNumber(first.tableNumber)}` : '',
+        tableNumber: displayTableLabel ? `桌号：${displayTableLabel}` : '',
         orderNumber: first.rootOrderId || first._id || '',
         peopleCount: peopleCount ? `人数：${peopleCount}人` : '',
         orderType: first.orderScene === 'camping' ? '类型：露营' : '类型：堂食',
@@ -1605,7 +1608,7 @@ function createPrintService({ db, _, defaultTenantId }) {
         ...settlementTicketData,
         totalPrice: checkoutSummary.receivable !== undefined ? checkoutSummary.receivable : fallbackOrderAmount
       },
-      payload: { ticketType, orderIds: sortedOrders.map(order => order._id), checkoutSummary },
+      payload: { ticketType, orderIds: sortedOrders.map(order => order._id), checkoutSummary, tableLabel: displayTableLabel },
       copies: config.copies,
       idempotencyKey: `cashier:${ticketType}:${eventKey || (first.rootOrderId || first._id || crypto.randomBytes(4).toString('hex'))}`
     })

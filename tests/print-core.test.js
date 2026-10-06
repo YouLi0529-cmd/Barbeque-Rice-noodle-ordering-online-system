@@ -68,10 +68,12 @@ async function verifyKitchenRouting() {
   const db = createMemoryDb()
   const service = createPrintService({ db, _: {}, defaultTenantId: 'store-test' })
   assert.strictEqual(service.formatTicketTableNumber('05'), '5')
-  assert.strictEqual(service.formatTicketTableNumber('VIP01'), 'VIP1')
-  assert.strictEqual(service.formatTicketTableNumber('天楼02'), '天2')
+  assert.strictEqual(service.formatTicketTableNumber('VIP01'), 'V01')
+  assert.strictEqual(service.formatTicketTableNumber('V01'), 'V01')
+  assert.strictEqual(service.formatTicketTableNumber('天楼02'), 'T02')
+  assert.strictEqual(service.formatTicketTableNumber('T02'), 'T02')
   assert.strictEqual(service.formatTicketTableNumber('普通02号桌'), '普通2号桌')
-  assert.strictEqual(service.formatTicketTableNumber('天楼10'), '天10')
+  assert.strictEqual(service.formatTicketTableNumber('天楼10'), 'T10')
   assert.strictEqual(service.formatTicketTableNumber('A10'), 'A10')
   const kitchenLines = service.renderDishLines({ size: 'large' }, {
     paperWidth: 80,

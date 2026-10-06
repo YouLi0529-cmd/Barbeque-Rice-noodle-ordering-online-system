@@ -73,6 +73,7 @@ Page({
     sharedCartActiveUntil: 0,
     sharedOrderRootId: '',
     sharedOrderAddOnCount: 0,
+    sharedExistingOrderCards: [],
     orderSessionClosed: false,
     showPeopleModal: false,
     peopleOptions: [1, 2, 3, 4, 5, 6, 7, 8],
@@ -259,6 +260,7 @@ Page({
       sharedCartActiveUntil: 0,
       sharedOrderRootId: '',
       sharedOrderAddOnCount: 0,
+      sharedExistingOrderCards: [],
       orderSessionClosed: true,
       sharedPeopleCount: 0,
       sharedPeopleConfirmed: false,
@@ -497,7 +499,9 @@ Page({
       })).then(async res => {
       const result = apiClient.isEnabled() ? (res || {}) : (res.result || {})
       if (!result.success || !result.sessionId) {
-        throw new Error(result.message || '加入共同点单失败')
+        const error = new Error(result.message || '加入共同点单失败')
+        error.code = result.code || ''
+        throw error
       }
 
       this.stopSharedCartSync()
@@ -512,6 +516,7 @@ Page({
         sharedCartActiveUntil: Number(result.sharedCartActiveUntil || 0),
         sharedOrderRootId: result.activeOrderRootId || '',
         sharedOrderAddOnCount: Number(result.addOnCount || 0),
+        sharedExistingOrderCards: Array.isArray(result.existingOrderCards) ? result.existingOrderCards : [],
         orderSessionClosed: false
       })
       // Read the personal draft as soon as the table session is available.
@@ -521,8 +526,20 @@ Page({
       this.applySharedPeopleState(result)
       await this.fetchSharedCart(false, true)
       this.startSharedCartWatch(result.sessionId)
+      if (!localCartBeforeJoin && result.activeOrderRootId && (result.existingOrderCards || []).length > 0 &&
+        result.peopleConfirmed !== false) {
+        this.navigateToSettle()
+      }
     }).catch(err => {
       console.error('初始化共同点单失败', err)
+      if (err && err.code === 'TABLE_ORDER_CONTEXT_AMBIGUOUS') {
+        wx.showModal({
+          title: '本桌订单需核对',
+          content: '该桌存在多条未结账订单，请联系服务员核对后再点单。',
+          showCancel: false
+        })
+        return
+      }
       this.startSharedCartFallback()
     }).finally(() => {
       this.sharedCartInitPromise = null
@@ -2757,22 +2774,27 @@ Page({
   getActiveOrderSessionForSettle() {
     try {
       const session = wx.getStorageSync('activeOrderSession')
-      if (!session || session.orderScene !== 'dineIn') {
-        return null
-      }
+      const localSessionMatches = session && session.orderScene === 'dineIn' &&
+        String(session.tableNumber || '') === String(this.data.tableNumber || '') &&
+        session.sharedSessionId &&
+        String(session.sharedSessionId) === String(this.data.sharedSessionId || '') &&
+        this.data.sharedOrderRootId &&
+        String(session.rootOrderId) === String(this.data.sharedOrderRootId)
+      if (localSessionMatches) return session
 
-      if (String(session.tableNumber || '') !== String(this.data.tableNumber || '')) {
-        return null
+      if (!this.data.sharedOrderRootId || !this.data.sharedSessionId) return null
+      const cards = Array.isArray(this.data.sharedExistingOrderCards)
+        ? this.data.sharedExistingOrderCards
+        : []
+      return {
+        rootOrderId: this.data.sharedOrderRootId,
+        orderScene: 'dineIn',
+        orderType: 'dineIn',
+        tableNumber: this.data.tableNumber,
+        sharedSessionId: this.data.sharedSessionId,
+        cards,
+        addOnCount: Number(this.data.sharedOrderAddOnCount || 0)
       }
-
-      if (!session.sharedSessionId ||
-        String(session.sharedSessionId) !== String(this.data.sharedSessionId || '') ||
-        !this.data.sharedOrderRootId ||
-        String(session.rootOrderId) !== String(this.data.sharedOrderRootId)) {
-        return null
-      }
-
-      return session
     } catch (err) {
       console.error('读取当前用餐订单失败', err)
       return null
