@@ -1,5 +1,7 @@
 const apiClient = require('../../../../../utils/apiClient')
+const cloudRealtime = require('../../../../../utils/cloudRealtime')
 const adminSound = require('../../../utils/adminSound')
+
 
 const UI = {
   title: '\u684c\u53f0\u7ba1\u7406',
@@ -280,6 +282,8 @@ Page({
     this.tableBoardActivityStamp = ''
     this.tableBoardStatusSupported = true
     this.tableBoardRefreshInFlight = false
+    this.tableBoardSignalWatcher = null
+    this.tableBoardSignalReady = false
     this.syncTransferState()
     this.syncMergeState()
     const usedPrefetchedTables = this.restorePrefetchedTables()
@@ -308,13 +312,52 @@ Page({
   },
 
   startAutoRefresh() {
-    if (this.timer) return
-    // Refresh through tenantApi. Direct CloudBase realtime is not available in
-    // every environment/account, so it must not gate table board freshness.
-    this.startTableBoardPolling(TABLE_BOARD_POLLING_INTERVAL_MS)
-    this.clockTimer = setInterval(() => {
-      this.refreshTables()
-    }, 60000)
+    if (!this.timer) {
+      this.startTableBoardPolling(TABLE_BOARD_POLLING_INTERVAL_MS)
+    }
+    this.startTableBoardSignalWatch()
+    if (!this.clockTimer) {
+      this.clockTimer = setInterval(() => {
+        this.refreshTables()
+      }, 60000)
+    }
+  },
+
+  startTableBoardSignalWatch() {
+    if (this.tableBoardSignalWatcher) return
+    const realtimeDb = cloudRealtime.getDatabase()
+    if (!realtimeDb) return
+
+    try {
+      this.tableBoardSignalWatcher = realtimeDb
+        .collection(cloudRealtime.TABLE_BOARD_SIGNAL_COLLECTION)
+        .doc(cloudRealtime.TABLE_BOARD_SIGNAL_ID)
+        .watch({
+          onChange: () => {
+            if (!this.tableBoardSignalReady) {
+              this.tableBoardSignalReady = true
+            }
+            this.refreshTableBoard(true)
+          },
+          onError: err => {
+            console.warn('table board realtime signal failed, using polling', err)
+            this.stopTableBoardSignalWatch()
+            this.startTableBoardPolling(TABLE_BOARD_POLLING_INTERVAL_MS)
+          }
+        })
+    } catch (err) {
+      console.warn('start table board realtime signal failed, using polling', err)
+      this.stopTableBoardSignalWatch()
+      this.startTableBoardPolling(TABLE_BOARD_POLLING_INTERVAL_MS)
+    }
+  },
+
+  stopTableBoardSignalWatch() {
+    if (this.tableBoardSignalWatcher && typeof this.tableBoardSignalWatcher.close === 'function') {
+      this.tableBoardSignalWatcher.close()
+    }
+    this.tableBoardSignalWatcher = null
+    this.tableBoardSignalReady = false
   },
 
   startTableBoardPolling(interval) {
@@ -333,6 +376,7 @@ Page({
       clearInterval(this.clockTimer)
       this.clockTimer = null
     }
+    this.stopTableBoardSignalWatch()
   },
 
   async loadTables(silent = false) {

@@ -1,4 +1,5 @@
 const apiClient = require('../../../../utils/apiClient')
+const cloudRealtime = require('../../../../utils/cloudRealtime')
 const adminSound = require('../../utils/adminSound')
 
 const DISMISSED_STORAGE_KEY = 'adminInfoCenterDismissed'
@@ -70,9 +71,11 @@ Component({
         if (enabled) {
           this.activate()
           this.startPolling()
+          this.startSignalWatch()
           return
         }
         this.stopPolling()
+        this.stopSignalWatch()
         this.setData({
           visible: false,
           panelOpen: false
@@ -106,10 +109,12 @@ Component({
       if (!this.data.enabled) return
       this.activate()
       this.startPolling()
+      this.startSignalWatch()
     },
     detached() {
       this.componentAttached = false
       this.stopPolling()
+      this.stopSignalWatch()
     }
   },
 
@@ -118,9 +123,11 @@ Component({
       if (!this.data.enabled) return
       this.activate()
       this.startPolling()
+      this.startSignalWatch()
     },
     hide() {
       this.stopPolling()
+      this.stopSignalWatch()
     }
   },
 
@@ -140,6 +147,43 @@ Component({
       if (!this.pollTimer) return
       clearInterval(this.pollTimer)
       this.pollTimer = null
+    },
+
+    startSignalWatch() {
+      if (this.signalWatcher || !this.data.enabled) return
+      const realtimeDb = cloudRealtime.getDatabase()
+      if (!realtimeDb) return
+
+      try {
+        this.signalWatcher = realtimeDb
+          .collection(cloudRealtime.TABLE_BOARD_SIGNAL_COLLECTION)
+          .doc(cloudRealtime.TABLE_BOARD_SIGNAL_ID)
+          .watch({
+            onChange: () => {
+              if (!this.signalWatchReady) {
+                this.signalWatchReady = true
+              }
+              this.activate(true)
+            },
+            onError: err => {
+              console.warn('admin info realtime signal failed, using polling', err)
+              this.stopSignalWatch()
+              this.startPolling()
+            }
+          })
+      } catch (err) {
+        console.warn('start admin info realtime signal failed, using polling', err)
+        this.stopSignalWatch()
+        this.startPolling()
+      }
+    },
+
+    stopSignalWatch() {
+      if (this.signalWatcher && typeof this.signalWatcher.close === 'function') {
+        this.signalWatcher.close()
+      }
+      this.signalWatcher = null
+      this.signalWatchReady = false
     },
 
     togglePanel() {

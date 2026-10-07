@@ -1,5 +1,6 @@
 //app.js
 const apiClient = require('./utils/apiClient')
+const cloudRealtime = require('./utils/cloudRealtime')
 
 const PRIVACY_CONSENT_KEY = 'privacyPolicyConsentV1'
 const COVER_ROUTE = 'pages/covertest/covertest'
@@ -20,6 +21,9 @@ App({
         userInfoPromise: null
       }
 
+      // HTTP tenantApi remains the business API. CloudBase is initialized only
+      // for the non-sensitive realtime board signal and never gates startup.
+      cloudRealtime.init()
       this.overridePage()
       this.checkForUpdate()
       return

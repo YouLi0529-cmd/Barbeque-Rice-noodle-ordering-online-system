@@ -36,6 +36,7 @@ const RESERVATION_COOLDOWN_MS = 4 * 60 * 60 * 1000
 const SHARED_CART_ACCESS_TOKEN_TTL_MS = 4 * 60 * 60 * 1000
 const SHARED_CART_ACTIVE_WINDOW_MS = 2 * 60 * 1000
 const ADMIN_TABLE_BOARD_STATE_ID = '__admin_table_board__'
+const ADMIN_TABLE_BOARD_SIGNAL_ID = '__admin_table_board_signal__'
 const MAX_DISH_IMAGE_SIZE = 1024 * 1024
 const DISH_IMAGE_TEMP_URL_MAX_AGE = 60 * 60 * 24
 const DISH_IMAGE_TYPES = {
@@ -8178,6 +8179,32 @@ async function touchAdminTableBoard() {
       console.error('touch admin table board failed', setErr)
     }
   }
+
+  // Clients only subscribe to this safe marker, then load table data through
+  // the authenticated tenantApi. A signal failure must never block ordering.
+  await touchAdminTableBoardSignal().catch(err => {
+    console.warn('touch admin table board signal failed', err)
+  })
+}
+
+async function touchAdminTableBoardSignal() {
+  const ref = db.collection('tableBoardSignal').doc(ADMIN_TABLE_BOARD_SIGNAL_ID)
+  const signal = {
+    type: 'admin_table_board_signal',
+    nonce: crypto.randomBytes(8).toString('hex'),
+    updateTime: db.serverDate()
+  }
+
+  try {
+    await ref.update({ data: signal })
+  } catch (err) {
+    await ref.set({
+      data: {
+        ...signal,
+        createTime: db.serverDate()
+      }
+    })
+  }
 }
 
 function normalizeSharedCartItem(item) {
@@ -11532,8 +11559,9 @@ async function handleAction(action, payload) {
   }
   if (action === 'order.create') {
     const result = await createOrder(payload)
-    const isDineIn = payload.orderScene !== 'camping' && payload.orderType !== 'camping'
-    if (result && result.success && isDineIn) await touchAdminTableBoard()
+    // The same signal wakes both the table board and the global info center.
+    // Outdoor orders do not change a table, but should still appear immediately.
+    if (result && result.success) await touchAdminTableBoard()
     return result
   }
   if (action === 'order.list') return listUserOrders(payload)
