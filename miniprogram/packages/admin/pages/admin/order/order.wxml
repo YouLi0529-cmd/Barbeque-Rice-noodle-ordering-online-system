@@ -51,7 +51,8 @@
           </view>
           <view class="detail-meta-row"><text>{{ui.settledAt}}</text><text>{{detail.paidTimeText}}</text></view>
           <view class="detail-meta-row"><text>{{ui.people}}</text><text>{{detail.peopleText}}</text></view>
-          <view class="detail-meta-row editable-meta payment-selector" bindtap="togglePaymentPicker">
+          <view class="detail-meta-row" wx:if="{{detail.isJointCheckout}}"><text>{{ui.payment}}</text><text>{{detail.paymentText}}</text></view>
+          <view class="detail-meta-row editable-meta payment-selector" wx:else bindtap="togglePaymentPicker">
             <text>{{ui.payment}}</text>
             <view class="editable-meta-value">
               <text>{{detail.paymentText}}</text>
@@ -69,22 +70,23 @@
               </view>
             </view>
           </view>
-          <view class="settlement-edit-actions"><view class="edit-action-button danger" bindtap="deleteSettlementRecord">永久删除整笔结算</view></view>
+          <view class="settlement-edit-actions" wx:if="{{!detail.isJointCheckout}}"><view class="edit-action-button danger" bindtap="deleteSettlementRecord">永久删除整笔结算</view></view>
         </view>
 
         <view class="bill-section">
           <view class="bill-row"><text>{{ui.total}}</text><text>¥{{detail.totalText}}</text></view>
           <view class="bill-row" wx:if="{{detail.discountText}}"><text>{{ui.discount}}</text><text>{{detail.discountText}}</text></view>
           <view class="bill-row" wx:if="{{detail.directReduceText}}"><text>{{ui.directReduce}}</text><text>-¥{{detail.directReduceText}}</text></view>
-          <view class="bill-row receivable editable-bill-row" bindtap="openSettlementAmountModal">
+          <view class="bill-row receivable" wx:if="{{detail.isJointCheckout}}"><text>{{ui.receivable}}</text><text>¥{{detail.receivableText}}</text></view>
+          <view class="bill-row receivable editable-bill-row" wx:else bindtap="openSettlementAmountModal">
             <text>{{ui.receivable}}</text>
             <view class="editable-bill-value"><text>¥{{detail.receivableText}}</text><text class="editable-meta-mark">{{ui.edit}}</text></view>
           </view>
-          <view class="bill-row mixed-payment-row" wx:if="{{detail.paymentMethod === 'mixed'}}">
+          <view class="bill-row mixed-payment-row" wx:if="{{detail.paymentMethod === 'mixed' && !detail.isJointCheckout}}">
             <text>{{ui.mixedCash}}</text>
             <view class="mixed-payment-edit" data-channel="cash" bindtap="openSettlementMixedPaymentDialog"><text>¥{{detail.cashReceivedText}}</text><text class="editable-meta-mark">{{ui.edit}}</text></view>
           </view>
-          <view class="bill-row mixed-payment-row" wx:if="{{detail.paymentMethod === 'mixed'}}">
+          <view class="bill-row mixed-payment-row" wx:if="{{detail.paymentMethod === 'mixed' && !detail.isJointCheckout}}">
             <text>{{ui.mixedOnline}}</text>
             <view class="mixed-payment-edit" data-channel="online" bindtap="openSettlementMixedPaymentDialog"><text>¥{{detail.onlineReceivedText}}</text><text class="editable-meta-mark">{{ui.edit}}</text></view>
           </view>
@@ -93,15 +95,15 @@
         <view class="order-group" wx:for="{{detail.orderGroups}}" wx:key="id">
           <view class="order-group-head">
             <view>{{item.title}}</view>
-            <view class="order-group-actions"><text>¥{{item.totalText}}</text><text class="edit-action-link danger-text" data-id="{{item.id}}" catchtap="deleteSettlementOrder">删除订单</text><text class="edit-action-link" data-id="{{item.id}}" catchtap="toggleAddDish">加菜</text></view>
+            <view class="order-group-actions"><text>¥{{item.totalText}}</text><block wx:if="{{!detail.isJointCheckout}}"><text class="edit-action-link danger-text" data-id="{{item.id}}" catchtap="deleteSettlementOrder">删除订单</text><text class="edit-action-link" data-id="{{item.id}}" catchtap="toggleAddDish">加菜</text></block></view>
           </view>
           <view class="goods-row" wx:for="{{item.goods}}" wx:key="index" wx:for-item="good">
             <view class="good-name">{{good.dishName}}</view>
             <view class="good-count">x{{good.count}}</view>
             <view class="good-money">¥{{good.subtotalText}}</view>
-            <text class="edit-action-link danger-text" data-order-id="{{item.id}}" data-goods-index="{{good.goodsIndex}}" catchtap="deleteSettlementDish">删除</text>
+            <text wx:if="{{!detail.isJointCheckout}}" class="edit-action-link danger-text" data-order-id="{{item.id}}" data-goods-index="{{good.goodsIndex}}" catchtap="deleteSettlementDish">删除</text>
           </view>
-          <view wx:if="{{addingToOrderId === item.id}}" class="add-dish-form">
+          <view wx:if="{{!detail.isJointCheckout && addingToOrderId === item.id}}" class="add-dish-form">
             <view class="add-dish-search-row">
               <input class="add-dish-search-input" placeholder="&#x641c;&#x7d22;&#x73b0;&#x6709;&#x83dc;&#x5355;&#x83dc;&#x54c1;" value="{{addDishForm.keyword}}" data-key="keyword" bindinput="onAddDishInput" />
               <input class="add-dish-count-input" type="number" placeholder="&#x6570;&#x91cf;" value="{{addDishForm.count}}" data-key="count" bindinput="onAddDishInput" />

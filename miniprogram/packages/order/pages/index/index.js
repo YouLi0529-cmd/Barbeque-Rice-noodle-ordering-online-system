@@ -245,6 +245,26 @@ Page({
       result.code === 'TABLE_SESSION_CLOSED'
   },
 
+  applySharedCartResolution(result = {}, expectedSessionId = '') {
+    const nextSessionId = String(result.sessionId || '').trim()
+    const nextTableNumber = String(result.tableNumber || this.data.tableNumber || '').trim()
+    if (!nextSessionId || (nextSessionId === this.data.sharedSessionId && nextTableNumber === this.data.tableNumber)) return false
+    if (expectedSessionId && this.data.sharedSessionId !== expectedSessionId) return false
+    this.stopSharedCartSync()
+    this.setData({
+      tableNumber: nextTableNumber,
+      sharedSessionId: nextSessionId,
+      sharedCartAccessToken: result.sharedCartAccessToken || this.data.sharedCartAccessToken,
+      sharedCartVersion: Number(result.cartVersion || 0),
+      sharedCartHydrated: false,
+      sharedCartWatchReady: false,
+      sharedOrderRootId: result.activeOrderRootId || '',
+      sharedOrderAddOnCount: Number(result.addOnCount || 0)
+    })
+    this.startSharedCartWatch(nextSessionId)
+    return true
+  },
+
   handleSharedSessionClosed(message = '本桌订单已结账，请重新扫码开台') {
     this.stopSharedCartSync()
     this.updateCart({}, { skipSync: true })
@@ -457,6 +477,7 @@ Page({
         throw new Error(result.message || '确认人数失败')
       }
 
+      this.applySharedCartResolution(result, this.data.sharedSessionId)
       this.applySharedPeopleState({
         peopleCount: result.peopleCount || peopleCount,
         peopleConfirmed: result.peopleConfirmed !== false
@@ -506,7 +527,7 @@ Page({
 
       this.stopSharedCartSync()
       this.setData({
-        tableNumber: currentTable,
+        tableNumber: result.tableNumber || currentTable,
         sharedSessionId: result.sessionId,
         sharedCartAccessToken: result.sharedCartAccessToken || '',
         sharedCartReady: true,
@@ -871,6 +892,10 @@ Page({
           if (statusResult && !statusResult.success) {
             throw new Error(statusResult.message || '同步购物车失败')
           }
+          if (statusResult && this.applySharedCartResolution(statusResult, sessionId)) {
+            await this.fetchSharedCart(false, true)
+            return
+          }
           if (statusResult && this.data.sharedSessionId !== sessionId) return
           if (statusResult && this.isSharedSessionClosed(statusResult)) {
             this.handleSharedSessionClosed('本桌订单已结账，请重新扫码开台')
@@ -906,6 +931,10 @@ Page({
           })).result || {}
         if (!result.success) {
           throw new Error(result.message || '同步购物车失败')
+        }
+        if (this.applySharedCartResolution(result, sessionId)) {
+          await this.fetchSharedCart(false, true)
+          return
         }
         if (this.data.sharedSessionId !== sessionId) return
         if (this.isSharedSessionClosed(result)) {
@@ -1064,6 +1093,15 @@ Page({
         shouldRetry: err => !err.code || err.statusCode >= 500 || err.statusCode === 429
       })
       pendingPatches.shift()
+      const resolved = this.applySharedCartResolution(result, patch.sessionId)
+      if (resolved) {
+        pendingPatches.forEach(queuedPatch => {
+          if (queuedPatch.sessionId === patch.sessionId) {
+            queuedPatch.sessionId = result.sessionId
+            queuedPatch.tableNumber = result.tableNumber || queuedPatch.tableNumber
+          }
+        })
+      }
       if (Number.isFinite(Number(result.cartVersion))) {
         this.setData({
           sharedCartVersion: Number(result.cartVersion),

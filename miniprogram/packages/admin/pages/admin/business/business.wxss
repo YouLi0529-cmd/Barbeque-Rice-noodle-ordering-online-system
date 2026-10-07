@@ -130,6 +130,20 @@ page {
   border-right: 0;
 }
 
+.range-date-picker {
+  min-width: 0;
+  height: 22rpx;
+  flex: 1;
+}
+
+.range-date-picker .range-option {
+  width: 100%;
+}
+
+.range-option-last {
+  border-right: 0;
+}
+
 .range-option.active {
   border-color: #C9341C;
   color: #FFFFFF;

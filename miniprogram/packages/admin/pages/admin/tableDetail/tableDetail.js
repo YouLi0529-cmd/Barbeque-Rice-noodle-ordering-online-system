@@ -93,6 +93,7 @@ const UI = {
   refundUnavailable: '\u6ca1\u6709\u53ef\u9000\u7684\u83dc\u54c1',
   sendSuccess: '\u5df2\u91cd\u65b0\u53d1\u9001',
   checkoutSuccess: '\u5df2\u7ed3\u8d26',
+  paidTableNoAdd: '\u8be5\u684c\u5df2\u7ed3\u8d26\uff0c\u8bf7\u6e05\u53f0\u540e\u518d\u5f00\u65b0\u5355',
   checkoutConfirmTitle: '\u786e\u8ba4\u7ed3\u8d26',
   checkoutConfirmContent: '\u786e\u8ba4\u4ed8\u6b3e\u5b8c\u6210\u5e76\u7ed3\u675f\u8be5\u5355\u5417',
   noOrder: '\u6ca1\u6709\u53ef\u64cd\u4f5c\u7684\u8ba2\u5355',
@@ -119,17 +120,23 @@ const UI = {
   mixedPaymentInputPlaceholder: '\u8bf7\u8f93\u5165\u91d1\u989d',
   mixedPaymentAutoFill: '\u53e6\u4e00\u9879\u5c06\u81ea\u52a8\u8865\u8db3',
   mixedPaymentInvalid: '\u6536\u6b3e\u91d1\u989d\u4e0d\u80fd\u5c0f\u4e8e 0 \u6216\u5927\u4e8e\u5e94\u6536',
-  combinedCheckoutDialogTitle: '\u4e00\u8d77\u7ed3\u8d26',
-  combinedCheckoutInputPlaceholder: '\u8f93\u5165\u684c\u53f7\uff0c\u5982 10\u300111',
-  combinedCheckoutInputHint: '\u53ef\u4e00\u6b21\u8f93\u5165\u591a\u4e2a\u684c\u53f7',
+  combinedCheckoutDialogTitle: '\u9009\u62e9\u4e00\u8d77\u7ed3\u8d26\u684c\u53f0',
+  combinedCheckoutDialogTip: '\u70b9\u9009\u5176\u4ed6\u5728\u7528\u684c\u53f0\uff0c\u4e0d\u53ef\u7ed3\u8d26\u7684\u684c\u53f0\u5df2\u7f6e\u7070',
+  combinedCheckoutEmpty: '\u6682\u65e0\u53ef\u9009\u7684\u5728\u7528\u684c\u53f0',
+  combinedCheckoutChoose: '\u786e\u5b9a\u9009\u62e9',
+  combinedCheckoutSource: '\u672c\u684c',
+  combinedCheckoutSelectedCount: '\u5df2\u9009',
+  combinedCheckoutSelectedUnit: '\u684c',
+  combinedCheckoutCancel: '\u53d6\u6d88',
   combinedCheckoutSelected: '\u4e00\u8d77\u7ed3\u8d26\u684c\u53f0',
-  combinedCheckoutRequired: '\u8bf7\u5148\u8f93\u5165\u8981\u4e00\u8d77\u7ed3\u8d26\u7684\u684c\u53f7',
+  jointCheckout: '\u5171\u540c\u7ed3\u8d26',
   combinedCheckoutPendingAmount: '\u5176\u4ed6\u684c\u5f85\u7ed3',
   combinedCheckoutPreviewFailed: '\u8bfb\u53d6\u4e00\u8d77\u7ed3\u8d26\u684c\u53f0\u5931\u8d25',
   settledAmount: '\u5df2\u7ed3\u83dc\u54c1\u91d1\u989d',
   outstandingAmount: '\u672a\u7ed3\u91d1\u989d',
   discountInvalid: '\u8bf7\u8f93\u5165 0-10 \u4e4b\u95f4\u7684\u6298\u6263',
   directReduceInvalid: '\u76f4\u51cf\u91d1\u989d\u4e0d\u80fd\u8d85\u8fc7\u6298\u540e\u91d1\u989d',
+  combinedCheckoutDirectReduceUnsupported: '\u4e00\u8d77\u7ed3\u8d26\u6682\u4e0d\u652f\u6301\u76f4\u51cf\uff0c\u8bf7\u5206\u522b\u7ed3\u8d26',
   editDishTitle: '\u4fee\u6539\u83dc\u54c1',
   editDishOptionsLabel: '\u53e3\u5473/\u9009\u9879',
   editDishRemarkLabel: '\u5907\u6ce8',
@@ -246,6 +253,8 @@ function buildTable(options) {
     finishedAt,
     diningTimeText: getDiningTime(scannedAt, finishedAt),
     tableGroupId: options.tableGroupId || '',
+    isMerged: options.isMerged === true,
+    isMergedPrimary: options.isMergedPrimary === true,
     mergedTables: Array.isArray(options.mergedTables) ? options.mergedTables : [],
     mergedTableText: options.mergedTableText || ''
   }
@@ -267,6 +276,8 @@ function buildServerTable(table) {
     scannedAt: table.scannedAt,
     finishedAt: table.finishedAt,
     tableGroupId: table.tableGroupId,
+    isMerged: table.isMerged,
+    isMergedPrimary: table.isMergedPrimary,
     mergedTables: table.mergedTables,
     mergedTableText: table.mergedTableText
   })
@@ -376,25 +387,6 @@ function getSafeTableRef(table) {
   }
 }
 
-function normalizeCombinedCheckoutTableToken(value) {
-  const source = String(value || '')
-    .trim()
-    .toUpperCase()
-    .replace(/[\u53f7\u684c]/g, '')
-  const match = source.match(/^([VT]?)(\d{1,2})$/)
-  if (!match) return ''
-  return `${match[1]}${String(Number(match[2])).padStart(2, '0')}`
-}
-
-function parseCombinedCheckoutTables(value, currentTable) {
-  const current = normalizeCombinedCheckoutTableToken(currentTable && currentTable.tableNumber)
-  const seen = {}
-  return String(value || '')
-    .split(/[\s,\uff0c\u3001;\uff1b]+/)
-    .map(normalizeCombinedCheckoutTableToken)
-    .filter(tableNumber => tableNumber && tableNumber !== current && !seen[tableNumber] && (seen[tableNumber] = true))
-}
-
 function formatMergeTableSections(sections, currentTable, selectedMap = {}) {
   return (sections || []).map(section => {
     const tables = (section.tables || [])
@@ -422,6 +414,51 @@ function formatMergeTableSections(sections, currentTable, selectedMap = {}) {
       tables
     }
   }).filter(section => section.tables.length > 0)
+}
+
+function formatCombinedCheckoutTableSections(sections, currentTable, selectedMap = {}) {
+  const sourceUnitTableKeys = {}
+  if (currentTable && currentTable.isMerged === true) {
+    ;(currentTable.mergedTables || []).forEach(item => {
+      const key = item && (item.tableKey || `${item.areaKey}-${item.tableNumber}`)
+      if (key) sourceUnitTableKeys[key] = true
+    })
+  }
+  if (currentTable && currentTable.tableKey) sourceUnitTableKeys[currentTable.tableKey] = true
+
+  return (sections || []).map(section => {
+    const tables = (section.tables || [])
+      .filter(table => {
+        const tableKey = table.tableKey || `${table.areaKey}-${table.tableNumber}`
+        return !sourceUnitTableKeys[tableKey]
+      })
+      .map(table => {
+        const status = STATUS[table.status] || STATUS.empty
+        const tableKey = table.tableKey || `${table.areaKey}-${table.tableNumber}`
+        const outstandingAmount = Math.max(0, getNumber(table.outstandingAmount, table.totalPrice))
+        const merged = table.isMerged === true
+        const mergedChild = merged && table.isMergedPrimary !== true
+        const selectable = !mergedChild && table.status !== 'empty' && table.status !== 'paid' && outstandingAmount > 0
+        return {
+          ...table,
+          tableKey,
+          areaName: table.areaName || section.areaName || '',
+          label: `${table.areaName || section.areaName || ''}${table.tableNumber}${UI.tableUnit}`,
+          statusText: status.text,
+          statusClass: status.className,
+          outstandingAmount,
+          outstandingPriceText: formatPrice(outstandingAmount),
+          selectable,
+          disabled: !selectable,
+          selectionHint: mergedChild ? UI.mergedTables : (selectable ? status.text : (table.status === 'paid' ? status.text : UI.emptyBill)),
+          selected: selectable && !!selectedMap[tableKey]
+        }
+      })
+    return {
+      ...section,
+      tables
+    }
+  })
 }
 
 Page({
@@ -459,7 +496,11 @@ Page({
     selectedMergeTableMap: {},
     selectedMergeTableCount: 0,
     showCombinedCheckoutDialog: false,
-    combinedCheckoutInput: '',
+    combinedCheckoutLoading: false,
+    combinedCheckoutTableSections: [],
+    selectedCombinedCheckoutTableMap: {},
+    selectedCombinedCheckoutTableCount: 0,
+    selectedCombinedCheckoutAmount: 0,
     combinedCheckoutTables: [],
     combinedCheckoutTableText: '',
     combinedCheckoutOutstandingAmount: 0,
@@ -511,11 +552,14 @@ Page({
     }
   },
 
-  getCombinedCheckoutTableTokens() {
+  getCombinedCheckoutTableRefs() {
     return (this.data.combinedCheckoutTables || [])
       .map(table => {
-        if (typeof table === 'string') return table
-        return table.tableNumber || table.inputToken || ''
+        if (!table || typeof table === 'string') return null
+        const areaKey = table.areaKey || ''
+        const tableNumber = table.tableNumber || ''
+        if (!areaKey || !tableNumber) return null
+        return { areaKey, tableNumber }
       })
       .filter(Boolean)
   },
@@ -531,8 +575,34 @@ Page({
     return Math.round((sourceAmount + combinedAmount) * 100) / 100
   },
 
+  clearCombinedCheckout() {
+    const table = this.data.table || {}
+    const sourceAmount = getNumber(table.outstandingAmount, table.totalPrice)
+    this.setData({
+      combinedCheckoutTables: [],
+      combinedCheckoutTableText: '',
+      combinedCheckoutOutstandingAmount: 0,
+      selectedCombinedCheckoutTableMap: {},
+      selectedCombinedCheckoutTableCount: 0,
+      selectedCombinedCheckoutAmount: 0,
+      paySummary: buildPaySummary(
+        sourceAmount,
+        this.data.paymentMethod,
+        this.data.discountType,
+        this.data.discountValue,
+        this.data.directReduceValue,
+        this.data.mixedPaymentChannel,
+        this.data.mixedPaymentAmount
+      )
+    })
+  },
+
   startWaiterOrder() {
     const table = this.data.table || {}
+    if (table.status === 'paid') {
+      wx.showToast({ title: UI.paidTableNoAdd, icon: 'none' })
+      return
+    }
     const mode = (this.data.billGroups || []).length > 0 ? 'add' : 'create'
 
     const openOrderPage = peopleCount => {
@@ -856,6 +926,10 @@ Page({
 
   editPeople() {
     const table = this.data.table || {}
+    if (table.status === 'paid') {
+      wx.showToast({ title: UI.paidTableNoAdd, icon: 'none' })
+      return
+    }
     this.setData({
       showPeopleDialog: true,
       peopleInput: table.peopleCount ? String(table.peopleCount) : ''
@@ -1191,52 +1265,108 @@ Page({
     })
   },
 
-  openCombinedCheckoutDialog() {
-    const selected = this.getCombinedCheckoutTableTokens()
+  async openCombinedCheckoutDialog() {
+    const table = this.data.table || {}
+    const selectedCombinedCheckoutTableMap = {}
+    this.getCombinedCheckoutTableRefs().forEach(ref => {
+      selectedCombinedCheckoutTableMap[`${ref.areaKey}-${ref.tableNumber}`] = true
+    })
     this.setData({
       showCombinedCheckoutDialog: true,
-      combinedCheckoutInput: selected.join('\u3001')
+      combinedCheckoutLoading: true,
+      combinedCheckoutTableSections: [],
+      selectedCombinedCheckoutTableMap,
+      selectedCombinedCheckoutTableCount: Object.keys(selectedCombinedCheckoutTableMap).length,
+      selectedCombinedCheckoutAmount: 0
     })
+
+    try {
+      const res = await apiClient.call('admin.table.list')
+      const sections = res && res.data && Array.isArray(res.data.sections)
+        ? res.data.sections
+        : []
+      this.combinedCheckoutRawSections = sections
+      this.refreshCombinedCheckoutTableSections(selectedCombinedCheckoutTableMap)
+    } catch (err) {
+      console.error('load combined checkout tables failed', err)
+      this.setData({ combinedCheckoutLoading: false })
+      wx.showToast({ title: UI.loadFailed, icon: 'none' })
+    }
   },
 
   closeCombinedCheckoutDialog() {
-    this.setData({
-      showCombinedCheckoutDialog: false,
-      combinedCheckoutInput: this.getCombinedCheckoutTableTokens().join('\u3001')
-    })
+    if (this.data.combinedCheckoutLoading || this.data.loadingCombinedCheckout) return
+    this.setData({ showCombinedCheckoutDialog: false })
   },
 
   stopCombinedCheckoutDialogTap() {},
 
-  onCombinedCheckoutInput(event) {
+  refreshCombinedCheckoutTableSections(selectedMap = {}) {
+    const sections = formatCombinedCheckoutTableSections(
+      this.combinedCheckoutRawSections || [],
+      this.data.table || {},
+      selectedMap
+    )
+    let selectedCount = 0
+    let selectedAmount = 0
+    sections.forEach(section => {
+      ;(section.tables || []).forEach(item => {
+        if (!item.selected) return
+        selectedCount += 1
+        selectedAmount += Math.max(0, getNumber(item.outstandingAmount))
+      })
+    })
     this.setData({
-      combinedCheckoutInput: event.detail.value
+      combinedCheckoutTableSections: sections,
+      selectedCombinedCheckoutTableMap: selectedMap,
+      selectedCombinedCheckoutTableCount: selectedCount,
+      selectedCombinedCheckoutAmount: Math.round(selectedAmount * 100) / 100,
+      combinedCheckoutLoading: false
     })
   },
 
-  async confirmCombinedCheckoutDialog() {
-    const tables = parseCombinedCheckoutTables(this.data.combinedCheckoutInput, this.data.table)
-    if (tables.length === 0) {
-      if ((this.data.combinedCheckoutTables || []).length > 0) {
-        this.setData({
-          showCombinedCheckoutDialog: false,
-          combinedCheckoutInput: '',
-          combinedCheckoutTables: [],
-          combinedCheckoutTableText: '',
-          combinedCheckoutOutstandingAmount: 0,
-          paySummary: buildPaySummary(
-            this.getCheckoutBaseAmount([]),
-            this.data.paymentMethod,
-            this.data.discountType,
-            this.data.discountValue,
-            this.data.directReduceValue,
-            this.data.mixedPaymentChannel,
-            this.data.mixedPaymentAmount
-          )
+  toggleCombinedCheckoutTable(event) {
+    const tableKey = event.currentTarget.dataset.tableKey || ''
+    if (!tableKey) return
+    let target = null
+    ;(this.data.combinedCheckoutTableSections || []).some(section => {
+      target = (section.tables || []).find(item => item.tableKey === tableKey) || null
+      return !!target
+    })
+    if (!target || !target.selectable) return
+
+    const selectedMap = {
+      ...(this.data.selectedCombinedCheckoutTableMap || {})
+    }
+    if (selectedMap[tableKey]) {
+      delete selectedMap[tableKey]
+    } else {
+      selectedMap[tableKey] = true
+    }
+    this.refreshCombinedCheckoutTableSections(selectedMap)
+  },
+
+  getSelectedCombinedCheckoutTables() {
+    const selectedMap = this.data.selectedCombinedCheckoutTableMap || {}
+    const selectedTables = []
+    ;(this.data.combinedCheckoutTableSections || []).forEach(section => {
+      ;(section.tables || []).forEach(item => {
+        if (!item.selectable || !selectedMap[item.tableKey]) return
+        selectedTables.push({
+          areaKey: item.areaKey,
+          tableNumber: item.tableNumber
         })
-        return
-      }
-      wx.showToast({ title: UI.combinedCheckoutRequired, icon: 'none' })
+      })
+    })
+    return selectedTables
+  },
+
+  async confirmCombinedCheckoutDialog() {
+    if (this.data.combinedCheckoutLoading || this.data.loadingCombinedCheckout) return
+    const tables = this.getSelectedCombinedCheckoutTables()
+    if (tables.length === 0) {
+      this.clearCombinedCheckout()
+      this.setData({ showCombinedCheckoutDialog: false })
       return
     }
     const table = this.data.table || {}
@@ -1255,7 +1385,6 @@ Page({
       const tableText = previewTables.map(item => item.label || item.tableNumber).filter(Boolean).join('\u3001')
       this.setData({
         showCombinedCheckoutDialog: false,
-        combinedCheckoutInput: tables.join('\u3001'),
         combinedCheckoutTables: previewTables,
         combinedCheckoutTableText: tableText,
         combinedCheckoutOutstandingAmount: getNumber(data.outstandingAmount),
@@ -1282,6 +1411,10 @@ Page({
 
   selectDiscount(event) {
     const value = event.currentTarget.dataset.value || 'discount'
+    if (value === 'direct_reduce' && this.getCombinedCheckoutTableRefs().length > 0) {
+      wx.showToast({ title: UI.combinedCheckoutDirectReduceUnsupported, icon: 'none' })
+      return
+    }
     const totalPrice = this.getCheckoutBaseAmount()
     if (value === 'direct_reduce' && this.data.directReduceValue !== '') {
       this.setData({
@@ -2000,7 +2133,11 @@ Page({
   async finishCheckout() {
     if (this.data.checkingOut) return
     const table = this.data.table || {}
-    const combinedTableNumbers = this.getCombinedCheckoutTableTokens()
+    if (table.status === 'paid') {
+      wx.showToast({ title: UI.paidTableNoAdd, icon: 'none' })
+      return
+    }
+    const combinedTableNumbers = this.getCombinedCheckoutTableRefs()
     if (!table.tableNumber || this.data.billGroups.length === 0) {
       wx.showToast({
         title: UI.noOrder,

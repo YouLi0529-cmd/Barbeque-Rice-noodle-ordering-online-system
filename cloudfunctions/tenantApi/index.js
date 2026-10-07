@@ -1092,16 +1092,23 @@ async function createOrder(payload) {
   const orderScene = payload.orderScene === 'camping' || payload.orderType === 'camping' ? 'camping' : 'dineIn'
   // Persist every dine-in order under one table identity. QR codes and old
   // records may still use aliases, but new data must always use 01, V01 or T01.
-  const tableNumber = orderScene === 'camping'
+  let tableNumber = orderScene === 'camping'
     ? ''
     : normalizeTableNumber(payload.tableNumber)
   if (orderScene !== 'camping' && !tableNumber) {
     return { success: false, code: 'TABLE_REQUIRED', message: 'table number required' }
   }
 
-  const sharedSessionId = orderScene === 'camping'
+  let sharedSessionId = orderScene === 'camping'
     ? ''
     : String(payload.sharedSessionId || getSharedCartSessionId(tableNumber)).trim()
+  if (orderScene === 'dineIn') {
+    const resolvedSession = await resolveSharedCartSession(tableNumber, sharedSessionId)
+    if (resolvedSession.redirected) {
+      tableNumber = resolvedSession.tableNumber
+      sharedSessionId = resolvedSession.sessionId
+    }
+  }
   const linkedTableGroup = orderScene === 'dineIn'
     ? await getActiveTableGroupSnapshotForTableNumber(tableNumber)
     : {}
@@ -1188,22 +1195,9 @@ async function createOrder(payload) {
       const parentOrder = parentRes.data
       if (!parentOrder || parentOrder.orderScene !== orderScene || isClosedOrderContext(parentOrder)) {
         if (orderScene === 'dineIn' && session) {
-          await transaction.collection('tableOrderSession').doc(sharedSessionId).update({ data: {
-            status: 'finished',
-            checkoutStatus: 'finished',
-            finishedAt: new Date(),
-            sharedCartActiveUntil: null,
-            visitId: '',
-            visitHistory: [],
-            memberOpenids: [],
-            peopleCount: 0,
-            peopleConfirmed: false,
-            peopleConfirmedAt: null,
-            activeOrderRootId: '',
-            addOnCount: 0,
-            cartVersion: _.inc(1),
-            updateTime: db.serverDate()
-          } })
+          await transaction.collection('tableOrderSession').doc(sharedSessionId).update({
+            data: buildClosedTableSessionData(session, new Date())
+          })
           return { success: false, code: 'TABLE_SESSION_CLOSED', message: '\u8fd9\u684c\u7684\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u5f00\u53f0\u540e\u518d\u70b9\u83dc' }
         }
         return { success: false, code: 'ACTIVE_ORDER_INVALID', message: '\u5f53\u524d\u8ba2\u5355\u72b6\u6001\u5df2\u53d8\u5316\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u5f00\u53f0' }
@@ -1325,10 +1319,16 @@ async function createOrder(payload) {
 }
 
 async function adminCreateOfflineOrder(payload) {
-  const tableRef = getAdminTableRef(payload.areaKey, payload.tableNumber)
-  if (!tableRef) {
+  const requestedTableRef = getAdminTableRef(payload.areaKey, payload.tableNumber)
+  if (!requestedTableRef) {
     return { success: false, code: 'TABLE_NOT_FOUND', message: '桌台不存在' }
   }
+  // A merged table has one writable cart/session. Staff may open either tile,
+  // but waiter-added dishes must still join the designated primary table.
+  const activeTableGroup = await getActiveTableGroupForRef(requestedTableRef)
+  const tableRef = activeTableGroup
+    ? getTableGroupPrimary(activeTableGroup, requestedTableRef)
+    : requestedTableRef
 
   const activeOrders = (await getAdminTableOrders({ areaKey: tableRef.areaKey, tableNumber: tableRef.tableNumber }))
     .filter(order => !isAdminPaidOrder(order) && order.tableCleared !== true && order.deleted !== true && order.status !== 'cancelled' && hasOrderableGoods(order))
@@ -1389,7 +1389,9 @@ async function adminCreateOfflineOrder(payload) {
         legacyAddOnCount
       ) + 1
       : 0
-    const visitId = sessionActive && session.visitId ? String(session.visitId) : crypto.randomBytes(16).toString('hex')
+    const visitId = isAddOnOrder && sessionActive && session.visitId
+      ? String(session.visitId)
+      : crypto.randomBytes(16).toString('hex')
     const priceResult = await buildServerOrderGoods(transaction, payload.orderGoods, { allowPackages: true })
     if (!priceResult.goods.length) throw new Error('请选择菜品')
 
@@ -1442,7 +1444,9 @@ async function adminCreateOfflineOrder(payload) {
     if (!effectiveRootOrderId) {
       await transaction.collection('order').doc(addRes._id).update({ data: { rootOrderId: savedRootOrderId } })
     }
-    const receiptSession = sessionActive ? session : {}
+    // A waiter-created first order starts a new visit. It must not inherit a
+    // previous customer's receipt anchor or shared-cart submission markers.
+    const receiptSession = isAddOnOrder && sessionActive ? session : {}
     const customerReceiptOrderId = customerReceiptState.getCustomerReceiptOrderId(
       receiptSession,
       addRes._id,
@@ -1453,14 +1457,19 @@ async function adminCreateOfflineOrder(payload) {
       customerReceiptOrderId
     )
     const sessionData = {
+      ...(isAddOnOrder ? {} : getNewTableVisitSessionFields()),
       tableNumber: formatAdminTableNumber(tableRef), status: 'ordering', checkoutStatus: '', finishedAt: null,
-      peopleCount, peopleConfirmed: true, peopleConfirmedAt: sessionActive && session.peopleConfirmedAt || db.serverDate(),
-      cartVersion: sessionActive ? Math.max(0, Number(session && session.cartVersion || 0)) : 0, visitId,
+      peopleCount, peopleConfirmed: true,
+      peopleConfirmedAt: isAddOnOrder && sessionActive && session.peopleConfirmedAt || db.serverDate(),
+      cartVersion: isAddOnOrder && sessionActive ? Math.max(0, Number(session && session.cartVersion || 0)) : 0,
+      visitId,
       visitHistory: [],
-      memberOpenids: sessionActive && Array.isArray(session.memberOpenids) ? session.memberOpenids : [],
+      memberOpenids: isAddOnOrder && sessionActive && Array.isArray(session.memberOpenids) ? session.memberOpenids : [],
       activeOrderRootId: savedRootOrderId, addOnCount: addOnIndex,
       ...customerReceiptFields,
-      createTime: sessionActive && session.createTime ? session.createTime : db.serverDate(), updateTime: db.serverDate()
+      sharedCartActiveUntil: isAddOnOrder && sessionActive ? session.sharedCartActiveUntil || null : null,
+      createTime: isAddOnOrder && sessionActive && session.createTime ? session.createTime : db.serverDate(),
+      updateTime: db.serverDate()
     }
     if (session) await sessionRef.update({ data: sessionData })
     else await sessionRef.set({ data: sessionData })
@@ -2754,29 +2763,50 @@ function getOrderClosedAt(order) {
   return getTimeValue(order.updateTime)
 }
 
-const BUSINESS_STATS_RANGE_KEYS = ['today', 'yesterday', '7d', '14d', '1m', '3m']
+const BUSINESS_STATS_RANGE_KEYS = ['today', 'yesterday', '7d', '1m', '3m', 'custom']
 
 function normalizeBusinessStatsRange(value) {
   const range = String(value || '').trim()
   return BUSINESS_STATS_RANGE_KEYS.includes(range) ? range : 'today'
 }
 
-function getBusinessStatsRangeStart(range, now = new Date()) {
+function getBusinessStatsCustomDateStart(value) {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+  const start = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  if (
+    start.getFullYear() !== Number(match[1]) ||
+    start.getMonth() !== Number(match[2]) - 1 ||
+    start.getDate() !== Number(match[3])
+  ) return null
+  start.setHours(0, 0, 0, 0)
+  return start
+}
+
+function getBusinessStatsRangeStart(range, now = new Date(), customDate = '') {
   const normalized = normalizeBusinessStatsRange(range)
+  const customStart = normalized === 'custom' ? getBusinessStatsCustomDateStart(customDate) : null
+  if (customStart) return customStart
   const start = new Date(now)
   start.setHours(0, 0, 0, 0)
 
   if (normalized === 'yesterday') start.setDate(start.getDate() - 1)
   if (normalized === '7d') start.setDate(start.getDate() - 6)
-  if (normalized === '14d') start.setDate(start.getDate() - 13)
   if (normalized === '1m') start.setMonth(start.getMonth() - 1)
   if (normalized === '3m') start.setMonth(start.getMonth() - 3)
 
   return start
 }
 
-function getBusinessStatsRangeEnd(range, now = new Date()) {
-  if (normalizeBusinessStatsRange(range) !== 'yesterday') return 0
+function getBusinessStatsRangeEnd(range, now = new Date(), customDate = '') {
+  const normalized = normalizeBusinessStatsRange(range)
+  if (normalized === 'custom') {
+    const start = getBusinessStatsRangeStart(range, now, customDate)
+    const end = new Date(start)
+    end.setDate(end.getDate() + 1)
+    return end.getTime()
+  }
+  if (normalized !== 'yesterday') return 0
   const end = new Date(now)
   end.setHours(0, 0, 0, 0)
   return end.getTime()
@@ -2806,9 +2836,9 @@ function getArrivalOrderKey(order = {}) {
   return rootOrderId ? `order:${rootOrderId}` : ''
 }
 
-function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'today', now = new Date()) {
-  const startAt = getBusinessStatsRangeStart(range, now).getTime()
-  const endAt = getBusinessStatsRangeEnd(range, now)
+function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'today', now = new Date(), customDate = '') {
+  const startAt = getBusinessStatsRangeStart(range, now, customDate).getTime()
+  const endAt = getBusinessStatsRangeEnd(range, now, customDate)
   const groups = {}
   const rootOrderGroupKeys = {}
   const countedTableKeys = new Set()
@@ -2874,9 +2904,9 @@ function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'tod
   }
 }
 
-async function listDineInArrivalOrders(range = 'today', now = new Date()) {
-  const startAt = getBusinessStatsRangeStart(range, now)
-  const endAt = getBusinessStatsRangeEnd(range, now)
+async function listDineInArrivalOrders(range = 'today', now = new Date(), customDate = '') {
+  const startAt = getBusinessStatsRangeStart(range, now, customDate)
+  const endAt = getBusinessStatsRangeEnd(range, now, customDate)
   try {
     const res = await db.collection('order')
       .where({ type: 'order', createTime: _.gte(startAt) })
@@ -2907,9 +2937,9 @@ async function listDineInArrivalOrders(range = 'today', now = new Date()) {
   }
 }
 
-async function listConfirmedTableSessions(range = 'today', now = new Date()) {
-  const startAt = getBusinessStatsRangeStart(range, now).getTime()
-  const endAt = getBusinessStatsRangeEnd(range, now)
+async function listConfirmedTableSessions(range = 'today', now = new Date(), customDate = '') {
+  const startAt = getBusinessStatsRangeStart(range, now, customDate).getTime()
+  const endAt = getBusinessStatsRangeEnd(range, now, customDate)
   try {
     const res = await db.collection('tableOrderSession')
       .where({ peopleConfirmed: true })
@@ -2925,12 +2955,12 @@ async function listConfirmedTableSessions(range = 'today', now = new Date()) {
   }
 }
 
-async function getTableArrivalSnapshot(range = 'today', now = new Date()) {
+async function getTableArrivalSnapshot(range = 'today', now = new Date(), customDate = '') {
   const [orders, tableSessions] = await Promise.all([
-    listDineInArrivalOrders(range, now),
-    listConfirmedTableSessions(range, now)
+    listDineInArrivalOrders(range, now, customDate),
+    listConfirmedTableSessions(range, now, customDate)
   ])
-  return buildTableArrivalSnapshot(orders, tableSessions, range, now)
+  return buildTableArrivalSnapshot(orders, tableSessions, range, now, customDate)
 }
 
 function getBusinessStatsGroupKey(order = {}) {
@@ -2940,6 +2970,27 @@ function getBusinessStatsGroupKey(order = {}) {
   const tableGroupId = String(order.tableGroupId || '').trim()
   if (scene === 'dineIn' && tableGroupId) return `table-group:${tableGroupId}`
   return `${scene}:${String(order.rootOrderId || order._id || '')}`
+}
+
+function isJointCheckoutGroup(orders = []) {
+  return (orders || []).some(order => String(order && order.jointCheckoutId || '').trim())
+}
+
+function getJointCheckoutPaymentBreakdown(payment = {}) {
+  const total = roundMoney(Math.max(0, Number(payment.receivable) || 0))
+  const cashAmount = Number(payment.cashAmount)
+  const onlineAmount = Number(payment.onlineAmount)
+  if (Number.isFinite(cashAmount) && cashAmount >= 0 && Number.isFinite(onlineAmount) && onlineAmount >= 0) {
+    const cash = roundMoney(cashAmount)
+    const online = roundMoney(onlineAmount)
+    if (cash + online <= total + 0.01) {
+      return { cash, online, other: roundMoney(Math.max(0, total - cash - online)) }
+    }
+  }
+  const paymentMethod = String(payment.paymentMethod || '').trim()
+  if (paymentMethod === 'cash') return { cash: total, online: 0, other: 0 }
+  if (['wechat_alipay', 'wechat', 'alipay', 'online'].includes(paymentMethod)) return { cash: 0, online: total, other: 0 }
+  return { cash: 0, online: 0, other: total }
 }
 
 function getBusinessStatsGroupRevenue(orders = []) {
@@ -2979,10 +3030,15 @@ function getBusinessStatsGroupRevenue(orders = []) {
 }
 
 function getBusinessStatsPaymentBreakdown(orders = [], groupRevenue = 0) {
+  // The cash/online split of a joint checkout lives in checkoutPayment. A
+  // physical table still contributes its own revenue, but never a made-up
+  // share of that one payment.
+  if (isJointCheckoutGroup(orders)) return { cash: 0, online: 0, other: 0 }
+
+  const total = roundMoney(groupRevenue)
   const source = orders.find(order => order.checkoutCashAmount !== undefined || order.checkoutOnlineAmount !== undefined) || {}
   const cashAmount = Number(source.checkoutCashAmount)
   const onlineAmount = Number(source.checkoutOnlineAmount)
-  const total = roundMoney(groupRevenue)
 
   if (Number.isFinite(cashAmount) && cashAmount >= 0 && Number.isFinite(onlineAmount) && onlineAmount >= 0) {
     const normalizedCash = roundMoney(cashAmount)
@@ -3106,9 +3162,9 @@ function getSettlementStoredMixedPayment(orders = []) {
   }
 }
 
-function buildBusinessStatsSnapshot(orders = [], range) {
-  const startAt = getBusinessStatsRangeStart(range).getTime()
-  const endAt = getBusinessStatsRangeEnd(range)
+function buildBusinessStatsSnapshot(orders = [], range, jointCheckoutPayments = [], customDate = '') {
+  const startAt = getBusinessStatsRangeStart(range, new Date(), customDate).getTime()
+  const endAt = getBusinessStatsRangeEnd(range, new Date(), customDate)
   const groupMap = {}
 
   const combinedSettlementEvents = {}
@@ -3199,6 +3255,20 @@ function buildBusinessStatsSnapshot(orders = [], range) {
     paymentRevenue.other = roundMoney(paymentRevenue.other + paymentBreakdown.other)
     return sum + Number(event.amount || 0)
   }, 0))
+  const jointPaymentMap = {}
+  ;(jointCheckoutPayments || []).forEach(payment => {
+    if (!payment || payment.deleted === true || payment.type !== 'joint_checkout') return
+    const paymentId = String(payment.jointCheckoutId || payment._id || '').trim()
+    const paidAt = getTimeValue(payment.checkoutAt || payment.createTime || payment.updateTime)
+    if (!paymentId || !paidAt || paidAt < startAt || (endAt && paidAt >= endAt)) return
+    jointPaymentMap[paymentId] = payment
+  })
+  Object.keys(jointPaymentMap).forEach(paymentId => {
+    const paymentBreakdown = getJointCheckoutPaymentBreakdown(jointPaymentMap[paymentId])
+    paymentRevenue.cash = roundMoney(paymentRevenue.cash + paymentBreakdown.cash)
+    paymentRevenue.online = roundMoney(paymentRevenue.online + paymentBreakdown.online)
+    paymentRevenue.other = roundMoney(paymentRevenue.other + paymentBreakdown.other)
+  })
   const revenue = roundMoney(settledRevenue + partialRevenue)
 
   const dishes = Object.keys(dishMap)
@@ -3223,16 +3293,55 @@ function buildBusinessStatsSnapshot(orders = [], range) {
   }
 }
 
+async function listJointCheckoutPayments(tenantId, earliestStart) {
+  await ensureCollection('checkoutPayment')
+  const payments = []
+  const pageSize = 100
+  const maxPayments = 1000
+  try {
+    for (let page = 0; page < maxPayments / pageSize; page += 1) {
+      const res = await db.collection('checkoutPayment')
+        .where({
+          type: 'joint_checkout',
+          storeId: tenantId,
+          checkoutAt: _.gte(new Date(earliestStart))
+        })
+        .orderBy('checkoutAt', 'desc')
+        .skip(page * pageSize)
+        .limit(pageSize)
+        .get()
+      const pageData = res.data || []
+      payments.push(...pageData)
+      if (pageData.length < pageSize) break
+    }
+  } catch (err) {
+    console.warn('list joint checkout payments fallback', err)
+    const res = await db.collection('checkoutPayment')
+      .where({ type: 'joint_checkout', storeId: tenantId })
+      .limit(maxPayments)
+      .get()
+    ;(res.data || []).forEach(payment => {
+      if (getTimeValue(payment.checkoutAt || payment.createTime || payment.updateTime) >= earliestStart) {
+        payments.push(payment)
+      }
+    })
+  }
+  return payments
+}
+
 async function adminGetBusinessStats(payload) {
   const revenueRange = normalizeBusinessStatsRange(payload.revenueRange)
   const dishRange = normalizeBusinessStatsRange(payload.dishRange)
+  const revenueDate = String(payload.revenueDate || '').trim()
+  const dishDate = String(payload.dishDate || '').trim()
+  const now = new Date()
   const earliestStart = Math.min(
-    getBusinessStatsRangeStart(revenueRange).getTime(),
-    getBusinessStatsRangeStart(dishRange).getTime()
+    getBusinessStatsRangeStart(revenueRange, now, revenueDate).getTime(),
+    getBusinessStatsRangeStart(dishRange, now, dishDate).getTime()
   )
   const tenantId = getTenantId(payload)
 
-  await ensureCollection('order')
+  await Promise.all([ensureCollection('order'), ensureCollection('checkoutPayment')])
   const query = {
     type: 'order',
     storeId: tenantId,
@@ -3242,7 +3351,7 @@ async function adminGetBusinessStats(payload) {
   const pageSize = 100
   const maxOrders = 1000
   const orders = []
-  const arrivalPromise = getTableArrivalSnapshot(revenueRange)
+  const arrivalPromise = getTableArrivalSnapshot(revenueRange, now, revenueDate)
 
   try {
     for (let page = 0; page < maxOrders / pageSize; page += 1) {
@@ -3273,13 +3382,16 @@ async function adminGetBusinessStats(payload) {
       if ((res.data || []).length < pageSize) break
     }
   }
-  const arrival = await arrivalPromise
+  const [arrival, jointCheckoutPayments] = await Promise.all([
+    arrivalPromise,
+    listJointCheckoutPayments(tenantId, earliestStart)
+  ])
 
   return {
     success: true,
     data: {
-      revenue: buildBusinessStatsSnapshot(orders, revenueRange),
-      dishes: buildBusinessStatsSnapshot(orders, dishRange),
+      revenue: buildBusinessStatsSnapshot(orders, revenueRange, jointCheckoutPayments, revenueDate),
+      dishes: buildBusinessStatsSnapshot(orders, dishRange, jointCheckoutPayments, dishDate),
       arrival,
       fetchedOrderCount: orders.length,
       isTruncated: orders.length === maxOrders
@@ -3339,7 +3451,8 @@ function getSettlementPaymentText(orders = []) {
     wechat_alipay: '微信/支付宝',
     mixed: '现金 + 微信/支付宝'
   }
-  return paymentTexts[paymentMethod] || paymentMethod || '未记录'
+  const paymentText = paymentTexts[paymentMethod] || paymentMethod || '未记录'
+  return isJointCheckoutGroup(orders) ? `${paymentText}（共同结账）` : paymentText
 }
 
 function getSettlementGroupTotal(orders = []) {
@@ -3394,6 +3507,7 @@ function buildSettlementRecord(key, orders = []) {
   const peopleCount = getSettlementPeopleCount(orders)
   return {
     id: key,
+    isJointCheckout: isJointCheckoutGroup(orders),
     scene,
     sceneText: scene === 'camping' ? '户外自取' : '堂食',
     tableText: getSettlementTableText(orders),
@@ -3570,6 +3684,9 @@ async function adminEditSettlement(payload) {
   const groupOrders = groups[recordId]
   if (!groupOrders || !groupOrders.length) {
     return { success: false, code: 'SETTLEMENT_RECORD_NOT_FOUND', message: 'settlement record not found' }
+  }
+  if (isJointCheckoutGroup(groupOrders)) {
+    return { success: false, code: 'JOINT_SETTLEMENT_READ_ONLY', message: 'joint checkout records are read-only' }
   }
   const recordLevelOperations = ['deleteRecord', 'updatePaymentMethod', 'updateReceivable']
   const target = groupOrders.find(order => order._id === orderId)
@@ -3781,6 +3898,14 @@ function summarizeAdminTable(table, orders, tableGroup, tableSession) {
   const hasActiveSession = isActiveTableSession(tableSession)
   const sessionPeopleState = buildSharedCartPeopleState(tableSession)
   const hasConfirmedSession = hasActiveSession && sessionPeopleState.peopleConfirmed
+  const jointCheckoutOrder = activeOrders.find(order => String(order.jointCheckoutId || '').trim())
+  const jointCheckoutTables = jointCheckoutOrder
+    ? normalizeAdminTableRefs(jointCheckoutOrder.jointCheckoutTables)
+    : []
+  const jointCheckoutTableText = jointCheckoutTables
+    .filter(ref => !isSameAdminTableRef(ref, tableRef))
+    .map(ref => ref.label)
+    .join('、')
 
   activeOrders.forEach(order => {
     const rootOrderId = order.rootOrderId || order._id
@@ -3837,8 +3962,11 @@ function summarizeAdminTable(table, orders, tableGroup, tableSession) {
     itemCount,
     rootOrderIds,
     tableGroupId,
+    isMerged: !!groupSnapshot,
+    isMergedPrimary: !!(groupSnapshot && isSameAdminTableRef(groupSnapshot.tableGroupPrimary, tableRef)),
     mergedTables,
-    mergedTableText: mergedTables.length > 1 ? getMergedTableText(mergedTables) : ''
+    mergedTableText: mergedTables.length > 1 ? getMergedTableText(mergedTables) : '',
+    jointCheckoutTableText
   }
 }
 
@@ -4219,6 +4347,41 @@ async function getSingleAdminTableOrders(areaKey, tableNumber) {
   })
 }
 
+const ACTIVE_ADMIN_TABLE_ORDER_STATUSES = [
+  'submitted',
+  'pending_prepare',
+  'preparing',
+  'served',
+  'ready_pickup',
+  'picked_up'
+]
+
+// Current-table operations must never let historical orders crowd out the
+// table that is currently dining. This is intentionally separate from getSingleAdminTableOrders,
+// which is also used to find already-paid orders during a new scan cleanup.
+async function getCurrentAdminTableOrders(areaKey, tableNumber) {
+  const targetAreaKey = String(areaKey || 'normal').trim() || 'normal'
+  const number = padTableNumber(tableNumber)
+  const candidates = getAdminTableNumberCandidates(targetAreaKey, number)
+  if (!number || candidates.length === 0) return []
+
+  const res = await db.collection('order')
+    .where({
+      type: 'order',
+      tableNumber: _.in(candidates),
+      status: _.in(ACTIVE_ADMIN_TABLE_ORDER_STATUSES)
+    })
+    .orderBy('createTime', 'desc')
+    .limit(100)
+    .get()
+
+  return (res.data || []).filter(order => {
+    if (!isAdminTableOrder(order) || isClosedOrderContext(order)) return false
+    const parsed = parseAdminTableNumber(order.tableNumber)
+    return parsed && parsed.areaKey === targetAreaKey && parsed.tableNumber === number
+  })
+}
+
 async function getAdminTableOrders(payload) {
   const areaKey = String(payload.areaKey || 'normal').trim() || 'normal'
   const tableNumber = padTableNumber(payload.tableNumber)
@@ -4232,10 +4395,15 @@ async function getAdminTableOrders(payload) {
   return getAdminOrdersForTableRef(visibleOrders.data || [], tableRef)
 }
 
-async function expandActiveTableOrderTree(orders) {
+async function expandActiveTableOrderTree(orders, options = {}) {
+  const includePaid = options.includePaid === true
   const byId = {}
   const addOrder = order => {
-    if (!order || !order._id || !isAdminTableOrder(order) || isClosedOrderContext(order)) return
+    if (!order || !order._id || !isAdminTableOrder(order)) return
+    if (order.deleted === true || order.tableCleared === true) return
+    const status = String(order.status || '')
+    if (status === 'cancelled' || status === 'closed' || status === '3') return
+    if (!includePaid && isClosedOrderContext(order)) return
     byId[order._id] = order
   }
 
@@ -4286,11 +4454,61 @@ function findActiveTableSessionForRef(sessions = [], ref) {
   }) || null
 }
 
-// A combined checkout always works on physical tables. It deliberately does
-// not read tableGroup/tableGroupTables so it cannot create or alter a merge.
-async function getPhysicalTableCheckoutContext(ref, sessions = []) {
-  const directOrders = await getSingleAdminTableOrders(ref.areaKey, ref.tableNumber)
-  const orders = (await expandActiveTableOrderTree(directOrders)).filter(order => !isClosedOrderContext(order))
+function getCombinedCheckoutUnitKey(groupSnapshot, ref) {
+  return groupSnapshot
+    ? `group:${groupSnapshot.tableGroupId}`
+    : `table:${ref.tableKey}`
+}
+
+function getCombinedCheckoutUnitSessionIds(group, groupSnapshot, session) {
+  if (!groupSnapshot) {
+    return session && session._id ? [String(session._id)] : []
+  }
+
+  const primarySessionId = String(group && group.primarySessionId || getSharedCartSessionId(
+    formatAdminTableNumber(groupSnapshot.tableGroupPrimary)
+  )).trim()
+  const mergedSessionIds = Array.isArray(group && group.mergedSessionIds)
+    ? group.mergedSessionIds.map(item => String(item || '').trim()).filter(Boolean)
+    : []
+  const fallbackChildSessionIds = groupSnapshot.tableGroupTables
+    .filter(ref => !isSameAdminTableRef(ref, groupSnapshot.tableGroupPrimary))
+    .map(ref => getSharedCartSessionId(formatAdminTableNumber(ref)))
+
+  return Array.from(new Set([primarySessionId].concat(mergedSessionIds, fallbackChildSessionIds).filter(Boolean)))
+}
+
+function getCombinedCheckoutUnitRequest(ref, tableGroups = []) {
+  const group = findTableGroupForRef(tableGroups, ref)
+  const groupSnapshot = getTableGroupSnapshot(group, ref)
+  const primaryRef = groupSnapshot ? groupSnapshot.tableGroupPrimary : ref
+  const refs = groupSnapshot ? groupSnapshot.tableGroupTables : [ref]
+  return {
+    requestedRef: ref,
+    ref: primaryRef,
+    refs,
+    group,
+    groupSnapshot,
+    unitKey: getCombinedCheckoutUnitKey(groupSnapshot, primaryRef)
+  }
+}
+
+// A combined checkout works on settlement units. A normal table is one unit;
+// an active merged group is one unit represented by its primary table. This
+// keeps child tables from being counted twice without changing the merge data.
+async function getCombinedCheckoutUnitContext(unit, sessions = []) {
+  const directOrderGroups = await Promise.all((unit.refs || []).map(ref => (
+    getCurrentAdminTableOrders(ref.areaKey, ref.tableNumber)
+  )))
+  const directOrderMap = {}
+  directOrderGroups.forEach(groupOrders => {
+    ;(groupOrders || []).forEach(order => {
+      if (order && order._id) directOrderMap[String(order._id)] = order
+    })
+  })
+  const orders = (await expandActiveTableOrderTree(Object.keys(directOrderMap)
+    .map(orderId => directOrderMap[orderId])))
+    .filter(order => !isClosedOrderContext(order))
   const settlementState = getOrdersSettlementState(orders)
   const rootOrderIds = Array.from(new Set(orders
     .map(order => String(order.rootOrderId || order._id || '').trim())
@@ -4304,10 +4522,16 @@ async function getPhysicalTableCheckoutContext(ref, sessions = []) {
       Math.max(0, Math.floor(Number(order.addOnIndex || 0)))
     )
   })
-  const session = findActiveTableSessionForRef(sessions, ref)
+  const session = unit.groupSnapshot
+    ? (sessions || []).find(item => String(item && item._id || '') === String(unit.group && unit.group.primarySessionId || '')) ||
+      findActiveTableSessionForRef(sessions, unit.ref)
+    : findActiveTableSessionForRef(sessions, unit.ref)
 
   return {
-    ref,
+    ref: unit.ref,
+    refs: unit.refs,
+    unitKey: unit.unitKey,
+    groupSnapshot: unit.groupSnapshot,
     orders,
     orderIds: orders.map(order => String(order._id)).sort(),
     rootOrderIds,
@@ -4318,18 +4542,29 @@ async function getPhysicalTableCheckoutContext(ref, sessions = []) {
       activeOrderRootId: String(session.activeOrderRootId || '').trim(),
       addOnCount: Math.max(0, Math.floor(Number(session.addOnCount || 0))),
       cartVersion: Math.max(0, Math.floor(Number(session.cartVersion || 0)))
-    } : null
+    } : null,
+    sessionIds: getCombinedCheckoutUnitSessionIds(unit.group, unit.groupSnapshot, session),
+    primarySessionId: unit.groupSnapshot
+      ? String(unit.group && unit.group.primarySessionId || getSharedCartSessionId(
+        formatAdminTableNumber(unit.groupSnapshot.tableGroupPrimary)
+      )).trim()
+      : (session && session._id ? String(session._id) : '')
   }
 }
 
 function serializeCombinedCheckoutTable(context) {
   const state = context.settlementState || {}
+  const refs = Array.isArray(context.refs) && context.refs.length ? context.refs : [context.ref]
+  const memberLabels = refs
+    .filter(ref => !isSameAdminTableRef(ref, context.ref))
+    .map(ref => ref.label)
   return {
     areaKey: context.ref.areaKey,
     areaName: context.ref.areaName,
     tableKey: context.ref.tableKey,
     tableNumber: formatAdminTableNumber(context.ref),
-    label: context.ref.label,
+    label: memberLabels.length ? `${context.ref.label}（含${memberLabels.join('、')}）` : context.ref.label,
+    tableGroupTables: refs,
     grossAmount: state.grossAmount || 0,
     settledAmount: state.settledAmount || 0,
     outstandingAmount: state.outstandingAmount || 0,
@@ -4355,8 +4590,34 @@ async function getCombinedCheckoutContexts(payload = {}) {
   if (!targetRefs.length) return { success: false, code: 'COMBINED_TABLE_REQUIRED', message: 'combined table is required' }
   if (targetRefs.length > 10) return { success: false, code: 'COMBINED_TABLE_LIMIT', message: 'at most 10 tables can be checked out together' }
 
+  const tableGroups = await listActiveTableGroups()
+  const sourceUnit = getCombinedCheckoutUnitRequest(sourceRef, tableGroups)
+  const targetUnits = []
+  const unitKeys = { [sourceUnit.unitKey]: true }
+  for (const targetRef of targetRefs) {
+    const unit = getCombinedCheckoutUnitRequest(targetRef, tableGroups)
+    if (unit.unitKey === sourceUnit.unitKey) {
+      return {
+        success: false,
+        code: 'COMBINED_TABLE_SAME_UNIT',
+        message: '同一拼桌组只需选择主桌一次'
+      }
+    }
+    if (unitKeys[unit.unitKey]) {
+      return {
+        success: false,
+        code: 'COMBINED_TABLE_DUPLICATE_UNIT',
+        message: '同一拼桌组只能选择主桌一次'
+      }
+    }
+    unitKeys[unit.unitKey] = true
+    targetUnits.push(unit)
+  }
+
   const sessions = await listActiveTableSessions()
-  const contexts = await Promise.all([sourceRef].concat(targetRefs).map(ref => getPhysicalTableCheckoutContext(ref, sessions)))
+  const contexts = await Promise.all([sourceUnit].concat(targetUnits).map(unit => (
+    getCombinedCheckoutUnitContext(unit, sessions)
+  )))
   const unavailable = contexts.find(context => (
     !context.orders.length || Number(context.settlementState && context.settlementState.outstandingAmount || 0) <= 0
   ))
@@ -4419,7 +4680,9 @@ async function adminGetTableDetail(payload) {
   }
 
   const directOrders = await getAdminTableOrders({ areaKey, tableNumber })
-  const orders = await expandActiveTableOrderTree(directOrders)
+  // A paid table remains inspectable until staff explicitly clears it, but it
+  // is never reused as an active shared-cart order after its session closes.
+  const orders = await expandActiveTableOrderTree(directOrders, { includePaid: true })
   const tableGroup = await getActiveTableGroupForRef(baseTable)
   const tableSession = await getActiveTableSessionForRef(baseTable)
   const table = summarizeAdminTable(baseTable, orders, tableGroup, tableSession)
@@ -4552,8 +4815,7 @@ async function adminMergeTables(payload) {
   const activeOrderMap = {}
 
   for (const ref of allMergeRefs) {
-    const orders = await getSingleAdminTableOrders(ref.areaKey, ref.tableNumber)
-    const activeOrders = orders.filter(order => !isAdminPaidOrder(order))
+    const activeOrders = await getCurrentAdminTableOrders(ref.areaKey, ref.tableNumber)
     activeOrders.forEach(order => {
       if (order._id) activeOrderMap[order._id] = order
     })
@@ -4590,6 +4852,36 @@ async function adminMergeTables(payload) {
     .sort((a, b) => a.tableKey.localeCompare(b.tableKey))
   const existingGroupId = groupIds[0] || getTableGroupId(matchedTableGroups[0]) || ''
   const tableGroupId = existingGroupId || `merge_${primaryRef.tableKey}_${Date.now()}`
+  const pendingCartRefs = await getPendingSharedCartTableRefs(mergedTables)
+  if (pendingCartRefs.length > 0) {
+    return {
+      success: false,
+      code: 'MERGE_CART_NOT_EMPTY',
+      message: `请先提交或清空购物车：${pendingCartRefs.map(ref => ref.label).join('、')}`
+    }
+  }
+
+  const sessionRefById = {}
+  mergedTables.forEach(ref => {
+    getSharedCartTableNumbersForAdminRef(ref).forEach(tableNumber => {
+      sessionRefById[getRawSharedCartSessionId(tableNumber)] = ref
+    })
+  })
+  const sessionIds = Object.keys(sessionRefById)
+  const primaryTableNumber = formatAdminTableNumber(primaryRef)
+  const primarySessionId = getSharedCartSessionId(primaryTableNumber)
+  const mergedSessionIds = mergedTables
+    .filter(ref => !isSameAdminTableRef(ref, primaryRef))
+    .map(ref => getSharedCartSessionId(formatAdminTableNumber(ref)))
+  const primaryOrder = activeOrders
+    .filter(order => isSameAdminTableRef(getOrderTableRef(order), primaryRef))
+    .sort((left, right) => {
+      const leftFirst = left.isAddOnOrder === true ? 1 : 0
+      const rightFirst = right.isAddOnOrder === true ? 1 : 0
+      return leftFirst - rightFirst || getTimeValue(left.createTime) - getTimeValue(right.createTime)
+    })[0] || null
+  const primaryOrderRootId = String(primaryOrder && (primaryOrder.rootOrderId || primaryOrder._id) || '').trim()
+  const mergedPeopleCount = Math.max(0, ...activeOrders.map(order => Math.floor(Number(order.peopleCount || 0))))
   const updateData = {
     tableGroupId,
     tableGroupPrimary: primaryRef,
@@ -4598,31 +4890,228 @@ async function adminMergeTables(payload) {
     updateTime: db.serverDate()
   }
 
-  await Promise.all(activeOrders.map(order => db.collection('order').doc(order._id).update({
-    data: updateData
-  })))
-
-  await db.collection('tableGroup').doc(tableGroupId).set({
-    data: {
-      tableGroupId,
-      primaryTable: primaryRef,
-      tables: mergedTables,
-      status: 'active',
-      updateTime: db.serverDate()
-    }
-  })
-
   const inactiveGroupIds = matchedTableGroups
     .map(group => getTableGroupId(group))
     .filter(groupId => groupId && groupId !== tableGroupId)
-  await Promise.all(inactiveGroupIds.map(groupId => db.collection('tableGroup').doc(groupId).set({
-    data: {
-      tableGroupId: groupId,
-      status: 'inactive',
-      mergedInto: tableGroupId,
-      updateTime: db.serverDate()
+
+  // A merge has one writable session. Child table sessions are retained only as
+  // redirect markers, so a child QR code joins the primary bill instead of
+  // silently creating a second add-on tree.
+  const mergeResult = await runTransactionWithBusyRetry(
+    callback => db.runTransaction(callback),
+    async transaction => {
+      const orderSnapshots = await runTransactionSequentially(activeOrders, order => (
+        transaction.collection('order').doc(order._id).get().catch(() => ({ data: null }))
+      ))
+      const currentOrders = orderSnapshots.map(snapshot => snapshot && snapshot.data).filter(Boolean)
+      if (currentOrders.length !== activeOrders.length || currentOrders.some(order => (
+        !isAdminTableOrder(order) || isClosedOrderContext(order)
+      ))) {
+        return { success: false, code: 'MERGE_STATE_CHANGED', message: '桌台订单状态已变化，请刷新后重试' }
+      }
+
+      const sessionSnapshots = await runTransactionSequentially(sessionIds, sessionId => (
+        transaction.collection('tableOrderSession').doc(sessionId).get().catch(() => ({ data: null }))
+      ))
+      const sessionsById = {}
+      sessionSnapshots.forEach((snapshot, index) => {
+        const session = snapshot && snapshot.data
+        if (session) sessionsById[sessionIds[index]] = session
+      })
+      const knownOrderIds = new Set(currentOrders.map(order => String(order._id || '')).filter(Boolean))
+      const lateSubmissionCandidates = sessionIds.map(sessionId => {
+        const session = sessionsById[sessionId] || {}
+        const rootOrderId = String(session.activeOrderRootId || '').trim()
+        const orderId = String(session.lastSubmittedOrderId || '').trim()
+        if (!rootOrderId || !orderId || knownOrderIds.has(orderId)) return null
+        return { sessionId, rootOrderId, orderId, tableRef: sessionRefById[sessionId] }
+      }).filter(Boolean)
+      const lateSubmissionSnapshots = await runTransactionSequentially(lateSubmissionCandidates, candidate => (
+        transaction.collection('order').doc(candidate.orderId).get().catch(() => ({ data: null }))
+      ))
+      const lateSubmissionMatches = lateSubmissionCandidates.map((candidate, index) => {
+        const order = lateSubmissionSnapshots[index] && lateSubmissionSnapshots[index].data
+        const orderRootId = String(order && (order.rootOrderId || order._id) || '').trim()
+        return !!order && !isClosedOrderContext(order) &&
+          orderRootId === candidate.rootOrderId &&
+          isSameAdminTableRef(getOrderTableRef(order), candidate.tableRef)
+      })
+      if (lateSubmissionMatches.some(Boolean)) {
+        return { success: false, code: 'MERGE_STATE_CHANGED', message: '桌台刚有新菜提交，请刷新后再拼桌' }
+      }
+      const cartChecks = await runTransactionSequentially(sessionIds, sessionId => (
+        transaction.collection('tableCartItem').where({
+          sessionId,
+          deleted: _.neq(true)
+        }).limit(1).get()
+      ))
+      if (cartChecks.some(result => (result.data || []).length > 0)) {
+        return { success: false, code: 'MERGE_CART_NOT_EMPTY', message: '有桌台正在编辑菜品，请先提交或清空购物车' }
+      }
+      const staleSubmissionCandidates = lateSubmissionCandidates.filter((candidate, index) => !lateSubmissionMatches[index])
+      // These markers belong to an older visit or another root. Once the cart
+      // is confirmed empty, clearing them cannot discard a pending customer action.
+      await runTransactionSequentially(staleSubmissionCandidates, candidate => (
+        transaction.collection('tableOrderSession').doc(candidate.sessionId).update({
+          data: {
+            lastSubmittedCartVersion: 0,
+            lastSubmittedOrderId: '',
+            updateTime: db.serverDate()
+          }
+        })
+      ))
+
+      const existingPrimary = sessionsById[primarySessionId] || null
+      const allMemberOpenids = normalizeOrderParticipantOpenids(
+        currentOrders.reduce((members, order) => members.concat(order.participantOpenids || []), []).concat(
+          sessionIds.reduce((members, sessionId) => members.concat((sessionsById[sessionId] || {}).memberOpenids || []), [])
+        ),
+        ''
+      )
+      const peopleCount = Math.max(
+        mergedPeopleCount,
+        ...sessionIds.map(sessionId => Math.floor(Number((sessionsById[sessionId] || {}).peopleCount || 0)))
+      )
+      const sessionRootId = String(existingPrimary && existingPrimary.activeOrderRootId || primaryOrderRootId).trim()
+      const sessionAddOnCount = Math.max(
+        Math.floor(Number(existingPrimary && existingPrimary.addOnCount || 0)),
+        ...currentOrders.filter(order => String(order.rootOrderId || order._id || '') === sessionRootId)
+          .map(order => Math.floor(Number(order.addOnIndex || 0))),
+        0
+      )
+      const sessionVisitId = String(existingPrimary && existingPrimary.visitId || primaryOrder && primaryOrder.tableVisitId || crypto.randomBytes(16).toString('hex'))
+      const primaryData = {
+        tableNumber: primaryTableNumber,
+        status: 'ordering',
+        checkoutStatus: '',
+        finishedAt: null,
+        peopleCount,
+        peopleConfirmed: peopleCount > 0,
+        peopleConfirmedAt: peopleCount > 0
+          ? (existingPrimary && existingPrimary.peopleConfirmedAt || db.serverDate())
+          : null,
+        memberOpenids: allMemberOpenids,
+        visitId: sessionVisitId,
+        visitHistory: [],
+        activeOrderRootId: sessionRootId,
+        addOnCount: sessionAddOnCount,
+        tableGroupId,
+        tableGroupPrimary: primaryRef,
+        tableGroupTables: mergedTables,
+        mergedIntoSessionId: '',
+        mergedIntoTable: null,
+        mergedAt: null,
+        mergedSessionIds,
+        sharedCartActiveUntil: new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS),
+        updateTime: db.serverDate()
+      }
+      const primarySessionRef = transaction.collection('tableOrderSession').doc(primarySessionId)
+      if (existingPrimary) {
+        await primarySessionRef.update({ data: primaryData })
+      } else {
+        await primarySessionRef.set({
+          data: {
+            ...primaryData,
+            cartVersion: 0,
+            appliedCartPatchIds: [],
+            customerReceiptOrderId: '',
+            customerReceiptStatus: '',
+            customerReceiptJobIds: [],
+            customerReceiptAttemptCount: 0,
+            createTime: db.serverDate()
+          }
+        })
+      }
+
+      for (const ref of mergedTables) {
+        const canonicalSessionId = getSharedCartSessionId(formatAdminTableNumber(ref))
+        if (canonicalSessionId === primarySessionId) continue
+        const childSession = sessionsById[canonicalSessionId] || null
+        const childData = {
+          ...getNewTableVisitSessionFields(),
+          tableNumber: formatAdminTableNumber(ref),
+          status: 'merged',
+          checkoutStatus: '',
+          finishedAt: null,
+          sharedCartActiveUntil: null,
+          peopleCount: 0,
+          peopleConfirmed: false,
+          peopleConfirmedAt: null,
+          memberOpenids: [],
+          visitId: '',
+          visitHistory: [],
+          activeOrderRootId: '',
+          addOnCount: 0,
+          tableGroupId,
+          tableGroupPrimary: primaryRef,
+          tableGroupTables: mergedTables,
+          mergedIntoSessionId: primarySessionId,
+          mergedIntoTable: primaryRef,
+          mergedAt: db.serverDate(),
+          updateTime: db.serverDate()
+        }
+        const childSessionRef = transaction.collection('tableOrderSession').doc(canonicalSessionId)
+        if (childSession) {
+          await childSessionRef.update({ data: childData })
+        } else {
+          await childSessionRef.set({
+            data: {
+              ...childData,
+              cartVersion: 0,
+              appliedCartPatchIds: [],
+              customerReceiptOrderId: '',
+              customerReceiptStatus: '',
+              customerReceiptJobIds: [],
+              customerReceiptAttemptCount: 0,
+              createTime: db.serverDate()
+            }
+          })
+        }
+      }
+
+      for (const sessionId of sessionIds) {
+        if (sessionId === primarySessionId || sessionId === getSharedCartSessionId(formatAdminTableNumber(sessionRefById[sessionId]))) continue
+        const legacySession = sessionsById[sessionId]
+        if (!legacySession) continue
+        await transaction.collection('tableOrderSession').doc(sessionId).update({
+          data: buildClosedTableSessionData(legacySession, new Date())
+        })
+      }
+
+      await runTransactionSequentially(currentOrders, order => transaction.collection('order').doc(order._id).update({
+        data: {
+          ...updateData,
+          participantOpenids: allMemberOpenids
+        }
+      }))
+      await transaction.collection('tableGroup').doc(tableGroupId).set({
+        data: {
+          tableGroupId,
+          primaryTable: primaryRef,
+          tables: mergedTables,
+          peopleCount,
+          primarySessionId,
+          mergedSessionIds,
+          status: 'active',
+          updateTime: db.serverDate()
+        }
+      })
+      await runTransactionSequentially(inactiveGroupIds, groupId => (
+        transaction.collection('tableGroup').doc(groupId).set({
+          data: {
+            tableGroupId: groupId,
+            status: 'inactive',
+            mergedInto: tableGroupId,
+            updateTime: db.serverDate()
+          }
+        })
+      ))
+      return { success: true, updatedOrders: currentOrders.length }
     }
-  })))
+  )
+  if (!mergeResult || !mergeResult.success) {
+    return mergeResult || { success: false, code: 'MERGE_FAILED', message: '拼桌失败，请刷新后重试' }
+  }
 
   return {
     success: true,
@@ -4631,7 +5120,8 @@ async function adminMergeTables(payload) {
       primaryTable: primaryRef,
       tables: mergedTables,
       tableText: getMergedTableText(mergedTables),
-      updatedOrders: activeOrders.length
+      updatedOrders: mergeResult.updatedOrders,
+      primarySessionId
     }
   }
 }
@@ -4655,6 +5145,18 @@ async function adminTransferTable(payload) {
       success: false,
       code: 'SAME_TABLE',
       message: 'target table is same as source table'
+    }
+  }
+
+  const [sourceGroup, targetGroup] = await Promise.all([
+    getActiveTableGroupForRef(sourceRef),
+    getActiveTableGroupForRef(targetRef)
+  ])
+  if (sourceGroup || targetGroup) {
+    return {
+      success: false,
+      code: 'MERGED_TABLE_TRANSFER_BLOCKED',
+      message: '拼桌中的桌台不能单独转台，请整组结账或清台后再操作'
     }
   }
 
@@ -4899,25 +5401,6 @@ function buildRootPartialSettlementDishSnapshot(root = {}) {
   return { dishes, currentCounts }
 }
 
-function allocateAmountByOutstanding(totalAmount, states = []) {
-  const amount = roundMoney(Math.max(0, Number(totalAmount) || 0))
-  const eligible = (states || []).filter(state => Number(state && state.outstandingAmount || 0) > 0)
-  const totalOutstanding = eligible.reduce((sum, state) => sum + Number(state.outstandingAmount || 0), 0)
-  const allocation = {}
-  if (!eligible.length || totalOutstanding <= 0 || amount <= 0) return allocation
-
-  let allocated = 0
-  eligible.forEach((state, index) => {
-    const isLast = index === eligible.length - 1
-    const share = isLast
-      ? roundMoney(amount - allocated)
-      : roundMoney(amount * Number(state.outstandingAmount || 0) / totalOutstanding)
-    allocation[state.rootId || state.tableKey || String(index)] = share
-    allocated = roundMoney(allocated + share)
-  })
-  return allocation
-}
-
 function buildAdminCheckoutSummary(orders, payload, options = {}) {
   const rawGrossTotal = roundMoney((orders || []).reduce((sum, order) => {
     return sum + getOrderGrossAmount(order)
@@ -5096,22 +5579,7 @@ async function adminFinishTableCheckout(payload) {
       const canonicalSessionId = getSharedCartSessionId(normalizeTableNumber(tableNumbers[index]))
       const sessionRef = transaction.collection('tableOrderSession').doc(sessionId)
       if (sessionId !== canonicalSessionId) return sessionRef.remove()
-      const data = {
-        status: 'finished',
-        checkoutStatus: 'finished',
-        finishedAt: checkoutTime,
-        sharedCartActiveUntil: null,
-        visitId: '',
-        visitHistory: [],
-        memberOpenids: [],
-        peopleCount: 0,
-        peopleConfirmed: false,
-        peopleConfirmedAt: null,
-        activeOrderRootId: '',
-        addOnCount: 0,
-        cartVersion: Math.max(0, Math.floor(Number(session && session.cartVersion || 0))) + 1,
-        updateTime: db.serverDate()
-      }
+      const data = buildClosedTableSessionData(session, checkoutTime)
       return sessionRef.update({ data })
     })
 
@@ -5193,34 +5661,46 @@ function isSameCheckoutAmount(left, right) {
   return Math.abs(Number(left || 0) - Number(right || 0)) < 0.005
 }
 
-function buildCombinedCheckoutSessionCloseData(session, checkoutTime) {
-  return {
-    status: 'finished',
-    checkoutStatus: 'finished',
-    finishedAt: checkoutTime,
-    sharedCartActiveUntil: null,
-    visitId: '',
-    visitHistory: [],
-    memberOpenids: [],
-    peopleCount: 0,
-    peopleConfirmed: false,
-    peopleConfirmedAt: null,
-    activeOrderRootId: '',
-    addOnCount: 0,
-    cartVersion: Math.max(0, Math.floor(Number(session && session.cartVersion || 0))) + 1,
-    updateTime: db.serverDate()
-  }
+function getCombinedCheckoutContextTableRefs(context) {
+  return mergeAdminTableRefs(context && context.refs, context && context.ref ? [context.ref] : [])
+}
+
+function isSameAdminTableRefSet(left, right) {
+  const leftKeys = mergeAdminTableRefs(left).map(ref => ref.tableKey).sort()
+  const rightKeys = mergeAdminTableRefs(right).map(ref => ref.tableKey).sort()
+  return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index])
+}
+
+function getCombinedCheckoutSessionEntries(contexts = []) {
+  const byId = {}
+  ;(contexts || []).forEach(context => {
+    ;(context.sessionIds || []).forEach(rawSessionId => {
+      const sessionId = String(rawSessionId || '').trim()
+      if (!sessionId || byId[sessionId]) return
+      byId[sessionId] = {
+        sessionId,
+        context,
+        isPrimary: sessionId === String(context.primarySessionId || '').trim()
+      }
+    })
+  })
+  return Object.keys(byId).map(sessionId => byId[sessionId])
 }
 
 async function adminFinishCombinedTableCheckout(payload) {
   const contextResult = await getCombinedCheckoutContexts(payload)
   if (!contextResult.success) return contextResult
+  if (String(payload.discountType || '').trim() === 'direct_reduce' ||
+    (payload.directReduceValue !== undefined && payload.directReduceValue !== '' && Number(payload.directReduceValue) > 0)) {
+    return { success: false, code: 'JOINT_CHECKOUT_DIRECT_REDUCE_UNSUPPORTED', message: '一起结账暂不支持直减，请分别结账' }
+  }
 
   const contexts = contextResult.contexts
   const sourceContext = contextResult.source
   const checkoutTime = new Date()
   const allOrderIds = Array.from(new Set(contexts.reduce((ids, context) => ids.concat(context.orderIds || []), [])))
-  const checkoutBatchId = `combined_checkout_${checkoutTime.getTime()}_${allOrderIds.slice().sort().join('_')}`
+  const jointCheckoutId = `joint_checkout_${checkoutTime.getTime()}_${crypto.randomBytes(6).toString('hex')}`
+  const tableCheckoutBatchPrefix = `checkout_${checkoutTime.getTime()}_${crypto.randomBytes(4).toString('hex')}`
   const initialState = contexts.reduce((summary, context) => {
     const state = context.settlementState || {}
     summary.grossAmount = roundMoney(summary.grossAmount + Number(state.grossAmount || 0))
@@ -5229,6 +5709,8 @@ async function adminFinishCombinedTableCheckout(payload) {
     return summary
   }, { grossAmount: 0, settledAmount: 0, outstandingAmount: 0 })
   let checkoutSummary = null
+
+  await ensureCollection('checkoutPayment')
 
   const checkoutTransaction = async transaction => {
     const orderSnapshots = await runTransactionSequentially(allOrderIds, orderId => (
@@ -5262,14 +5744,46 @@ async function adminFinishCombinedTableCheckout(payload) {
       currentContexts.push({ ...context, orders: currentOrders, settlementState: currentState })
     }
 
-    const sessionContexts = currentContexts.filter(context => context.session && context.session._id)
-    const sessionSnapshots = await runTransactionSequentially(sessionContexts, context => (
-      transaction.collection('tableOrderSession').doc(context.session._id).get().catch(() => ({ data: null }))
+    const groupContexts = currentContexts.filter(context => context.groupSnapshot)
+    const groupSnapshots = await runTransactionSequentially(groupContexts, context => (
+      transaction.collection('tableGroup').doc(context.groupSnapshot.tableGroupId).get().catch(() => ({ data: null }))
     ))
-    for (let index = 0; index < sessionContexts.length; index += 1) {
-      const context = sessionContexts[index]
+    for (let index = 0; index < groupContexts.length; index += 1) {
+      const context = groupContexts[index]
+      const group = groupSnapshots[index] && groupSnapshots[index].data
+      const currentSnapshot = getTableGroupSnapshot(group, context.ref)
+      if (!group || String(group.status || '').trim() !== 'active' || !currentSnapshot ||
+        currentSnapshot.tableGroupId !== context.groupSnapshot.tableGroupId ||
+        !isSameAdminTableRef(currentSnapshot.tableGroupPrimary, context.groupSnapshot.tableGroupPrimary) ||
+        !isSameAdminTableRefSet(currentSnapshot.tableGroupTables, context.groupSnapshot.tableGroupTables)) {
+        return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '拼桌状态已变化，请刷新后重新结账' }
+      }
+    }
+
+    const sessionEntries = getCombinedCheckoutSessionEntries(currentContexts)
+    const sessionSnapshots = await runTransactionSequentially(sessionEntries, entry => (
+      transaction.collection('tableOrderSession').doc(entry.sessionId).get().catch(() => ({ data: null }))
+    ))
+    for (let index = 0; index < sessionEntries.length; index += 1) {
+      const entry = sessionEntries[index]
+      const context = entry.context
       const session = sessionSnapshots[index] && sessionSnapshots[index].data
-      if (!session || !isActiveTableSession(session)) {
+      if (!session) {
+        return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台点单状态已变化，请刷新后重试' }
+      }
+
+      if (context.groupSnapshot) {
+        if (String(session.tableGroupId || '').trim() !== context.groupSnapshot.tableGroupId) {
+          return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '拼桌点单状态已变化，请刷新后重试' }
+        }
+        if (!entry.isPrimary && (!isMergedTableSession(session) ||
+          String(session.mergedIntoSessionId || '').trim() !== String(context.primarySessionId || '').trim())) {
+          return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '拼桌子桌状态已变化，请刷新后重试' }
+        }
+      }
+
+      if (!entry.isPrimary) continue
+      if (!isActiveTableSession(session)) {
         return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台点单状态已变化，请刷新后重试' }
       }
       const activeRootId = String(session.activeOrderRootId || '').trim()
@@ -5292,112 +5806,109 @@ async function adminFinishCombinedTableCheckout(payload) {
       return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '待结金额已变化，请刷新后重试' }
     }
 
-    checkoutSummary = buildAdminCheckoutSummary([], payload, {
+    const tableSummaries = currentContexts.map(context => {
+      const state = context.settlementState || {}
+      // Every physical table calculates its own amount. The payment method is
+      // intentionally ignored here because cash/online belongs to the one
+      // joint payment record, not to an invented share of each table.
+      return buildAdminCheckoutSummary([], { ...payload, paymentMethod: 'joint_checkout' }, {
+        grossTotalPrice: state.grossAmount,
+        previousSettledAmount: state.settledAmount,
+        baseTotalPrice: state.outstandingAmount
+      })
+    })
+    const jointReceivable = roundMoney(tableSummaries.reduce((sum, summary) => sum + Number(summary.receivable || 0), 0))
+    const jointTotalPrice = roundMoney(tableSummaries.reduce((sum, summary) => sum + Number(summary.totalPrice || 0), 0))
+    const paymentMethod = String(payload.paymentMethod || 'wechat_alipay').trim() || 'wechat_alipay'
+    const paymentBreakdown = buildSettlementPaymentBreakdown(paymentMethod, jointReceivable, payload)
+    checkoutSummary = {
+      totalPrice: jointTotalPrice,
       grossTotalPrice: combinedState.grossAmount,
       previousSettledAmount: combinedState.settledAmount,
-      baseTotalPrice: combinedState.outstandingAmount
-    })
+      receivable: jointReceivable,
+      paymentMethod,
+      cashReceived: paymentBreakdown.cash,
+      onlineReceived: paymentBreakdown.online,
+      mixedPaymentChannel: paymentBreakdown.mixedPaymentChannel,
+      paymentSplitValid: paymentBreakdown.paymentSplitValid,
+      discountType: tableSummaries[0] && tableSummaries[0].discountType || '',
+      discountValue: tableSummaries[0] && tableSummaries[0].discountValue || '',
+      directReduceValue: ''
+    }
     if (!checkoutSummary.paymentSplitValid) {
       return { success: false, code: 'MIXED_PAYMENT_AMOUNT_INVALID', message: 'mixed payment amount must be between 0 and receivable amount' }
     }
 
-    const tableStates = currentContexts.map(context => ({
-      tableKey: context.ref.tableKey,
-      outstandingAmount: context.settlementState.outstandingAmount
-    }))
-    const tableBaseAllocations = allocateAmountByOutstanding(checkoutSummary.totalPrice, tableStates)
-    const tableReceivableAllocations = allocateAmountByOutstanding(checkoutSummary.receivable, tableStates)
-    const tableCashAllocations = allocateAmountByOutstanding(checkoutSummary.cashReceived, tableStates)
-    const tableOnlineAllocations = allocateAmountByOutstanding(checkoutSummary.onlineReceived, tableStates)
-    const currentSource = currentContexts[0]
-    const sourceBaseAmount = roundMoney(tableBaseAllocations[currentSource.ref.tableKey] || 0)
-    const sourceReceivable = roundMoney(tableReceivableAllocations[currentSource.ref.tableKey] || 0)
-    const sourceCash = roundMoney(tableCashAllocations[currentSource.ref.tableKey] || 0)
-    const sourceOnline = roundMoney(tableOnlineAllocations[currentSource.ref.tableKey] || 0)
+    const jointCheckoutTables = mergeAdminTableRefs(...currentContexts.map(getCombinedCheckoutContextTableRefs))
+    for (let index = 0; index < currentContexts.length; index += 1) {
+      const context = currentContexts[index]
+      const tableSummary = tableSummaries[index]
+      const tableCheckoutBatchId = `${tableCheckoutBatchPrefix}_${context.ref.tableKey}`
 
-    await runTransactionSequentially(currentSource.orders, order => transaction.collection('order').doc(order._id).update({
+      await runTransactionSequentially(context.orders, order => transaction.collection('order').doc(order._id).update({
+        data: {
+          pay_status: true,
+          payStatus: true,
+          status: 'completed',
+          checkoutStatus: 'finished',
+          payMethod: paymentMethod,
+          paymentMethod,
+          checkoutTotalPrice: context.settlementState.grossAmount,
+          checkoutPreSettledAmount: context.settlementState.settledAmount,
+          checkoutReceivable: tableSummary.receivable,
+          receivedAmount: tableSummary.receivable,
+          checkoutCashAmount: null,
+          checkoutOnlineAmount: null,
+          mixedPaymentChannel: '',
+          checkoutDiscountType: tableSummary.discountType,
+          checkoutDiscountValue: tableSummary.discountValue,
+          checkoutDirectReduceValue: '',
+          checkoutBatchId: tableCheckoutBatchId,
+          checkoutAt: checkoutTime,
+          jointCheckoutId,
+          jointCheckoutTables,
+          jointCheckoutAt: checkoutTime,
+          updateTime: db.serverDate()
+        }
+      }))
+    }
+
+    await transaction.collection('checkoutPayment').doc(jointCheckoutId).set({
       data: {
-        pay_status: true,
-        payStatus: true,
-        status: 'completed',
-        checkoutStatus: 'finished',
-        payMethod: checkoutSummary.paymentMethod,
-        paymentMethod: checkoutSummary.paymentMethod,
-        checkoutTotalPrice: currentSource.settlementState.grossAmount,
-        checkoutPreSettledAmount: currentSource.settlementState.settledAmount,
-        checkoutReceivable: sourceReceivable,
-        receivedAmount: sourceReceivable,
-        checkoutCashAmount: sourceCash,
-        checkoutOnlineAmount: sourceOnline,
+        jointCheckoutId,
+        type: 'joint_checkout',
+        storeId: getTenantId(payload),
+        tables: jointCheckoutTables,
+        orderIds: allOrderIds,
+        totalPrice: checkoutSummary.totalPrice,
+        receivable: checkoutSummary.receivable,
+        cashAmount: checkoutSummary.cashReceived,
+        onlineAmount: checkoutSummary.onlineReceived,
+        paymentMethod,
         mixedPaymentChannel: checkoutSummary.mixedPaymentChannel,
-        checkoutDiscountType: checkoutSummary.discountType,
-        checkoutDiscountValue: checkoutSummary.discountValue,
-        checkoutDirectReduceValue: checkoutSummary.directReduceValue,
-        checkoutBatchId,
         checkoutAt: checkoutTime,
-        combinedCheckoutBaseAmount: sourceBaseAmount,
+        createTime: db.serverDate(),
         updateTime: db.serverDate()
       }
-    }))
+    })
 
-    for (const context of currentContexts.slice(1)) {
-      const tableKey = context.ref.tableKey
-      const tableBaseAmount = roundMoney(tableBaseAllocations[tableKey] || 0)
-      const tableReceivable = roundMoney(tableReceivableAllocations[tableKey] || 0)
-      const tableCash = roundMoney(tableCashAllocations[tableKey] || 0)
-      const tableOnline = roundMoney(tableOnlineAllocations[tableKey] || 0)
-      const rootBaseAllocations = allocateAmountByOutstanding(tableBaseAmount, context.settlementState.roots)
-      const rootReceivableAllocations = allocateAmountByOutstanding(tableReceivable, context.settlementState.roots)
-      const rootCashAllocations = allocateAmountByOutstanding(tableCash, context.settlementState.roots)
-      const rootOnlineAllocations = allocateAmountByOutstanding(tableOnline, context.settlementState.roots)
-
-      await runTransactionSequentially(context.settlementState.roots, root => {
-        const rootOrder = root.rootOrder
-        const rootBaseAmount = roundMoney(rootBaseAllocations[root.rootId] || 0)
-        const rootReceivedAmount = roundMoney(rootReceivableAllocations[root.rootId] || 0)
-        const rootCashAmount = roundMoney(rootCashAllocations[root.rootId] || 0)
-        const rootOnlineAmount = roundMoney(rootOnlineAllocations[root.rootId] || 0)
-        const dishSnapshot = buildRootPartialSettlementDishSnapshot(root)
-        const events = Array.isArray(rootOrder.combinedSettlementEvents)
-          ? rootOrder.combinedSettlementEvents.slice(-49)
-          : []
-        events.push({
-          id: `${checkoutBatchId}:${root.rootId}`,
-          type: 'combined_checkout',
-          settledAt: checkoutTime,
-          sourceTableKey: currentSource.ref.tableKey,
-          sourceTableLabel: currentSource.ref.label,
-          settledAmount: rootBaseAmount,
-          receivedAmount: rootReceivedAmount,
-          cashAmount: rootCashAmount,
-          onlineAmount: rootOnlineAmount,
-          paymentMethod: checkoutSummary.paymentMethod,
-          dishes: dishSnapshot.dishes,
-          discountAmount: roundMoney(Math.max(0, rootBaseAmount - rootReceivedAmount))
-        })
-        return transaction.collection('order').doc(rootOrder._id).update({
-          data: {
-            partialSettlementAmount: roundMoney(root.settledAmount + rootBaseAmount),
-            partialReceivedAmount: roundMoney(getOrderPartialReceivedAmount(rootOrder) + rootReceivedAmount),
-            partialSettlementDishCounts: dishSnapshot.currentCounts,
-            combinedSettlementEvents: events,
-            lastSettlementAt: checkoutTime,
-            checkoutAt: checkoutTime,
-            updateTime: db.serverDate()
-          }
-        })
+    await runTransactionSequentially(sessionEntries, (entry, index) => {
+      const session = sessionSnapshots[index] && sessionSnapshots[index].data
+      if (!session) return null
+      return transaction.collection('tableOrderSession').doc(entry.sessionId).update({
+        data: buildClosedTableSessionData(session, checkoutTime)
       })
-    }
+    })
 
-    if (currentSource.session && currentSource.session._id) {
-      const sourceSnapshot = sessionSnapshots[sessionContexts.findIndex(context => context.ref.tableKey === currentSource.ref.tableKey)]
-      const sourceSession = sourceSnapshot && sourceSnapshot.data
-      if (sourceSession) {
-        await transaction.collection('tableOrderSession').doc(currentSource.session._id).update({
-          data: buildCombinedCheckoutSessionCloseData(sourceSession, checkoutTime)
-        })
-      }
-    }
+    await runTransactionSequentially(groupContexts, context => (
+      transaction.collection('tableGroup').doc(context.groupSnapshot.tableGroupId).update({
+        data: {
+          status: 'inactive',
+          finishedAt: checkoutTime,
+          updateTime: db.serverDate()
+        }
+      })
+    ))
 
     return { success: true, orders: currentContexts.reduce((all, context) => all.concat(context.orders), []) }
   }
@@ -5415,14 +5926,16 @@ async function adminFinishCombinedTableCheckout(payload) {
   let cashierPrintJobs = []
   let cashierPrintError = ''
   try {
-    const tableLabel = contexts.map(context => formatAdminTableNumber(context.ref)).join('、')
+    const tableLabel = mergeAdminTableRefs(...contexts.map(getCombinedCheckoutContextTableRefs))
+      .map(formatAdminTableNumber)
+      .join('、')
     const printResult = await printService.queueCashierReceipt({
       id: getTenantId(payload),
       ticketType: 'checkout',
       orders: checkoutResult.orders || [],
       checkoutSummary,
       tableLabel,
-      eventKey: `combined-checkout:${checkoutBatchId}`
+      eventKey: `joint-checkout:${jointCheckoutId}`
     })
     cashierPrintJobs = (printResult.jobs || []).map(job => job._id)
     if (printResult.skipped || cashierPrintJobs.length === 0) {
@@ -6624,9 +7137,61 @@ function getTableSessionTimeValue(session) {
 
 function isActiveTableSession(session) {
   if (!session) return false
-  if (session.status === 'finished' || session.checkoutStatus === 'finished') return false
+  const status = String(session.status || '').trim()
+  if (status === 'finished' || status === 'merged' || status === 'inactive' || status === 'closed' ||
+    session.checkoutStatus === 'finished' || session.mergedIntoSessionId) return false
   const time = getTableSessionTimeValue(session)
   return !time || Date.now() - time <= TABLE_SESSION_STALE_MS
+}
+
+// These fields belong to one dining visit only. A new visit must never inherit
+// submission, cart de-duplication, receipt, merge, or transfer state.
+function getNewTableVisitSessionFields() {
+  return {
+    cartVersion: 0,
+    appliedCartPatchIds: [],
+    activeOrderRootId: '',
+    addOnCount: 0,
+    lastSubmittedCartVersion: 0,
+    lastSubmittedOrderId: '',
+    customerReceiptOrderId: '',
+    customerReceiptStatus: '',
+    customerReceiptJobIds: [],
+    customerReceiptAttemptCount: 0,
+    customerReceiptLastAttemptAt: null,
+    customerReceiptLastError: '',
+    customerReceiptQueuedAt: null,
+    tableGroupId: '',
+    tableGroupPrimary: null,
+    tableGroupTables: [],
+    mergedIntoSessionId: '',
+    mergedIntoTable: null,
+    mergedAt: null,
+    mergedSessionIds: [],
+    sharedCartActiveUntil: null
+  }
+}
+
+function buildClosedTableSessionData(session, finishedAt) {
+  return {
+    ...getNewTableVisitSessionFields(),
+    status: 'finished',
+    checkoutStatus: 'finished',
+    finishedAt: finishedAt || new Date(),
+    visitId: '',
+    visitHistory: [],
+    memberOpenids: [],
+    peopleCount: 0,
+    peopleConfirmed: false,
+    peopleConfirmedAt: null,
+    cartVersion: Math.max(0, Math.floor(Number(session && session.cartVersion || 0))) + 1,
+    updateTime: db.serverDate()
+  }
+}
+
+function isMergedTableSession(session) {
+  return !!(session && String(session.status || '').trim() === 'merged' &&
+    String(session.mergedIntoSessionId || '').trim())
 }
 
 function getRawSharedCartSessionId(tableNumber) {
@@ -6636,6 +7201,81 @@ function getRawSharedCartSessionId(tableNumber) {
 
 function getSharedCartSessionId(tableNumber) {
   return getRawSharedCartSessionId(normalizeTableNumber(tableNumber))
+}
+
+function getMergedSessionPrimaryRef(session) {
+  return getAdminTableRef(
+    session && session.mergedIntoTable && session.mergedIntoTable.areaKey,
+    session && session.mergedIntoTable && session.mergedIntoTable.tableNumber
+  )
+}
+
+// A child table only redirects while its primary session remains active. Once
+// the group is checked out or cleared, its old marker can never revive a bill.
+async function resolveSharedCartSession(tableNumber, requestedSessionId) {
+  const requestedTableNumber = normalizeTableNumber(tableNumber)
+  const requestedId = String(requestedSessionId || getSharedCartSessionId(requestedTableNumber)).trim()
+  if (!requestedTableNumber || !requestedId) {
+    return {
+      requestedSessionId: requestedId,
+      sessionId: requestedId,
+      tableNumber: requestedTableNumber,
+      session: null,
+      redirected: false
+    }
+  }
+
+  const requestedRes = await db.collection('tableOrderSession').doc(requestedId).get().catch(() => ({ data: null }))
+  const requestedSession = requestedRes.data || null
+  let primaryRef = isMergedTableSession(requestedSession)
+    ? getMergedSessionPrimaryRef(requestedSession)
+    : null
+  let tableGroupId = String(requestedSession && requestedSession.tableGroupId || '').trim()
+
+  if (!primaryRef) {
+    const requestedRef = getOrderTableRef({ tableNumber: requestedTableNumber })
+    const group = await getActiveTableGroupForRef(requestedRef)
+    const groupPrimary = getTableGroupPrimary(group, requestedRef)
+    if (groupPrimary && !isSameAdminTableRef(groupPrimary, requestedRef)) {
+      primaryRef = groupPrimary
+      tableGroupId = getTableGroupId(group)
+    }
+  }
+
+  if (!primaryRef) {
+    return {
+      requestedSessionId: requestedId,
+      sessionId: requestedId,
+      tableNumber: requestedTableNumber,
+      session: requestedSession,
+      redirected: false
+    }
+  }
+
+  const primaryTableNumber = formatAdminTableNumber(primaryRef)
+  const primarySessionId = getSharedCartSessionId(primaryTableNumber)
+  const primaryRes = await db.collection('tableOrderSession').doc(primarySessionId).get().catch(() => ({ data: null }))
+  const primarySession = primaryRes.data || null
+  const primaryGroupId = String(primarySession && primarySession.tableGroupId || '').trim()
+  if (!isActiveTableSession(primarySession) ||
+    (tableGroupId && primaryGroupId && tableGroupId !== primaryGroupId)) {
+    return {
+      requestedSessionId: requestedId,
+      sessionId: requestedId,
+      tableNumber: requestedTableNumber,
+      session: requestedSession,
+      redirected: false
+    }
+  }
+
+  return {
+    requestedSessionId: requestedId,
+    sessionId: primarySessionId,
+    tableNumber: primaryTableNumber,
+    session: primarySession,
+    redirected: primarySessionId !== requestedId || primaryTableNumber !== requestedTableNumber,
+    tableGroupId: primaryGroupId || tableGroupId
+  }
 }
 
 function getSharedCartTableNumbersForAdminRef(ref) {
@@ -6651,6 +7291,37 @@ function getSharedCartTableNumbersForAdminRef(ref) {
   // Keep the raw aliases here. They are used to close sessions created before
   // table ids were normalized to 01, V01 and T01.
   return Array.from(new Set(numbers.map(value => String(value || '').trim()).filter(Boolean)))
+}
+
+async function getPendingSharedCartTableRefs(refs) {
+  const refBySessionId = {}
+  normalizeAdminTableRefs(refs).forEach(ref => {
+    getSharedCartTableNumbersForAdminRef(ref).forEach(tableNumber => {
+      refBySessionId[getRawSharedCartSessionId(tableNumber)] = ref
+    })
+  })
+  const sessionIds = Object.keys(refBySessionId)
+  const pendingTableMap = {}
+  for (let offset = 0; offset < sessionIds.length; offset += 50) {
+    const ids = sessionIds.slice(offset, offset + 50)
+    let items = []
+    try {
+      const res = await db.collection('tableCartItem').where({
+        sessionId: _.in(ids),
+        deleted: _.neq(true)
+      }).limit(200).get()
+      items = res.data || []
+    } catch (err) {
+      const rows = await Promise.all(ids.map(sessionId => db.collection('tableCartItem')
+        .where({ sessionId }).limit(200).get().catch(() => ({ data: [] }))))
+      items = rows.reduce((all, row) => all.concat((row.data || []).filter(item => item.deleted !== true)), [])
+    }
+    items.forEach(item => {
+      const ref = refBySessionId[String(item.sessionId || '')]
+      if (ref) pendingTableMap[ref.tableKey] = ref
+    })
+  }
+  return Object.keys(pendingTableMap).map(key => pendingTableMap[key])
 }
 
 function getCheckoutSharedCartTableNumbers(orders, fallbackPayload) {
@@ -6712,22 +7383,9 @@ async function clearSharedCartSessionByTableNumber(tableNumber, finishedAt) {
       // End the canonical session immediately, but leave a short-lived empty
       // shell behind. It prevents a checkout/new-scan race from reviving the
       // previous visit; the maintenance cleanup below later removes this shell.
-      await sessionRef.update({ data: {
-        status: 'finished',
-        checkoutStatus: 'finished',
-        finishedAt: finishedAt || new Date(),
-        sharedCartActiveUntil: null,
-        cartVersion: _.inc(1),
-        visitId: '',
-        visitHistory: [],
-        memberOpenids: [],
-        peopleCount: 0,
-        peopleConfirmed: false,
-        peopleConfirmedAt: null,
-        activeOrderRootId: '',
-        addOnCount: 0,
-        updateTime: db.serverDate()
-      } })
+      await sessionRef.update({
+        data: buildClosedTableSessionData(sessionRes.data, finishedAt)
+      })
     }
   }
 
@@ -7393,10 +8051,9 @@ async function autoClearPaidTableOrdersForNewSession(tableNumber, clearedAt) {
     }
   }
 
-  const orders = await getAdminTableOrders({
-    areaKey: parsed.areaKey,
-    tableNumber: parsed.tableNumber
-  })
+  // A new scan only clears the paid context of this physical table. It must not
+  // follow historical table-group links into another table.
+  const orders = await getSingleAdminTableOrders(parsed.areaKey, parsed.tableNumber)
   const paidOrders = (orders || []).filter(order => {
     return isAdminPaidOrder(order) && order.tableCleared !== true
   })
@@ -7416,28 +8073,9 @@ async function autoClearPaidTableOrdersForNewSession(tableNumber, clearedAt) {
     }
   })))
 
-  const groupIds = Array.from(new Set(paidOrders
-    .map(order => String(order.tableGroupId || '').trim())
-    .filter(Boolean)))
-
-  await Promise.all(groupIds.map(groupId => db.collection('tableGroup').doc(groupId).update({
-    data: {
-      status: 'inactive',
-      clearedAt,
-      updateTime: db.serverDate()
-    }
-  }).catch(() => db.collection('tableGroup').doc(groupId).set({
-    data: {
-      tableGroupId: groupId,
-      status: 'inactive',
-      clearedAt,
-      updateTime: db.serverDate()
-    }
-  }))))
-
   return {
     clearedOrders: paidOrders.length,
-    clearedGroups: groupIds.length
+    clearedGroups: 0
   }
 }
 
@@ -7630,6 +8268,30 @@ async function listActiveTableOrdersForSharedCart(tableNumber, rootOrderId) {
     .sort((left, right) => sortSharedCartOrders(left, right, explicitRootId))
 }
 
+async function listActiveSharedCartOrdersForSession(session) {
+  if (!session) return []
+  const rootOrderId = String(session.activeOrderRootId || '').trim()
+  const ordersById = {}
+  const addOrder = order => {
+    if (order && order._id && isVisibleSharedCartOrder(order)) ordersById[order._id] = order
+  }
+  const ownOrders = await listActiveTableOrdersForSharedCart(session.tableNumber, rootOrderId)
+  ownOrders.forEach(addOrder)
+
+  const tableGroupId = String(session.tableGroupId || '').trim()
+  if (tableGroupId) {
+    const groupRes = await db.collection('order').where({
+      type: 'order',
+      tableGroupId
+    }).limit(200).get().catch(() => ({ data: [] }))
+    ;(groupRes.data || []).forEach(addOrder)
+  }
+
+  return Object.keys(ordersById)
+    .map(id => ordersById[id])
+    .sort((left, right) => sortSharedCartOrders(left, right, rootOrderId))
+}
+
 function buildSharedCartOrderCards(orders) {
   return (orders || []).map(order => {
     const goods = (Array.isArray(order.goods) ? order.goods : []).map(item => {
@@ -7728,10 +8390,14 @@ async function getActiveTableOrderContext(tableNumber) {
   }
 }
 
-async function addSharedCartParticipantToActiveOrders(tableNumber, openid) {
+async function addSharedCartParticipantToActiveOrders(tableNumber, openid, session) {
   const participantOpenid = String(openid || '').trim()
   if (!participantOpenid) return 0
-  const orders = await listActiveTableOrdersForSharedCart(tableNumber)
+  const currentSession = session || (await db.collection('tableOrderSession')
+    .doc(getSharedCartSessionId(tableNumber)).get().catch(() => ({ data: null }))).data
+  const orders = currentSession
+    ? await listActiveSharedCartOrdersForSession(currentSession)
+    : await listActiveTableOrdersForSharedCart(tableNumber)
   const targets = orders.filter(order => {
     const participants = Array.isArray(order.participantOpenids) ? order.participantOpenids : []
     return order && order._id && !participants.includes(participantOpenid)
@@ -7762,6 +8428,52 @@ async function joinSharedCart(payload) {
   const sessionRef = db.collection('tableOrderSession').doc(sessionId)
   const oldSessionRes = await sessionRef.get()
   const oldSession = oldSessionRes.data
+  const mergedSession = await resolveSharedCartSession(tableNumber, sessionId)
+  if (mergedSession.redirected) {
+    const primarySession = mergedSession.session
+    const primarySessionId = mergedSession.sessionId
+    const wasPrimaryMember = Array.isArray(primarySession.memberOpenids) &&
+      primarySession.memberOpenids.includes(auth.data.openid)
+    const sharedCartActiveUntil = new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS)
+    await db.collection('tableOrderSession').doc(primarySessionId).update({
+      data: {
+        memberOpenids: _.addToSet(auth.data.openid),
+        sharedCartActiveUntil,
+        updateTime: db.serverDate()
+      }
+    })
+    const nextSession = {
+      ...primarySession,
+      tableNumber: mergedSession.tableNumber,
+      memberOpenids: normalizeOrderParticipantOpenids(primarySession.memberOpenids, auth.data.openid),
+      sharedCartActiveUntil
+    }
+    const existingOrderCards = buildSharedCartOrderCards(
+      await listActiveSharedCartOrdersForSession(nextSession)
+    )
+    const participantAccessUpdated = !wasPrimaryMember
+      ? await addSharedCartParticipantToActiveOrders(mergedSession.tableNumber, auth.data.openid, nextSession).catch(err => {
+        console.warn('grant merged shared-cart order access failed', err)
+        return 0
+      })
+      : 0
+    return {
+      success: true,
+      sessionId: primarySessionId,
+      tableNumber: mergedSession.tableNumber,
+      redirectedFromTableNumber: tableNumber,
+      sharedCartAccessToken: createSharedCartAccessToken({
+        tenantId: getTenantId(payload),
+        sessionId: primarySessionId,
+        openid: auth.data.openid
+      }),
+      ...buildSharedCartPeopleState(nextSession),
+      ...buildSharedCartSessionState(nextSession),
+      existingOrderCards,
+      participantAccessUpdated,
+      clearedForNewSession: { clearedOrders: 0, clearedGroups: 0 }
+    }
+  }
   const wasSessionMember = !!(oldSession && Array.isArray(oldSession.memberOpenids) && oldSession.memberOpenids.includes(auth.data.openid))
   const sharedCartActiveUntil = new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS)
   const newVisitId = () => crypto.randomBytes(16).toString('hex')
@@ -7816,20 +8528,14 @@ async function joinSharedCart(payload) {
       }
     }
     if (shouldResetSession) {
-      updateData.visitId = newVisitId()
-      updateData.createTime = db.serverDate()
-      updateData.peopleCount = 0
-      updateData.peopleConfirmed = false
-      updateData.peopleConfirmedAt = null
-      updateData.cartVersion = 0
-      updateData.activeOrderRootId = ''
-      updateData.addOnCount = 0
-      updateData.customerReceiptOrderId = ''
-      updateData.customerReceiptStatus = ''
-      updateData.customerReceiptJobIds = []
-      updateData.customerReceiptAttemptCount = 0
-      updateData.customerReceiptLastAttemptAt = null
-      updateData.customerReceiptLastError = ''
+      Object.assign(updateData, getNewTableVisitSessionFields(), {
+        visitId: newVisitId(),
+        createTime: db.serverDate(),
+        peopleCount: 0,
+        peopleConfirmed: false,
+        peopleConfirmedAt: null,
+        sharedCartActiveUntil
+      })
       await clearSharedCartItemsBySessionId(sessionId)
       clearedForNewSession = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date())
     }
@@ -7839,6 +8545,7 @@ async function joinSharedCart(payload) {
     })
     nextSession = shouldResetSession
       ? {
+        ...getNewTableVisitSessionFields(),
         tableNumber,
         status: 'ordering',
         peopleCount: 0,
@@ -7846,12 +8553,6 @@ async function joinSharedCart(payload) {
         cartVersion: 0,
         visitId: newVisitId(),
         visitHistory: [],
-        activeOrderRootId: '',
-        addOnCount: 0,
-        customerReceiptOrderId: '',
-        customerReceiptStatus: '',
-        customerReceiptJobIds: [],
-        customerReceiptAttemptCount: 0,
         sharedCartActiveUntil
       }
       : {
@@ -7874,6 +8575,7 @@ async function joinSharedCart(payload) {
     const inheritedPeopleConfirmed = inheritedPeopleCount > 0
     await sessionRef.set({
       data: {
+        ...getNewTableVisitSessionFields(),
         tableNumber,
         status: 'ordering',
         peopleCount: inheritedPeopleCount,
@@ -7884,10 +8586,6 @@ async function joinSharedCart(payload) {
         visitHistory: [],
         activeOrderRootId: inferredOrderContext.activeOrderRootId || '',
         addOnCount: inferredOrderContext.addOnCount || 0,
-        customerReceiptOrderId: '',
-        customerReceiptStatus: '',
-        customerReceiptJobIds: [],
-        customerReceiptAttemptCount: 0,
         sharedCartActiveUntil,
         memberOpenids: [auth.data.openid],
         createTime: db.serverDate(),
@@ -7896,6 +8594,7 @@ async function joinSharedCart(payload) {
     })
     clearedForNewSession = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date())
     nextSession = {
+      ...getNewTableVisitSessionFields(),
       tableNumber,
       status: 'ordering',
       peopleCount: inheritedPeopleCount,
@@ -7904,22 +8603,15 @@ async function joinSharedCart(payload) {
       visitId: newVisitId(),
       activeOrderRootId: inferredOrderContext.activeOrderRootId || '',
       addOnCount: inferredOrderContext.addOnCount || 0,
-      customerReceiptOrderId: '',
-      customerReceiptStatus: '',
-      customerReceiptJobIds: [],
-      customerReceiptAttemptCount: 0,
       sharedCartActiveUntil
     }
   }
 
-  const existingOrderCards = nextSession.activeOrderRootId
-    ? buildSharedCartOrderCards(await listActiveTableOrdersForSharedCart(
-      tableNumber,
-      nextSession.activeOrderRootId
-    ))
+  const existingOrderCards = nextSession.activeOrderRootId || nextSession.tableGroupId
+    ? buildSharedCartOrderCards(await listActiveSharedCartOrdersForSession(nextSession))
     : []
   const participantAccessUpdated = nextSession.activeOrderRootId && !wasSessionMember
-    ? await addSharedCartParticipantToActiveOrders(tableNumber, auth.data.openid).catch(err => {
+    ? await addSharedCartParticipantToActiveOrders(tableNumber, auth.data.openid, nextSession).catch(err => {
       console.warn('grant shared cart order access failed', err)
       return 0
     })
@@ -7946,8 +8638,8 @@ async function getSharedCart(payload) {
   const auth = await getAuthSession(payload)
   if (!auth.success) return auth
 
-  const tableNumber = normalizeTableNumber(payload.tableNumber)
-  const sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
+  let tableNumber = normalizeTableNumber(payload.tableNumber)
+  let sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
   if (!sessionId) {
     return {
       success: false,
@@ -7956,13 +8648,31 @@ async function getSharedCart(payload) {
     }
   }
 
-  const sessionRes = await db.collection('tableOrderSession').doc(sessionId).get()
-  const sessionState = buildSharedCartSessionState(sessionRes.data)
+  const resolvedSession = await resolveSharedCartSession(tableNumber, sessionId)
+  if (resolvedSession.redirected) {
+    tableNumber = resolvedSession.tableNumber
+    sessionId = resolvedSession.sessionId
+  }
+  const session = resolvedSession.redirected
+    ? resolvedSession.session
+    : (await db.collection('tableOrderSession').doc(sessionId).get()).data
+  const sessionState = buildSharedCartSessionState(session)
+  const responseIdentity = {
+    sessionId,
+    tableNumber,
+    redirected: resolvedSession.redirected === true,
+    ...(resolvedSession.redirected ? {
+      sharedCartAccessToken: createSharedCartAccessToken({
+        tenantId: getTenantId(payload), sessionId, openid: auth.data.openid
+      })
+    } : {})
+  }
   if (sessionState.sessionClosed) {
     return {
       success: true,
       items: [],
-      ...buildSharedCartPeopleState(sessionRes.data),
+      ...responseIdentity,
+      ...buildSharedCartPeopleState(session),
       ...sessionState
     }
   }
@@ -7976,7 +8686,8 @@ async function getSharedCart(payload) {
     return {
       success: true,
       unchanged: true,
-      ...buildSharedCartPeopleState(sessionRes.data),
+      ...responseIdentity,
+      ...buildSharedCartPeopleState(session),
       ...sessionState
     }
   }
@@ -7992,14 +8703,15 @@ async function getSharedCart(payload) {
   return {
     success: true,
     items: res.data || [],
-    ...buildSharedCartPeopleState(sessionRes.data),
+    ...responseIdentity,
+    ...buildSharedCartPeopleState(session),
     ...sessionState
   }
 }
 
 async function getSharedCartStatus(payload) {
-  const tableNumber = normalizeTableNumber(payload.tableNumber)
-  const sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
+  let tableNumber = normalizeTableNumber(payload.tableNumber)
+  let sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
   if (!sessionId) {
     return {
       success: false,
@@ -8008,8 +8720,14 @@ async function getSharedCartStatus(payload) {
     }
   }
 
-  const sessionRes = await db.collection('tableOrderSession').doc(sessionId).get()
-  const session = sessionRes.data
+  const resolvedSession = await resolveSharedCartSession(tableNumber, sessionId)
+  if (resolvedSession.redirected) {
+    tableNumber = resolvedSession.tableNumber
+    sessionId = resolvedSession.sessionId
+  }
+  const session = resolvedSession.redirected
+    ? resolvedSession.session
+    : (await db.collection('tableOrderSession').doc(sessionId).get()).data
   const accessPayload = getSharedCartAccessTokenPayload(
     payload.sharedCartAccessToken,
     getTenantId(payload),
@@ -8017,13 +8735,22 @@ async function getSharedCartStatus(payload) {
   )
   const accessOpenid = accessPayload && accessPayload.openid
   const members = Array.isArray(session && session.memberOpenids) ? session.memberOpenids : []
+  let auth = null
   if (!accessOpenid || members.indexOf(accessOpenid) === -1) {
-    const auth = await getAuthSession(payload)
+    auth = await getAuthSession(payload)
     if (!auth.success) return auth
   }
 
   return {
     success: true,
+    sessionId,
+    tableNumber,
+    redirected: resolvedSession.redirected === true,
+    ...(auth ? {
+      sharedCartAccessToken: createSharedCartAccessToken({
+        tenantId: getTenantId(payload), sessionId, openid: auth.data.openid
+      })
+    } : {}),
     ...buildSharedCartPeopleState(session),
     ...buildSharedCartSessionState(session)
   }
@@ -8033,8 +8760,8 @@ async function setSharedCartPeople(payload) {
   const auth = await getAuthSession(payload)
   if (!auth.success) return auth
 
-  const tableNumber = normalizeTableNumber(payload.tableNumber)
-  const sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
+  let tableNumber = normalizeTableNumber(payload.tableNumber)
+  let sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
   const peopleCount = Math.floor(Number(payload.peopleCount || 0))
   if (!sessionId || !tableNumber) {
     return {
@@ -8049,6 +8776,12 @@ async function setSharedCartPeople(payload) {
       code: 'PEOPLE_COUNT_INVALID',
       message: 'people count invalid'
     }
+  }
+
+  const resolvedSession = await resolveSharedCartSession(tableNumber, sessionId)
+  if (resolvedSession.redirected) {
+    tableNumber = resolvedSession.tableNumber
+    sessionId = resolvedSession.sessionId
   }
 
   const sessionRef = db.collection('tableOrderSession').doc(sessionId)
@@ -8075,6 +8808,12 @@ async function setSharedCartPeople(payload) {
       success: true,
       sessionId,
       tableNumber,
+      redirected: resolvedSession.redirected === true,
+      ...(resolvedSession.redirected ? {
+        sharedCartAccessToken: createSharedCartAccessToken({
+          tenantId: getTenantId(payload), sessionId, openid: auth.data.openid
+        })
+      } : {}),
       alreadyConfirmed: true,
       ...oldPeopleState
     }
@@ -8107,6 +8846,12 @@ async function setSharedCartPeople(payload) {
     success: true,
     sessionId,
     tableNumber,
+    redirected: resolvedSession.redirected === true,
+    ...(resolvedSession.redirected ? {
+      sharedCartAccessToken: createSharedCartAccessToken({
+        tenantId: getTenantId(payload), sessionId, openid: auth.data.openid
+      })
+    } : {}),
     peopleCount,
     peopleConfirmed: true,
     peopleRequired: false
@@ -8117,8 +8862,8 @@ async function patchSharedCart(payload) {
   const auth = await getAuthSession(payload)
   if (!auth.success) return auth
 
-  const tableNumber = normalizeTableNumber(payload.tableNumber)
-  const sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
+  let tableNumber = normalizeTableNumber(payload.tableNumber)
+  let sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
   const operations = Array.isArray(payload.operations) ? payload.operations : []
   const patchId = String(payload.patchId || '').trim().slice(0, 100)
 
@@ -8134,6 +8879,12 @@ async function patchSharedCart(payload) {
     return {
       success: true
     }
+  }
+
+  const resolvedSession = await resolveSharedCartSession(tableNumber, sessionId)
+  if (resolvedSession.redirected) {
+    tableNumber = resolvedSession.tableNumber
+    sessionId = resolvedSession.sessionId
   }
 
   const sessionRef = db.collection('tableOrderSession').doc(sessionId)
@@ -8221,6 +8972,14 @@ async function patchSharedCart(payload) {
 
   return {
     success: true,
+    sessionId,
+    tableNumber,
+    redirected: resolvedSession.redirected === true,
+    ...(resolvedSession.redirected ? {
+      sharedCartAccessToken: createSharedCartAccessToken({
+        tenantId: getTenantId(payload), sessionId, openid: auth.data.openid
+      })
+    } : {}),
     cartVersion: transactionResult.cartVersion,
     duplicatePatch: transactionResult.duplicate,
     sharedCartSyncActive: true,
@@ -8232,14 +8991,20 @@ async function clearSharedCart(payload) {
   const auth = await getAuthSession(payload)
   if (!auth.success) return auth
 
-  const tableNumber = normalizeTableNumber(payload.tableNumber)
-  const sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
+  let tableNumber = normalizeTableNumber(payload.tableNumber)
+  let sessionId = String(payload.sessionId || (tableNumber ? getSharedCartSessionId(tableNumber) : '')).trim()
   if (!sessionId) {
     return {
       success: false,
       code: 'SESSION_REQUIRED',
       message: 'shared cart session required'
     }
+  }
+
+  const resolvedSession = await resolveSharedCartSession(tableNumber, sessionId)
+  if (resolvedSession.redirected) {
+    tableNumber = resolvedSession.tableNumber
+    sessionId = resolvedSession.sessionId
   }
 
   const res = await db.collection('tableCartItem')
@@ -8264,6 +9029,14 @@ async function clearSharedCart(payload) {
 
   return {
     success: true,
+    sessionId,
+    tableNumber,
+    redirected: resolvedSession.redirected === true,
+    ...(resolvedSession.redirected ? {
+      sharedCartAccessToken: createSharedCartAccessToken({
+        tenantId: getTenantId(payload), sessionId, openid: auth.data.openid
+      })
+    } : {}),
     removed: (res.data || []).length,
     sharedCartSyncActive: false,
     sharedCartActiveUntil: 0

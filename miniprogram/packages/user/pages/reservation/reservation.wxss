@@ -234,3 +234,65 @@ page {
   line-height: 1.5;
   text-align: center;
 }
+
+.reservation-confirm-mask {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  padding: 48rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(43, 29, 20, 0.52);
+  box-sizing: border-box;
+}
+
+.reservation-confirm-dialog {
+  width: 100%;
+  max-width: 580rpx;
+  padding: 52rpx 44rpx 38rpx;
+  border-radius: 24rpx;
+  color: #3A2418;
+  background: #FFF9F1;
+  box-shadow: 0 24rpx 60rpx rgba(43, 29, 20, 0.24);
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.reservation-confirm-title {
+  margin-bottom: 32rpx;
+  font-size: 36rpx;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.reservation-confirm-text {
+  color: rgba(58, 36, 24, 0.78);
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 1.65;
+}
+
+.reservation-phone-link {
+  display: inline-block;
+  margin: 4rpx 0;
+  padding: 2rpx 8rpx;
+  color: #B15B18;
+  font-size: 32rpx;
+  font-weight: 900;
+  line-height: 1.45;
+  text-decoration: underline;
+}
+
+.reservation-confirm-action {
+  height: 84rpx;
+  margin-top: 40rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  color: #FFF7EC;
+  background: #B15B18;
+  font-size: 29rpx;
+  font-weight: 900;
+}

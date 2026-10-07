@@ -106,4 +106,14 @@
     bind:saved="onUserInfoSaved"
     bind:closed="onAuthModalClosed">
   </avatar-nickname-modal>
+
+  <view wx:if="{{showReservationConfirmPrompt}}" class="reservation-confirm-mask">
+    <view class="reservation-confirm-dialog">
+      <view class="reservation-confirm-title">预约已提交</view>
+      <view class="reservation-confirm-text">店内忙碌，请致电</view>
+      <view class="reservation-phone-link" bindtap="chooseReservationPhoneAction">13212308765</view>
+      <view class="reservation-confirm-text">确认预约哦，否则预约可能无效</view>
+      <view class="reservation-confirm-action" bindtap="finishReservationPrompt">我知道了</view>
+    </view>
+  </view>
 </view>

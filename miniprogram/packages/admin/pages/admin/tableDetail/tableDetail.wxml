@@ -7,17 +7,21 @@
           <view class="bill-title-row">
             <view class="panel-title">{{ui.pageTitle}}</view>
             <view class="status-pill {{table.statusClass}}">{{table.statusText}}</view>
-            <view class="waiter-order-btn" bindtap="startWaiterOrder">{{billGroups.length ? ui.waiterAdd : ui.waiterCreate}}</view>
+            <view class="waiter-order-btn" wx:if="{{table.status !== 'paid'}}" bindtap="startWaiterOrder">{{billGroups.length ? ui.waiterAdd : ui.waiterCreate}}</view>
           </view>
           <view class="table-meta-row">
             <text class="meta-strong">{{table.areaName}}{{table.tableNumber}}{{ui.tableUnit}}</text>
             <text>{{ui.people}} {{table.peopleText}}</text>
-            <text class="modify-hint" bindtap="editPeople">{{ui.modifyPeople}}</text>
+            <text class="modify-hint" wx:if="{{table.status !== 'paid'}}" bindtap="editPeople">{{ui.modifyPeople}}</text>
             <text>{{ui.diningTime}} {{table.diningTimeText}}</text>
             <text class="meta-price">{{ui.moneySymbol}}{{totalPriceText}}</text>
           </view>
           <view class="paid-settlement-summary" wx:if="{{table.status === 'paid' && table.settlementSummary}}">
             <text class="paid-settlement-received">{{ui.actualReceived}} {{ui.moneySymbol}}{{table.settlementSummary.receivedTotal}}</text>
+          </view>
+          <view class="paid-settlement-summary" wx:if="{{table.status === 'paid' && table.jointCheckoutTableText}}">
+            <text>{{ui.jointCheckout}}</text>
+            <text class="merged-table-text">{{table.jointCheckoutTableText}}</text>
           </view>
           <view class="paid-settlement-summary" wx:if="{{table.status !== 'paid' && table.settledAmount > 0}}">
             <text class="paid-settlement-received">{{ui.settledAmount}} {{ui.moneySymbol}}{{table.settledAmount}}</text>
@@ -109,7 +113,7 @@
         </scroll-view>
 
         <view class="bill-total">
-          <view class="mini-send-kitchen" bindtap="sendKitchen">{{ui.sendKitchen}}</view>
+          <view class="mini-send-kitchen" wx:if="{{table.status !== 'paid'}}" bindtap="sendKitchen">{{ui.sendKitchen}}</view>
           <view class="total-area">
             <text>{{ui.total}}</text>
             <text class="total-price">{{ui.moneySymbol}}{{totalPriceText}}</text>
@@ -118,7 +122,7 @@
         </view>
       </view>
 
-      <view class="dish-action-strip">
+      <view class="dish-action-strip" wx:if="{{table.status !== 'paid'}}">
         <view class="strip-title">{{ui.dishActions}}</view>
         <view
           class="operation-btn"
@@ -132,7 +136,7 @@
       </view>
     </view>
 
-    <view class="pay-panel">
+    <view class="pay-panel" wx:if="{{table.status !== 'paid'}}">
       <view class="panel-title">{{ui.payTitle}}</view>
 
       <view class="pay-section">
@@ -177,7 +181,10 @@
         </view>
         <view class="summary-row combined-checkout-summary" wx:if="{{combinedCheckoutTableText}}">
           <text>{{ui.combinedCheckoutPendingAmount}}</text>
-          <text>{{ui.moneySymbol}}{{combinedCheckoutOutstandingAmount}}</text>
+          <view class="combined-checkout-summary-value">
+            <text>{{ui.moneySymbol}}{{combinedCheckoutOutstandingAmount}}</text>
+            <view class="combined-checkout-cancel" bindtap="clearCombinedCheckout">{{ui.combinedCheckoutCancel}}</view>
+          </view>
         </view>
         <view class="summary-row strong-row">
           <view class="discount-summary-label">
@@ -261,18 +268,51 @@
   </view>
   <view class="combined-checkout-mask" wx:if="{{showCombinedCheckoutDialog}}" catchtap="closeCombinedCheckoutDialog">
     <view class="combined-checkout-dialog" catchtap="stopCombinedCheckoutDialogTap">
-      <view class="combined-checkout-title">{{ui.combinedCheckoutDialogTitle}}</view>
-      <input
-        class="combined-checkout-input"
-        value="{{combinedCheckoutInput}}"
-        placeholder="{{ui.combinedCheckoutInputPlaceholder}}"
-        focus="{{showCombinedCheckoutDialog}}"
-        bindinput="onCombinedCheckoutInput"
-      />
-      <view class="combined-checkout-hint">{{ui.combinedCheckoutInputHint}}</view>
+      <view class="combined-checkout-head">
+        <view>
+          <view class="combined-checkout-title">{{ui.combinedCheckoutDialogTitle}}</view>
+          <view class="combined-checkout-hint">{{ui.combinedCheckoutDialogTip}}</view>
+        </view>
+        <view class="combined-checkout-close" bindtap="closeCombinedCheckoutDialog">×</view>
+      </view>
+
+      <view class="combined-checkout-source">
+        <text>{{ui.combinedCheckoutSource}}：{{table.areaName}}{{table.tableNumber}}{{ui.tableUnit}}</text>
+        <text>{{ui.moneySymbol}}{{table.outstandingAmount}}</text>
+      </view>
+
+      <view class="combined-checkout-loading" wx:if="{{combinedCheckoutLoading}}">{{ui.loading}}</view>
+      <view class="combined-checkout-loading" wx:elif="{{!combinedCheckoutTableSections.length}}">{{ui.combinedCheckoutEmpty}}</view>
+      <scroll-view class="combined-checkout-board" scroll-y wx:else>
+        <view class="combined-checkout-section" wx:for="{{combinedCheckoutTableSections}}" wx:for-item="section" wx:key="areaKey">
+          <view class="combined-checkout-section-title">{{section.areaName}}</view>
+          <view class="combined-checkout-grid">
+            <view
+              class="combined-checkout-card {{table.statusClass}} {{table.selected ? 'combined-checkout-card-active' : ''}} {{table.disabled ? 'combined-checkout-card-disabled' : ''}}"
+              wx:for="{{section.tables}}"
+              wx:for-item="table"
+              wx:key="tableKey"
+              data-table-key="{{table.tableKey}}"
+              bindtap="toggleCombinedCheckoutTable"
+            >
+              <view class="combined-checkout-card-name">{{table.label}}</view>
+              <view class="combined-checkout-card-info">
+                <text>{{ui.moneySymbol}}{{table.outstandingPriceText}}</text>
+                <text>{{table.peopleCount}}/{{table.maxPeople}}</text>
+              </view>
+              <view class="combined-checkout-card-status">{{table.selectionHint}}</view>
+            </view>
+          </view>
+        </view>
+      </scroll-view>
+
+      <view class="combined-checkout-selection">
+        <text>{{ui.combinedCheckoutSelectedCount}} {{selectedCombinedCheckoutTableCount}} {{ui.combinedCheckoutSelectedUnit}}</text>
+        <text>{{ui.moneySymbol}}{{selectedCombinedCheckoutAmount}}</text>
+      </view>
       <view class="combined-checkout-actions">
         <view class="combined-checkout-action cancel" bindtap="closeCombinedCheckoutDialog">{{ui.discountCancel}}</view>
-        <view class="combined-checkout-action confirm" bindtap="confirmCombinedCheckoutDialog">{{ui.discountConfirm}}</view>
+        <view class="combined-checkout-action confirm {{combinedCheckoutLoading ? 'combined-checkout-action-disabled' : ''}}" bindtap="confirmCombinedCheckoutDialog">{{ui.combinedCheckoutChoose}}</view>
       </view>
     </view>
   </view>

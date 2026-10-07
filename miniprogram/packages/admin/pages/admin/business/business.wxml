@@ -10,12 +10,22 @@
         <view class="summary-head">
           <view class="summary-label">{{ui.revenue}}</view>
           <view class="range-control">
-            <view
-              wx:for="{{rangeOptions}}"
-              wx:key="key"
-              class="range-option {{revenueRange === item.key ? 'active' : ''}}"
-              data-value="{{item.key}}"
-              bindtap="selectRevenueRange">{{item.label}}</view>
+            <block wx:for="{{rangeOptions}}" wx:key="key">
+              <picker
+                wx:if="{{item.key === 'custom'}}"
+                class="range-date-picker"
+                mode="date"
+                value="{{revenueDate}}"
+                end="{{todayDate}}"
+                bindchange="onRevenueDateChange">
+                <view class="range-option range-option-last {{revenueRange === item.key ? 'active' : ''}}">{{revenueRange === 'custom' ? revenueDateLabel : item.label}}</view>
+              </picker>
+              <view
+                wx:else
+                class="range-option {{revenueRange === item.key ? 'active' : ''}}"
+                data-value="{{item.key}}"
+                bindtap="selectRevenueRange">{{item.label}}</view>
+            </block>
           </view>
         </view>
         <view class="revenue-value"><text class="money-symbol">{{ui.currency}}</text>{{revenueText}}</view>
@@ -59,12 +69,22 @@
               bindtap="selectDishSort">{{item.label}}</view>
           </view>
           <view class="range-control dish-range-control">
-            <view
-              wx:for="{{rangeOptions}}"
-              wx:key="key"
-              class="range-option {{dishRange === item.key ? 'active' : ''}}"
-              data-value="{{item.key}}"
-              bindtap="selectDishRange">{{item.label}}</view>
+            <block wx:for="{{rangeOptions}}" wx:key="key">
+              <picker
+                wx:if="{{item.key === 'custom'}}"
+                class="range-date-picker"
+                mode="date"
+                value="{{dishDate}}"
+                end="{{todayDate}}"
+                bindchange="onDishDateChange">
+                <view class="range-option range-option-last {{dishRange === item.key ? 'active' : ''}}">{{dishRange === 'custom' ? dishDateLabel : item.label}}</view>
+              </picker>
+              <view
+                wx:else
+                class="range-option {{dishRange === item.key ? 'active' : ''}}"
+                data-value="{{item.key}}"
+                bindtap="selectDishRange">{{item.label}}</view>
+            </block>
           </view>
         </view>
       </view>

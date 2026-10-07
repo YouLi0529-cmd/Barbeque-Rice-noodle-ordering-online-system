@@ -27,10 +27,10 @@ const UI = {
 const RANGE_OPTIONS = [
   { key: 'today', label: '\u5f53\u65e5' },
   { key: 'yesterday', label: '\u6628\u65e5' },
-  { key: '7d', label: '7\u5929\u5185' },
-  { key: '14d', label: '14\u5929\u5185' },
+  { key: '7d', label: '7\u5929' },
   { key: '1m', label: '1\u4e2a\u6708' },
-  { key: '3m', label: '3\u4e2a\u6708' }
+  { key: '3m', label: '3\u4e2a\u6708' },
+  { key: 'custom', label: '\u9009\u65e5\u671f' }
 ]
 
 const DISH_SORT_OPTIONS = [
@@ -43,6 +43,19 @@ function formatMoney(value) {
   const amount = Number(value || 0)
   if (!Number.isFinite(amount)) return '0'
   return Number.isInteger(amount) ? String(amount) : amount.toFixed(2)
+}
+
+function formatDateValue(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function formatDateLabel(value) {
+  const match = String(value || '').match(/^\d{4}-(\d{2})-(\d{2})$/)
+  if (!match) return '\u9009\u65e5\u671f'
+  return `${Number(match[1])}/${Number(match[2])}`
 }
 
 function compareText(left, right) {
@@ -95,8 +108,13 @@ Page({
     ui: UI,
     rangeOptions: RANGE_OPTIONS,
     dishSortOptions: DISH_SORT_OPTIONS,
+    todayDate: formatDateValue(),
     revenueRange: 'today',
     dishRange: 'today',
+    revenueDate: formatDateValue(),
+    dishDate: formatDateValue(),
+    revenueDateLabel: formatDateLabel(formatDateValue()),
+    dishDateLabel: formatDateLabel(formatDateValue()),
     dishSort: 'quantity',
     dishSearch: '',
     loading: true,
@@ -134,6 +152,26 @@ Page({
     this.setData({ dishRange: value }, () => this.loadStats())
   },
 
+  onRevenueDateChange(e) {
+    const value = e.detail && e.detail.value
+    if (!value) return
+    this.setData({
+      revenueRange: 'custom',
+      revenueDate: value,
+      revenueDateLabel: formatDateLabel(value)
+    }, () => this.loadStats())
+  },
+
+  onDishDateChange(e) {
+    const value = e.detail && e.detail.value
+    if (!value) return
+    this.setData({
+      dishRange: 'custom',
+      dishDate: value,
+      dishDateLabel: formatDateLabel(value)
+    }, () => this.loadStats())
+  },
+
   selectDishSort(e) {
     const value = e.currentTarget.dataset.value
     if (!value || value === this.data.dishSort) return
@@ -164,7 +202,9 @@ Page({
     try {
       const res = await apiClient.call('admin.business.stats', {
         revenueRange: this.data.revenueRange,
-        dishRange: this.data.dishRange
+        revenueDate: this.data.revenueDate,
+        dishRange: this.data.dishRange,
+        dishDate: this.data.dishDate
       })
       const data = res.data || {}
       const revenue = data.revenue || {}

@@ -55,6 +55,7 @@ Page({
     selectedRoom: '大厅',
     userInfo: null,
     showAuthModal: false,
+    showReservationConfirmPrompt: false,
     pendingReservationSubmit: false,
     actionLoadingGif: '/images/orderloadinggif-transparent.gif'
   },
@@ -211,16 +212,7 @@ Page({
         roomType: this.data.selectedRoom
       })
       wx.hideLoading()
-      wx.showToast({
-        title: '预约已提交',
-        icon: 'success',
-        duration: 1000
-      })
-      setTimeout(() => {
-        wx.reLaunch({
-          url: '/pages/covertest/covertest'
-        })
-      }, 1000)
+      this.setData({ showReservationConfirmPrompt: true })
     } catch (err) {
       wx.hideLoading()
       console.error('提交预约失败', err)
@@ -252,6 +244,37 @@ Page({
     this.setData({
       showAuthModal: false,
       pendingReservationSubmit: false
+    })
+  },
+
+  chooseReservationPhoneAction() {
+    wx.showActionSheet({
+      itemList: ['拨打 13212308765', '复制号码'],
+      success: (res) => {
+        if (res.tapIndex === 0) {
+          wx.makePhoneCall({
+            phoneNumber: '13212308765',
+            fail: (err) => {
+              if (err && err.errMsg && err.errMsg.indexOf('cancel') === -1) {
+                wx.showToast({ title: '暂时无法拨打，请复制号码联系', icon: 'none' })
+              }
+            }
+          })
+          return
+        }
+
+        wx.setClipboardData({
+          data: '13212308765',
+          success: () => wx.showToast({ title: '号码已复制', icon: 'success' })
+        })
+      }
+    })
+  },
+
+  finishReservationPrompt() {
+    this.setData({ showReservationConfirmPrompt: false })
+    wx.reLaunch({
+      url: '/pages/covertest/covertest'
     })
   },
 

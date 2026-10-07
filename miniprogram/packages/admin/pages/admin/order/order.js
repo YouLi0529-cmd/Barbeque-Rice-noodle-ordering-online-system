@@ -220,6 +220,7 @@ Page({
   },
 
   toggleAddDish(event) {
+    if (this.data.detail && this.data.detail.isJointCheckout) return
     const orderId = String(event.currentTarget.dataset.id || '')
     this.setData({
       addingToOrderId: this.data.addingToOrderId === orderId ? '' : orderId,
@@ -282,6 +283,7 @@ Page({
   async submitSettlementEdit(operation, extra = {}) {
     const detail = this.data.detail
     if (!detail || !this.data.selectedRecordId) return
+    if (detail.isJointCheckout) return
     try {
       wx.showLoading({ title: '正在保存' })
       await apiClient.call('admin.settlement.edit', {
@@ -326,6 +328,7 @@ Page({
   },
 
   deleteSettlementDish(event) {
+    if (this.data.detail && this.data.detail.isJointCheckout) return
     const { orderId, goodsIndex } = event.currentTarget.dataset
     wx.showModal({
       title: '删除菜品',
@@ -335,6 +338,7 @@ Page({
   },
 
   deleteSettlementOrder(event) {
+    if (this.data.detail && this.data.detail.isJointCheckout) return
     const orderId = String(event.currentTarget.dataset.id || '')
     wx.showModal({
       title: '删除订单',
@@ -345,6 +349,7 @@ Page({
 
   deleteSettlementRecord() {
     if (!this.data.detail) return
+    if (this.data.detail.isJointCheckout) return
     wx.showModal({
       title: '删除整笔结算',
       content: '将永久删除该结算记录关联的全部订单，并从营业统计中移除；此操作无法恢复。',
@@ -353,7 +358,7 @@ Page({
   },
 
   togglePaymentPicker() {
-    if (!this.data.detail) return
+    if (!this.data.detail || this.data.detail.isJointCheckout) return
     this.setData({ showPaymentPicker: !this.data.showPaymentPicker })
   },
 
@@ -381,7 +386,7 @@ Page({
 
   openSettlementMixedPaymentDialog(event) {
     const detail = this.data.detail
-    if (!detail || detail.paymentMethod !== 'mixed') return
+    if (!detail || detail.isJointCheckout || detail.paymentMethod !== 'mixed') return
     const channel = event.currentTarget.dataset.channel === 'online' ? 'online' : 'cash'
     this.setData({
       showPaymentPicker: false,
@@ -423,7 +428,7 @@ Page({
 
   openSettlementAmountModal() {
     const detail = this.data.detail
-    if (!detail) return
+    if (!detail || detail.isJointCheckout) return
     this.setData({
       showPaymentPicker: false,
       showAmountModal: true,
