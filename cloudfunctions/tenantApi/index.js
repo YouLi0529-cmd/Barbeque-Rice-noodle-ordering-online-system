@@ -5145,11 +5145,9 @@ async function adminMergeTables(payload) {
       error: originalMessage
     })
     // Surface the stage in the API response as well, so diagnosis does not
-    // depend on CloudBase log access being enabled or available.
-    if (error && typeof error === 'object') {
-      error.message = `[MERGE_DIAG:${mergeWriteStage}] ${originalMessage}`
-    }
-    throw error
+    // depend on CloudBase log access being enabled or available. Throw a new
+    // Error because SDK transaction errors may expose a non-writable message.
+    throw new Error(`[MERGE_DIAG:${mergeWriteStage}] ${originalMessage}`)
   }
   if (!mergeResult || !mergeResult.success) {
     return mergeResult || { success: false, code: 'MERGE_FAILED', message: '拼桌失败，请刷新后重试' }
