@@ -2580,6 +2580,26 @@ function getTableGroupSnapshot(group, fallbackRef) {
   }
 }
 
+function requiresTableGroupPrimaryReplace(document) {
+  if (!document || !Object.prototype.hasOwnProperty.call(document, 'tableGroupPrimary')) return false
+  const primary = document.tableGroupPrimary
+  return primary === null || typeof primary !== 'object' || Array.isArray(primary)
+}
+
+async function writeTableGroupFields(transaction, collectionName, documentId, currentDocument, data) {
+  const ref = transaction.collection(collectionName).doc(documentId)
+  if (!requiresTableGroupPrimaryReplace(currentDocument)) {
+    return ref.update({ data })
+  }
+
+  // CloudBase cannot update tableGroupPrimary.areaKey while its parent is null.
+  // The current document was read inside this transaction, so a complete set is
+  // atomic and safely changes that field from null into the primary-table object.
+  const replacement = { ...(currentDocument || {}), ...data }
+  delete replacement._id
+  return ref.set({ data: replacement })
+}
+
 function findTableGroupForRef(tableGroups, ref) {
   if (!ref) return null
   return (tableGroups || []).find(group => {
@@ -2973,8 +2993,18 @@ function getBusinessStatsGroupKey(order = {}) {
   return `${scene}:${String(order.rootOrderId || order._id || '')}`
 }
 
+function isAllocatedJointCheckoutOrder(order = {}) {
+  return !!String(order && order.jointCheckoutId || '').trim() &&
+    Number(order && order.jointCheckoutAllocationVersion || 0) >= 1
+}
+
 function isJointCheckoutGroup(orders = []) {
-  return (orders || []).some(order => String(order && order.jointCheckoutId || '').trim())
+  // Older joint checkouts keep one payment record and cannot be safely edited.
+  // New checkouts allocate that payment to each table, so they behave as normal
+  // settlement records while retaining jointCheckoutId as audit metadata.
+  return (orders || []).some(order => {
+    return !!String(order && order.jointCheckoutId || '').trim() && !isAllocatedJointCheckoutOrder(order)
+  })
 }
 
 function getJointCheckoutPaymentBreakdown(payment = {}) {
@@ -3031,9 +3061,8 @@ function getBusinessStatsGroupRevenue(orders = []) {
 }
 
 function getBusinessStatsPaymentBreakdown(orders = [], groupRevenue = 0) {
-  // The cash/online split of a joint checkout lives in checkoutPayment. A
-  // physical table still contributes its own revenue, but never a made-up
-  // share of that one payment.
+  // Older joint checkouts keep their one payment in checkoutPayment. Newer
+  // allocated joint checkouts pass through as ordinary per-table settlements.
   if (isJointCheckoutGroup(orders)) return { cash: 0, online: 0, other: 0 }
 
   const total = roundMoney(groupRevenue)
@@ -3153,6 +3182,47 @@ function buildSettlementPaymentBreakdown(paymentMethod, receivable, options = {}
   return { cash: 0, online: 0, mixedPaymentChannel: '', paymentSplitValid: true }
 }
 
+function getAllocatedPaymentMethod(cashAmount, onlineAmount, fallback = '') {
+  const cashCents = Math.max(0, Math.round((Number(cashAmount) || 0) * 100))
+  const onlineCents = Math.max(0, Math.round((Number(onlineAmount) || 0) * 100))
+  if (cashCents > 0 && onlineCents > 0) return 'mixed'
+  if (cashCents > 0) return 'cash'
+  if (onlineCents > 0) return 'wechat_alipay'
+  return String(fallback || 'wechat_alipay').trim() || 'wechat_alipay'
+}
+
+function allocateJointCheckoutPayments(tableSummaries = [], paymentBreakdown = {}, fallbackMethod = '') {
+  let cashCents = Math.max(0, Math.round((Number(paymentBreakdown.cash) || 0) * 100))
+  let onlineCents = Math.max(0, Math.round((Number(paymentBreakdown.online) || 0) * 100))
+  const allocations = []
+
+  for (const summary of tableSummaries || []) {
+    const receivableCents = Math.max(0, Math.round((Number(summary && summary.receivable) || 0) * 100))
+    const cashAllocation = Math.min(receivableCents, cashCents)
+    cashCents -= cashAllocation
+    const onlineAllocation = Math.min(receivableCents - cashAllocation, onlineCents)
+    onlineCents -= onlineAllocation
+    const allocatedCents = cashAllocation + onlineAllocation
+    const cashAmount = roundMoney(cashAllocation / 100)
+    const onlineAmount = roundMoney(onlineAllocation / 100)
+    allocations.push({
+      receivable: roundMoney(receivableCents / 100),
+      cashAmount,
+      onlineAmount,
+      paymentMethod: getAllocatedPaymentMethod(cashAmount, onlineAmount, fallbackMethod),
+      mixedPaymentChannel: cashAllocation > 0 && onlineAllocation > 0 ? 'cash' : ''
+    })
+    if (allocatedCents !== receivableCents) {
+      return { valid: false, allocations: [] }
+    }
+  }
+
+  return {
+    valid: cashCents === 0 && onlineCents === 0,
+    allocations
+  }
+}
+
 function getSettlementStoredMixedPayment(orders = []) {
   const source = orders.find(order => order.checkoutCashAmount !== undefined || order.checkoutOnlineAmount !== undefined) || {}
   const channel = String(source.mixedPaymentChannel || '').trim() === 'online' ? 'online' : 'cash'
@@ -3259,6 +3329,9 @@ function buildBusinessStatsSnapshot(orders = [], range, jointCheckoutPayments = 
   const jointPaymentMap = {}
   ;(jointCheckoutPayments || []).forEach(payment => {
     if (!payment || payment.deleted === true || payment.type !== 'joint_checkout') return
+    // Newer joint checkouts distribute the payment to ordinary table records.
+    // Counting this audit document as well would double count payment revenue.
+    if (String(payment.allocationMode || '').trim() === 'per_table') return
     const paymentId = String(payment.jointCheckoutId || payment._id || '').trim()
     const paidAt = getTimeValue(payment.checkoutAt || payment.createTime || payment.updateTime)
     if (!paymentId || !paidAt || paidAt < startAt || (endAt && paidAt >= endAt)) return
@@ -5008,7 +5081,13 @@ async function adminMergeTables(payload) {
       }
       const primarySessionRef = transaction.collection('tableOrderSession').doc(primarySessionId)
       if (existingPrimary) {
-        await primarySessionRef.update({ data: primaryData })
+        await writeTableGroupFields(
+          transaction,
+          'tableOrderSession',
+          primarySessionId,
+          existingPrimary,
+          primaryData
+        )
       } else {
         await primarySessionRef.set({
           data: {
@@ -5053,7 +5132,13 @@ async function adminMergeTables(payload) {
         }
         const childSessionRef = transaction.collection('tableOrderSession').doc(canonicalSessionId)
         if (childSession) {
-          await childSessionRef.update({ data: childData })
+          await writeTableGroupFields(
+            transaction,
+            'tableOrderSession',
+            canonicalSessionId,
+            childSession,
+            childData
+          )
         } else {
           await childSessionRef.set({
             data: {
@@ -5079,12 +5164,16 @@ async function adminMergeTables(payload) {
         })
       }
 
-      await runTransactionSequentially(currentOrders, order => transaction.collection('order').doc(order._id).update({
-        data: {
+      await runTransactionSequentially(currentOrders, order => writeTableGroupFields(
+        transaction,
+        'order',
+        order._id,
+        order,
+        {
           ...updateData,
           participantOpenids: allMemberOpenids
         }
-      }))
+      ))
       await transaction.collection('tableGroup').doc(tableGroupId).set({
         data: {
           tableGroupId,
@@ -5809,9 +5898,8 @@ async function adminFinishCombinedTableCheckout(payload) {
 
     const tableSummaries = currentContexts.map(context => {
       const state = context.settlementState || {}
-      // Every physical table calculates its own amount. The payment method is
-      // intentionally ignored here because cash/online belongs to the one
-      // joint payment record, not to an invented share of each table.
+      // Each settlement unit calculates its own receivable before the total
+      // payment is distributed from the source table outward.
       return buildAdminCheckoutSummary([], { ...payload, paymentMethod: 'joint_checkout' }, {
         grossTotalPrice: state.grossAmount,
         previousSettledAmount: state.settledAmount,
@@ -5822,6 +5910,7 @@ async function adminFinishCombinedTableCheckout(payload) {
     const jointTotalPrice = roundMoney(tableSummaries.reduce((sum, summary) => sum + Number(summary.totalPrice || 0), 0))
     const paymentMethod = String(payload.paymentMethod || 'wechat_alipay').trim() || 'wechat_alipay'
     const paymentBreakdown = buildSettlementPaymentBreakdown(paymentMethod, jointReceivable, payload)
+    const paymentAllocation = allocateJointCheckoutPayments(tableSummaries, paymentBreakdown, paymentMethod)
     checkoutSummary = {
       totalPrice: jointTotalPrice,
       grossTotalPrice: combinedState.grossAmount,
@@ -5839,11 +5928,15 @@ async function adminFinishCombinedTableCheckout(payload) {
     if (!checkoutSummary.paymentSplitValid) {
       return { success: false, code: 'MIXED_PAYMENT_AMOUNT_INVALID', message: 'mixed payment amount must be between 0 and receivable amount' }
     }
+    if (!paymentAllocation.valid) {
+      return { success: false, code: 'JOINT_CHECKOUT_ALLOCATION_INVALID', message: '共同结账付款分配失败，请刷新后重试' }
+    }
 
     const jointCheckoutTables = mergeAdminTableRefs(...currentContexts.map(getCombinedCheckoutContextTableRefs))
     for (let index = 0; index < currentContexts.length; index += 1) {
       const context = currentContexts[index]
       const tableSummary = tableSummaries[index]
+      const allocation = paymentAllocation.allocations[index]
       const tableCheckoutBatchId = `${tableCheckoutBatchPrefix}_${context.ref.tableKey}`
 
       await runTransactionSequentially(context.orders, order => transaction.collection('order').doc(order._id).update({
@@ -5852,15 +5945,15 @@ async function adminFinishCombinedTableCheckout(payload) {
           payStatus: true,
           status: 'completed',
           checkoutStatus: 'finished',
-          payMethod: paymentMethod,
-          paymentMethod,
+          payMethod: allocation.paymentMethod,
+          paymentMethod: allocation.paymentMethod,
           checkoutTotalPrice: context.settlementState.grossAmount,
           checkoutPreSettledAmount: context.settlementState.settledAmount,
           checkoutReceivable: tableSummary.receivable,
           receivedAmount: tableSummary.receivable,
-          checkoutCashAmount: null,
-          checkoutOnlineAmount: null,
-          mixedPaymentChannel: '',
+          checkoutCashAmount: allocation.cashAmount,
+          checkoutOnlineAmount: allocation.onlineAmount,
+          mixedPaymentChannel: allocation.mixedPaymentChannel,
           checkoutDiscountType: tableSummary.discountType,
           checkoutDiscountValue: tableSummary.discountValue,
           checkoutDirectReduceValue: '',
@@ -5869,6 +5962,11 @@ async function adminFinishCombinedTableCheckout(payload) {
           jointCheckoutId,
           jointCheckoutTables,
           jointCheckoutAt: checkoutTime,
+          jointCheckoutAllocationVersion: 1,
+          jointCheckoutAllocationIndex: index,
+          jointCheckoutPaymentMethod: paymentMethod,
+          jointCheckoutPaymentCashAmount: checkoutSummary.cashReceived,
+          jointCheckoutPaymentOnlineAmount: checkoutSummary.onlineReceived,
           updateTime: db.serverDate()
         }
       }))
@@ -5887,6 +5985,18 @@ async function adminFinishCombinedTableCheckout(payload) {
         onlineAmount: checkoutSummary.onlineReceived,
         paymentMethod,
         mixedPaymentChannel: checkoutSummary.mixedPaymentChannel,
+        allocationMode: 'per_table',
+        allocations: currentContexts.map((context, index) => {
+          const allocation = paymentAllocation.allocations[index]
+          return {
+            table: serializeCombinedCheckoutTable(context),
+            orderIds: context.orderIds,
+            receivable: allocation.receivable,
+            cashAmount: allocation.cashAmount,
+            onlineAmount: allocation.onlineAmount,
+            paymentMethod: allocation.paymentMethod
+          }
+        }),
         checkoutAt: checkoutTime,
         createTime: db.serverDate(),
         updateTime: db.serverDate()
@@ -8155,15 +8265,25 @@ async function getAdminTableActivityStamp() {
   }
 }
 
-async function touchAdminTableBoard() {
+async function writeAdminTableBoardState(options = {}) {
   const ref = db.collection('tableOrderSession').doc(ADMIN_TABLE_BOARD_STATE_ID)
   try {
-    await ref.update({
+    const updateResult = await ref.update({
       data: {
         version: _.inc(1),
         updateTime: db.serverDate()
       }
     })
+    if (!updateResult || !updateResult.stats || Number(updateResult.stats.updated || 0) < 1) {
+      await ref.set({
+        data: {
+          type: 'admin_table_board_state',
+          version: 1,
+          createTime: db.serverDate(),
+          updateTime: db.serverDate()
+        }
+      })
+    }
   } catch (err) {
     try {
       await ref.set({
@@ -8175,19 +8295,20 @@ async function touchAdminTableBoard() {
         }
       })
     } catch (setErr) {
-      // Board refresh is an optimization. A failed marker must not block ordering.
-      console.error('touch admin table board failed', setErr)
+      throw new Error(`write table board state failed: ${setErr.message || setErr}`)
     }
   }
 
-  // Clients only subscribe to this safe marker, then load table data through
-  // the authenticated tenantApi. A signal failure must never block ordering.
-  await touchAdminTableBoardSignal().catch(err => {
-    console.warn('touch admin table board signal failed', err)
-  })
+  if (!options.verify) return { id: ADMIN_TABLE_BOARD_STATE_ID }
+  const saved = await ref.get()
+  return {
+    id: ADMIN_TABLE_BOARD_STATE_ID,
+    version: Math.max(0, Number(saved.data && saved.data.version || 0)),
+    updateTime: saved.data && saved.data.updateTime || null
+  }
 }
 
-async function touchAdminTableBoardSignal() {
+async function touchAdminTableBoardSignal(options = {}) {
   const ref = db.collection('tableBoardSignal').doc(ADMIN_TABLE_BOARD_SIGNAL_ID)
   const signal = {
     type: 'admin_table_board_signal',
@@ -8196,7 +8317,15 @@ async function touchAdminTableBoardSignal() {
   }
 
   try {
-    await ref.update({ data: signal })
+    const updateResult = await ref.update({ data: signal })
+    if (!updateResult || !updateResult.stats || Number(updateResult.stats.updated || 0) < 1) {
+      await ref.set({
+        data: {
+          ...signal,
+          createTime: db.serverDate()
+        }
+      })
+    }
   } catch (err) {
     await ref.set({
       data: {
@@ -8204,6 +8333,60 @@ async function touchAdminTableBoardSignal() {
         createTime: db.serverDate()
       }
     })
+  }
+
+  if (!options.verify) return { id: ADMIN_TABLE_BOARD_SIGNAL_ID }
+  const saved = await ref.get()
+  return {
+    id: ADMIN_TABLE_BOARD_SIGNAL_ID,
+    nonce: String(saved.data && saved.data.nonce || ''),
+    updateTime: saved.data && saved.data.updateTime || null
+  }
+}
+
+async function touchAdminTableBoard() {
+  const result = { board: null, signal: null }
+  try {
+    result.board = await writeAdminTableBoardState()
+  } catch (err) {
+    // Board refresh is an optimization. A failed marker must not block ordering.
+    console.error('touch admin table board failed', err)
+  }
+
+  // Clients only subscribe to this safe marker, then load table data through
+  // the authenticated tenantApi. A signal failure must never block ordering.
+  try {
+    result.signal = await touchAdminTableBoardSignal()
+  } catch (err) {
+    console.warn('touch admin table board signal failed', err)
+  }
+  return result
+}
+
+async function probeAdminTableBoardRealtimeSignal() {
+  // Admin-only, no-order diagnostic for verifying the realtime marker chain.
+  const [board, signal] = await Promise.all([
+    writeAdminTableBoardState({ verify: true }),
+    touchAdminTableBoardSignal({ verify: true })
+  ])
+  let context = {}
+  try {
+    context = cloud.getWXContext() || {}
+  } catch (err) {
+    context = {}
+  }
+
+  return {
+    success: true,
+    data: {
+      board,
+      signal,
+      runtime: {
+        wxContextEnv: String(context.ENV || ''),
+        tcbEnv: String(process.env.TCB_ENV || ''),
+        scfNamespace: String(process.env.SCF_NAMESPACE || '')
+      }
+    }
   }
 }
 
@@ -11493,6 +11676,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.list') return adminListTables(payload)
   if (action === 'admin.table.searchDishes') return adminSearchOpenTableDishes(payload)
   if (action === 'admin.table.status') return adminGetTableBoardStatus(payload)
+  if (action === 'admin.table.realtimeProbe') return probeAdminTableBoardRealtimeSignal()
   if (action === 'admin.table.detail') return adminGetTableDetail(payload)
   if (action === 'admin.table.combinedCheckoutPreview') return adminPreviewCombinedTableCheckout(payload)
   // Maintenance actions are intentionally admin-only. They can inspect and

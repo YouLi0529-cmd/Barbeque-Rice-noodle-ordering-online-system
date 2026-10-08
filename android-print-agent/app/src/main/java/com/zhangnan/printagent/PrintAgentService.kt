@@ -79,24 +79,56 @@ class PrintAgentService : Service() {
     worker = scope.launch {
       val api = AgentApi(prefs.apiUrl, prefs.tenantId)
       var refreshConfigAt = 0L
+      var refreshHeartbeatAt = 0L
+      var refreshUsbDevicesAt = 0L
+      var nextClaimAt = 0L
+      var claimRequested = true
       while (isActive) {
         try {
-          api.heartbeat(prefs.agentId, prefs.agentToken)
-          reportUsbDevices(api)
-          if (System.currentTimeMillis() >= refreshConfigAt) {
+          val now = System.currentTimeMillis()
+          if (now >= refreshHeartbeatAt) {
+            api.heartbeat(prefs.agentId, prefs.agentToken)
+            refreshHeartbeatAt = now + HEARTBEAT_INTERVAL_MS
+          }
+          if (now >= refreshUsbDevicesAt) {
+            reportUsbDevices(api)
+            refreshUsbDevicesAt = now + USB_REPORT_INTERVAL_MS
+          }
+          if (now >= refreshConfigAt) {
             printers = api.bootstrap(prefs.agentId, prefs.agentToken).associateBy { it.id }
-            refreshConfigAt = System.currentTimeMillis() + 60_000
+            refreshConfigAt = now + CONFIG_REFRESH_INTERVAL_MS
           }
-          if (System.currentTimeMillis() >= refreshHealthAt) {
+          if (now >= refreshHealthAt) {
             reportNetworkPrinterHealth(api)
-            refreshHealthAt = System.currentTimeMillis() + PRINTER_HEALTH_INTERVAL_MS
+            refreshHealthAt = now + PRINTER_HEALTH_INTERVAL_MS
           }
+
+          if (!claimRequested) {
+            val waitMs = nextClaimAt - System.currentTimeMillis()
+            claimRequested = if (waitMs > 0) {
+              // WebSocket wakes this immediately. Timing out is the fallback path
+              // for a missed notification or a disconnected gateway.
+              withTimeoutOrNull(waitMs) {
+                jobWakeups.receive()
+                true
+              } ?: true
+            } else {
+              true
+            }
+          }
+
+          if (!claimRequested) continue
+          claimRequested = false
           val job = api.claim(prefs.agentId, prefs.agentToken)
-          if (job != null) executeJob(api, job)
-          else {
-            // A WebSocket notification wakes this wait immediately. The timeout
-            // keeps the existing HTTP polling path as a reliable fallback.
-            withTimeoutOrNull(POLL_INTERVAL_MS) { jobWakeups.receive() }
+          nextClaimAt = System.currentTimeMillis() + if (socketOpen) {
+            SOCKET_SAFETY_CLAIM_INTERVAL_MS
+          } else {
+            FALLBACK_CLAIM_INTERVAL_MS
+          }
+          if (job != null) {
+            executeJob(api, job)
+            // Drain a burst of queued tickets without waiting for another push.
+            claimRequested = true
           }
         } catch (error: Exception) {
           safeLog(api, "agent_connection_error", error.message ?: "network error", level = "error")
@@ -188,6 +220,8 @@ class PrintAgentService : Service() {
         }
         socketConnecting = false
         socketOpen = true
+        // Check for a job as soon as the gateway connection becomes available.
+        jobWakeups.trySend(Unit)
         webSocket.send(JSONObject()
           .put("type", "hello")
           .put("agentId", prefs.agentId)
@@ -199,8 +233,7 @@ class PrintAgentService : Service() {
       override fun onMessage(webSocket: WebSocket, text: String) {
         val type = try { JSONObject(text).optString("type") } catch (_: Exception) { "" }
         if (type == "print_job_available") {
-          // The HTTP claim remains authoritative; this signal only removes the
-          // five-second wait when a new job is queued.
+          // The HTTP claim remains authoritative; this signal makes it immediate.
           jobWakeups.trySend(Unit)
         }
       }
@@ -220,6 +253,8 @@ class PrintAgentService : Service() {
     socket = null
     socketOpen = false
     socketConnecting = false
+    // Leave the long WebSocket wait immediately and fall back to HTTP polling.
+    jobWakeups.trySend(Unit)
     scheduleWebSocketReconnect()
   }
 
@@ -257,7 +292,11 @@ class PrintAgentService : Service() {
     const val ACTION_USB_DETACHED = "com.zhangnan.printagent.USB_DETACHED"
     private const val CHANNEL_ID = "print_agent"
     private const val NOTIFICATION_ID = 4101
-    private const val POLL_INTERVAL_MS = 5_000L
+    private const val HEARTBEAT_INTERVAL_MS = 60_000L
+    private const val USB_REPORT_INTERVAL_MS = 5 * 60_000L
+    private const val CONFIG_REFRESH_INTERVAL_MS = 60_000L
+    private const val SOCKET_SAFETY_CLAIM_INTERVAL_MS = 60_000L
+    private const val FALLBACK_CLAIM_INTERVAL_MS = 10_000L
     private const val RECONNECT_INTERVAL_MS = 8_000L
     private const val PRINTER_HEALTH_INTERVAL_MS = 60_000L
   }

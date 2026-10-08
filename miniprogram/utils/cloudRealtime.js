@@ -26,7 +26,11 @@ function init() {
 function getDatabase() {
   if (!init()) return null
   try {
-    return wx.cloud.database()
+    // Do not rely on the DevTools default cloud environment. This listener
+    // must read the same environment that tenantApi writes its marker to.
+    return wx.cloud.database({
+      config: { env: CLOUD_ENV_ID }
+    })
   } catch (err) {
     console.warn('cloud realtime database unavailable', err)
     return null

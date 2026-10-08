@@ -337,6 +337,7 @@ Page({
             if (!this.tableBoardSignalReady) {
               this.tableBoardSignalReady = true
             }
+            this.stopTableBoardPolling()
             this.refreshTableBoard(true)
           },
           onError: err => {
@@ -361,17 +362,21 @@ Page({
   },
 
   startTableBoardPolling(interval) {
+    if (this.tableBoardSignalReady) return
     if (this.timer) clearInterval(this.timer)
     this.timer = setInterval(() => {
       this.refreshTableBoard(true)
     }, interval)
   },
 
+  stopTableBoardPolling() {
+    if (!this.timer) return
+    clearInterval(this.timer)
+    this.timer = null
+  },
+
   stopAutoRefresh() {
-    if (this.timer) {
-      clearInterval(this.timer)
-      this.timer = null
-    }
+    this.stopTableBoardPolling()
     if (this.clockTimer) {
       clearInterval(this.clockTimer)
       this.clockTimer = null

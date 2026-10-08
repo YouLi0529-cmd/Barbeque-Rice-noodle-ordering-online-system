@@ -10,7 +10,7 @@ This is the on-premise Android service that delivers CloudBase print jobs to the
 4. On the tablet, tap `注册打印代理` and enter the Tenant API HTTP URL, store ID, the one-time registration code, and the Print Push Gateway WebSocket endpoint ending in `/ws`.
 5. Allow USB access when Android asks. The service reports attached USB VID/PID devices to the backend, so the front-counter printer can be rebound from the Mini Program.
 
-The service uses an authenticated WebSocket notification to wake `print.agent.claim` immediately when a job is queued. It continues polling every five seconds when the socket is absent or disconnected. It is a foreground service and restarts after device boot when it has been registered.
+The service uses an authenticated WebSocket notification to wake `print.agent.claim` immediately when a job is queued. It sends an online heartbeat every minute and reports USB devices at startup, on USB attach/detach, and every five minutes. When the WebSocket is absent or disconnected, job claiming falls back to every ten seconds; while it is connected, a one-minute safety claim protects against a missed notification. It is a foreground service and restarts after device boot when it has been registered.
 
 ## Hardware verification checklist
 

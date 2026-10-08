@@ -137,6 +137,7 @@ Component({
     },
 
     startPolling() {
+      if (this.signalWatchReady) return
       this.stopPolling()
       this.pollTimer = setInterval(() => {
         this.activate(true)
@@ -163,6 +164,7 @@ Component({
               if (!this.signalWatchReady) {
                 this.signalWatchReady = true
               }
+              this.stopPolling()
               this.activate(true)
             },
             onError: err => {
