@@ -4885,10 +4885,7 @@ async function adminMergeTables(payload) {
   const mergedPeopleCount = Math.max(0, ...activeOrders.map(order => Math.floor(Number(order.peopleCount || 0))))
   const updateData = {
     tableGroupId,
-    // Replace the entire field. Legacy records can store null here; without
-    // _.set(), CloudBase may emit nested writes such as tableGroupPrimary.areaKey,
-    // which MongoDB rejects when the parent value is null.
-    tableGroupPrimary: _.set(primaryRef),
+    tableGroupPrimary: primaryRef,
     tableGroupTables: mergedTables,
     tableGroupUpdatedAt: db.serverDate(),
     updateTime: db.serverDate()
@@ -5011,12 +5008,9 @@ async function adminMergeTables(payload) {
       }
       const primarySessionRef = transaction.collection('tableOrderSession').doc(primarySessionId)
       if (existingPrimary) {
-        await primarySessionRef.update({
-          data: {
-            ...primaryData,
-            tableGroupPrimary: _.set(primaryRef)
-          }
-        })
+        const replacementData = { ...existingPrimary, ...primaryData }
+        delete replacementData._id
+        await primarySessionRef.set({ data: replacementData })
       } else {
         await primarySessionRef.set({
           data: {
@@ -5061,12 +5055,9 @@ async function adminMergeTables(payload) {
         }
         const childSessionRef = transaction.collection('tableOrderSession').doc(canonicalSessionId)
         if (childSession) {
-          await childSessionRef.update({
-            data: {
-              ...childData,
-              tableGroupPrimary: _.set(primaryRef)
-            }
-          })
+          const replacementData = { ...childSession, ...childData }
+          delete replacementData._id
+          await childSessionRef.set({ data: replacementData })
         } else {
           await childSessionRef.set({
             data: {
@@ -5092,12 +5083,18 @@ async function adminMergeTables(payload) {
         })
       }
 
-      await runTransactionSequentially(currentOrders, order => transaction.collection('order').doc(order._id).update({
-        data: {
+      await runTransactionSequentially(currentOrders, order => {
+        // Legacy orders can have tableGroupPrimary: null. Replacing the full
+        // document avoids CloudBase translating an object update into dotted
+        // child writes against that null parent.
+        const replacementData = {
+          ...order,
           ...updateData,
           participantOpenids: allMemberOpenids
         }
-      }))
+        delete replacementData._id
+        return transaction.collection('order').doc(order._id).set({ data: replacementData })
+      })
       await transaction.collection('tableGroup').doc(tableGroupId).set({
         data: {
           tableGroupId,
