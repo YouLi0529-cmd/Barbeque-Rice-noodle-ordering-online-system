@@ -4898,18 +4898,7 @@ async function adminMergeTables(payload) {
   // A merge has one writable session. Child table sessions are retained only as
   // redirect markers, so a child QR code joins the primary bill instead of
   // silently creating a second add-on tree.
-  // CloudBase may report transaction write failures only when committing the
-  // transaction. Keep the last operation label outside the callback so logs
-  // identify which write was in flight without logging customer/order data.
-  let mergeWriteStage = 'transaction-start'
-  console.info('[admin.table.merge diagnostic 2026-10-08-a] started', {
-    tableGroupId,
-    orderCount: activeOrders.length,
-    sessionCount: sessionIds.length
-  })
-  let mergeResult
-  try {
-    mergeResult = await runTransactionWithBusyRetry(
+  const mergeResult = await runTransactionWithBusyRetry(
     callback => db.runTransaction(callback),
     async transaction => {
       const orderSnapshots = await runTransactionSequentially(activeOrders, order => (
@@ -4963,20 +4952,15 @@ async function adminMergeTables(payload) {
       const staleSubmissionCandidates = lateSubmissionCandidates.filter((candidate, index) => !lateSubmissionMatches[index])
       // These markers belong to an older visit or another root. Once the cart
       // is confirmed empty, clearing them cannot discard a pending customer action.
-      mergeWriteStage = 'clear-stale-submission-markers'
-      await runTransactionSequentially(staleSubmissionCandidates, candidate => {
-        const existingSession = sessionsById[candidate.sessionId] || {}
-        const replacementData = {
-          ...existingSession,
-          lastSubmittedCartVersion: 0,
-          lastSubmittedOrderId: '',
-          updateTime: db.serverDate()
-        }
-        delete replacementData._id
-        return transaction.collection('tableOrderSession').doc(candidate.sessionId).set({
-          data: replacementData
+      await runTransactionSequentially(staleSubmissionCandidates, candidate => (
+        transaction.collection('tableOrderSession').doc(candidate.sessionId).update({
+          data: {
+            lastSubmittedCartVersion: 0,
+            lastSubmittedOrderId: '',
+            updateTime: db.serverDate()
+          }
         })
-      })
+      ))
 
       const existingPrimary = sessionsById[primarySessionId] || null
       const allMemberOpenids = normalizeOrderParticipantOpenids(
@@ -5023,11 +5007,8 @@ async function adminMergeTables(payload) {
         updateTime: db.serverDate()
       }
       const primarySessionRef = transaction.collection('tableOrderSession').doc(primarySessionId)
-      mergeWriteStage = existingPrimary ? 'replace-primary-session' : 'create-primary-session'
       if (existingPrimary) {
-        const replacementData = { ...existingPrimary, ...primaryData }
-        delete replacementData._id
-        await primarySessionRef.set({ data: replacementData })
+        await primarySessionRef.update({ data: primaryData })
       } else {
         await primarySessionRef.set({
           data: {
@@ -5071,11 +5052,8 @@ async function adminMergeTables(payload) {
           updateTime: db.serverDate()
         }
         const childSessionRef = transaction.collection('tableOrderSession').doc(canonicalSessionId)
-        mergeWriteStage = childSession ? 'replace-child-session' : 'create-child-session'
         if (childSession) {
-          const replacementData = { ...childSession, ...childData }
-          delete replacementData._id
-          await childSessionRef.set({ data: replacementData })
+          await childSessionRef.update({ data: childData })
         } else {
           await childSessionRef.set({
             data: {
@@ -5096,34 +5074,17 @@ async function adminMergeTables(payload) {
         if (sessionId === primarySessionId || sessionId === getSharedCartSessionId(formatAdminTableNumber(sessionRefById[sessionId]))) continue
         const legacySession = sessionsById[sessionId]
         if (!legacySession) continue
-        mergeWriteStage = 'close-legacy-session'
-        // This legacy alias may also contain tableGroupPrimary: null. A
-        // document update can be expanded into nested field writes by the SDK;
-        // replace the whole document so no write targets areaKey under null.
-        const replacementData = {
-          ...legacySession,
-          ...buildClosedTableSessionData(legacySession, new Date())
-        }
-        delete replacementData._id
-        await transaction.collection('tableOrderSession').doc(sessionId).set({
-          data: replacementData
+        await transaction.collection('tableOrderSession').doc(sessionId).update({
+          data: buildClosedTableSessionData(legacySession, new Date())
         })
       }
 
-      await runTransactionSequentially(currentOrders, order => {
-        // Legacy orders can have tableGroupPrimary: null. Replacing the full
-        // document avoids CloudBase translating an object update into dotted
-        // child writes against that null parent.
-        const replacementData = {
-          ...order,
+      await runTransactionSequentially(currentOrders, order => transaction.collection('order').doc(order._id).update({
+        data: {
           ...updateData,
           participantOpenids: allMemberOpenids
         }
-        delete replacementData._id
-        mergeWriteStage = 'replace-order-document'
-        return transaction.collection('order').doc(order._id).set({ data: replacementData })
-      })
-      mergeWriteStage = 'write-active-table-group'
+      }))
       await transaction.collection('tableGroup').doc(tableGroupId).set({
         data: {
           tableGroupId,
@@ -5136,9 +5097,8 @@ async function adminMergeTables(payload) {
           updateTime: db.serverDate()
         }
       })
-      await runTransactionSequentially(inactiveGroupIds, groupId => {
-        mergeWriteStage = 'deactivate-previous-table-group'
-        return transaction.collection('tableGroup').doc(groupId).set({
+      await runTransactionSequentially(inactiveGroupIds, groupId => (
+        transaction.collection('tableGroup').doc(groupId).set({
           data: {
             tableGroupId: groupId,
             status: 'inactive',
@@ -5146,21 +5106,10 @@ async function adminMergeTables(payload) {
             updateTime: db.serverDate()
           }
         })
-      })
+      ))
       return { success: true, updatedOrders: currentOrders.length }
     }
-    )
-  } catch (error) {
-    const originalMessage = String(error && (error.message || error.errMsg) || error)
-    console.error('[admin.table.merge diagnostic 2026-10-08-a] transaction failed', {
-      lastWriteStage: mergeWriteStage,
-      error: originalMessage
-    })
-    // Surface the stage in the API response as well, so diagnosis does not
-    // depend on CloudBase log access being enabled or available. Throw a new
-    // Error because SDK transaction errors may expose a non-writable message.
-    throw new Error(`[MERGE_DIAG:${mergeWriteStage}] ${originalMessage}`)
-  }
+  )
   if (!mergeResult || !mergeResult.success) {
     return mergeResult || { success: false, code: 'MERGE_FAILED', message: '拼桌失败，请刷新后重试' }
   }
