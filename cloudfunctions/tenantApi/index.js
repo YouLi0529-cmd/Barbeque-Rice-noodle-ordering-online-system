@@ -4885,7 +4885,10 @@ async function adminMergeTables(payload) {
   const mergedPeopleCount = Math.max(0, ...activeOrders.map(order => Math.floor(Number(order.peopleCount || 0))))
   const updateData = {
     tableGroupId,
-    tableGroupPrimary: primaryRef,
+    // Replace the whole value. Some legacy orders contain
+    // tableGroupPrimary: null, and a nested merge would try to write
+    // tableGroupPrimary.areaKey under null (which MongoDB rejects).
+    tableGroupPrimary: _.set(primaryRef),
     tableGroupTables: mergedTables,
     tableGroupUpdatedAt: db.serverDate(),
     updateTime: db.serverDate()
@@ -5008,7 +5011,12 @@ async function adminMergeTables(payload) {
       }
       const primarySessionRef = transaction.collection('tableOrderSession').doc(primarySessionId)
       if (existingPrimary) {
-        await primarySessionRef.update({ data: primaryData })
+        await primarySessionRef.update({
+          data: {
+            ...primaryData,
+            tableGroupPrimary: _.set(primaryRef)
+          }
+        })
       } else {
         await primarySessionRef.set({
           data: {
@@ -5053,7 +5061,12 @@ async function adminMergeTables(payload) {
         }
         const childSessionRef = transaction.collection('tableOrderSession').doc(canonicalSessionId)
         if (childSession) {
-          await childSessionRef.update({ data: childData })
+          await childSessionRef.update({
+            data: {
+              ...childData,
+              tableGroupPrimary: _.set(primaryRef)
+            }
+          })
         } else {
           await childSessionRef.set({
             data: {
