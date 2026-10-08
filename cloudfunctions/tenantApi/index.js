@@ -5093,8 +5093,16 @@ async function adminMergeTables(payload) {
         const legacySession = sessionsById[sessionId]
         if (!legacySession) continue
         mergeWriteStage = 'close-legacy-session'
-        await transaction.collection('tableOrderSession').doc(sessionId).update({
-          data: buildClosedTableSessionData(legacySession, new Date())
+        // This legacy alias may also contain tableGroupPrimary: null. A
+        // document update can be expanded into nested field writes by the SDK;
+        // replace the whole document so no write targets areaKey under null.
+        const replacementData = {
+          ...legacySession,
+          ...buildClosedTableSessionData(legacySession, new Date())
+        }
+        delete replacementData._id
+        await transaction.collection('tableOrderSession').doc(sessionId).set({
+          data: replacementData
         })
       }
 
