@@ -1315,14 +1315,14 @@ function createPrintService({ db, _, defaultTenantId }) {
       printerId: printer._id,
       stationId: input.stationId || ''
     })
-    const ticket = input.ticket || renderTicket(template, {
+    const ticket = normalizeTicketTableLabel(input.ticket || renderTicket(template, {
       ...(input.ticketData || {}),
       paperWidth: printer.paperWidth,
       feedLines: printer.feedLines,
       cutPaper: printer.capabilities && printer.capabilities.cutPaper,
       openCashDrawer: printer.openCashDrawer,
       capabilities: printer.capabilities || {}
-    })
+    }))
     const timestamp = now()
     const job = {
       _id: jobId,
@@ -1337,7 +1337,7 @@ function createPrintService({ db, _, defaultTenantId }) {
       stationName: input.stationName || '',
       orderId: input.orderId || '',
       orderNumber: input.orderNumber || input.orderId || '',
-      tableNumber: input.tableNumber || '',
+      tableNumber: formatTicketTableLabel(input.tableNumber || ''),
       deviceName: '',
       payload: input.payload || {},
       ticket,
@@ -1397,16 +1397,43 @@ function createPrintService({ db, _, defaultTenantId }) {
 
   function formatTicketTableNumber(value) {
     const tableNumber = text(value).trim()
-    const skyMatch = tableNumber.match(/^(?:T|SKY|TIAN|TL|\u5929\u697c|\u5929)[-\s_]?0*(\d+)$/i)
-    if (skyMatch) return `T${String(Number(skyMatch[1])).padStart(2, '0')}`
-    const vipMatch = tableNumber.match(/^(?:VIP|V)[-\s_]?0*(\d+)$/i)
-    if (vipMatch) return `V${String(Number(vipMatch[1])).padStart(2, '0')}`
+    const skyMatch = tableNumber.match(/^(?:T|SKY|TIAN|TL|\u5929\u697c|\u5929)[-\s_]?0*(\d+)(?:\u53f7(?:\u684c)?)?$/i)
+    if (skyMatch) return `\u5929${Number(skyMatch[1])}`
+    const vipMatch = tableNumber.match(/^(?:VIP|V)[-\s_]?0*(\d+)(?:\u53f7(?:\u684c)?)?$/i)
+    if (vipMatch) return `V${Number(vipMatch[1])}`
     const numbered = tableNumber.match(/^(.*?)(\d+)(\D*)$/)
     if (!numbered) return tableNumber
     const numericValue = Number(numbered[2])
     return numericValue < 10 && numbered[2].length > 1
       ? `${numbered[1]}${numericValue}${numbered[3]}`
       : tableNumber
+  }
+
+  function formatTicketTableLabel(value) {
+    return text(value).split(/([、,+])/).map(part => {
+      if (/^[、,+]$/.test(part)) return part
+      const match = part.match(/^(\s*)(.*?)(\s*)$/)
+      return `${match[1]}${formatTicketTableNumber(match[2])}${match[3]}`
+    }).join('')
+  }
+
+  function formatTicketTableText(value) {
+    const source = text(value)
+    const labelPrefix = source.match(/^(\s*\u684c\u53f7\s*[:\uff1a]\s*)(.*)$/)
+    return labelPrefix
+      ? `${labelPrefix[1]}${formatTicketTableLabel(labelPrefix[2])}`
+      : formatTicketTableLabel(source)
+  }
+
+  function normalizeTicketTableLabel(ticket) {
+    if (!ticket || typeof ticket !== 'object') return ticket
+    return {
+      ...ticket,
+      lines: (Array.isArray(ticket.lines) ? ticket.lines : []).map(line => {
+        if (!line || line.key !== 'tableNumber') return line
+        return { ...line, text: formatTicketTableText(line.text) }
+      })
+    }
   }
 
   function kitchenPeopleCountText(order = {}) {
@@ -2218,7 +2245,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     const ticketData = {
       title: template.name,
       shopName: '',
-      tableNumber: 'T01',
+      tableNumber: formatTicketTableNumber('T01'),
       orderNumber: 'TEST-0001',
       orderTime: now().toLocaleString('zh-CN', { hour12: false }),
       printTime: '\u6253\u5370\u65f6\u95f4\uff1a\u7b49\u5f85\u53d1\u9001',
@@ -2848,6 +2875,7 @@ function createPrintService({ db, _, defaultTenantId }) {
     queueCashierReceipt,
     formatKitchenStyleDishes,
     formatTicketTableNumber,
+    formatTicketTableLabel,
     renderDishLines,
     JOB_STATUS
   }

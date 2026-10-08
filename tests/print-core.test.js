@@ -68,13 +68,17 @@ async function verifyKitchenRouting() {
   const db = createMemoryDb()
   const service = createPrintService({ db, _: {}, defaultTenantId: 'store-test' })
   assert.strictEqual(service.formatTicketTableNumber('05'), '5')
-  assert.strictEqual(service.formatTicketTableNumber('VIP01'), 'V01')
-  assert.strictEqual(service.formatTicketTableNumber('V01'), 'V01')
-  assert.strictEqual(service.formatTicketTableNumber('天楼02'), 'T02')
-  assert.strictEqual(service.formatTicketTableNumber('T02'), 'T02')
+  assert.strictEqual(service.formatTicketTableNumber('01'), '1')
+  assert.strictEqual(service.formatTicketTableNumber('VIP01'), 'V1')
+  assert.strictEqual(service.formatTicketTableNumber('VIP12'), 'V12')
+  assert.strictEqual(service.formatTicketTableNumber('V01'), 'V1')
+  assert.strictEqual(service.formatTicketTableNumber('天楼02'), '天2')
+  assert.strictEqual(service.formatTicketTableNumber('T02'), '天2')
+  assert.strictEqual(service.formatTicketTableNumber('T12'), '天12')
   assert.strictEqual(service.formatTicketTableNumber('普通02号桌'), '普通2号桌')
-  assert.strictEqual(service.formatTicketTableNumber('天楼10'), 'T10')
+  assert.strictEqual(service.formatTicketTableNumber('天楼10'), '天10')
   assert.strictEqual(service.formatTicketTableNumber('A10'), 'A10')
+  assert.strictEqual(service.formatTicketTableLabel('T01、VIP02、03'), '天1、V2、3')
   const kitchenLines = service.renderDishLines({ size: 'large' }, {
     paperWidth: 80,
     dishes: [{ dishName: '长菜名测试超过一行宽度的菜品', count: 2 }]
@@ -204,6 +208,14 @@ async function verifyKitchenRouting() {
   })
   assert.strictEqual(skyPrint.jobs[0].tableNumber, '\u59291')
   assert.ok(skyPrint.jobs[0].ticket.lines.some(line => line.key === 'tableNumber' && line.text.includes('\u59291')))
+  const combinedPrint = await service.queueCashierReceipt({
+    id: 'store-test', ticketType: 'customer_order',
+    orders: [{ ...firstOrder, _id: 'combined-order', tableNumber: 'T01' }],
+    tableLabel: 'T01、VIP02、03',
+    eventKey: 'combined-table-label'
+  })
+  assert.strictEqual(combinedPrint.jobs[0].tableNumber, '\u59291、V2、3')
+  assert.ok(combinedPrint.jobs[0].ticket.lines.some(line => line.key === 'tableNumber' && line.text.includes('\u59291、V2、3')))
   const repeatPrint = await service.queueCashierReceipt({ id: 'store-test', ticketType: 'customer_order', orders: [firstOrder, addOrder], eventKey: 'auto-submit:order-guest-2' })
   assert.strictEqual(repeatPrint.jobs[0]._id, customerJob._id)
 
