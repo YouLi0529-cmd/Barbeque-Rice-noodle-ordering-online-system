@@ -4898,7 +4898,18 @@ async function adminMergeTables(payload) {
   // A merge has one writable session. Child table sessions are retained only as
   // redirect markers, so a child QR code joins the primary bill instead of
   // silently creating a second add-on tree.
-  const mergeResult = await runTransactionWithBusyRetry(
+  // CloudBase may report transaction write failures only when committing the
+  // transaction. Keep the last operation label outside the callback so logs
+  // identify which write was in flight without logging customer/order data.
+  let mergeWriteStage = 'transaction-start'
+  console.info('[admin.table.merge diagnostic 2026-10-08-a] started', {
+    tableGroupId,
+    orderCount: activeOrders.length,
+    sessionCount: sessionIds.length
+  })
+  let mergeResult
+  try {
+    mergeResult = await runTransactionWithBusyRetry(
     callback => db.runTransaction(callback),
     async transaction => {
       const orderSnapshots = await runTransactionSequentially(activeOrders, order => (
@@ -4952,6 +4963,7 @@ async function adminMergeTables(payload) {
       const staleSubmissionCandidates = lateSubmissionCandidates.filter((candidate, index) => !lateSubmissionMatches[index])
       // These markers belong to an older visit or another root. Once the cart
       // is confirmed empty, clearing them cannot discard a pending customer action.
+      mergeWriteStage = 'clear-stale-submission-markers'
       await runTransactionSequentially(staleSubmissionCandidates, candidate => (
         transaction.collection('tableOrderSession').doc(candidate.sessionId).update({
           data: {
@@ -5007,6 +5019,7 @@ async function adminMergeTables(payload) {
         updateTime: db.serverDate()
       }
       const primarySessionRef = transaction.collection('tableOrderSession').doc(primarySessionId)
+      mergeWriteStage = existingPrimary ? 'replace-primary-session' : 'create-primary-session'
       if (existingPrimary) {
         const replacementData = { ...existingPrimary, ...primaryData }
         delete replacementData._id
@@ -5054,6 +5067,7 @@ async function adminMergeTables(payload) {
           updateTime: db.serverDate()
         }
         const childSessionRef = transaction.collection('tableOrderSession').doc(canonicalSessionId)
+        mergeWriteStage = childSession ? 'replace-child-session' : 'create-child-session'
         if (childSession) {
           const replacementData = { ...childSession, ...childData }
           delete replacementData._id
@@ -5078,6 +5092,7 @@ async function adminMergeTables(payload) {
         if (sessionId === primarySessionId || sessionId === getSharedCartSessionId(formatAdminTableNumber(sessionRefById[sessionId]))) continue
         const legacySession = sessionsById[sessionId]
         if (!legacySession) continue
+        mergeWriteStage = 'close-legacy-session'
         await transaction.collection('tableOrderSession').doc(sessionId).update({
           data: buildClosedTableSessionData(legacySession, new Date())
         })
@@ -5093,8 +5108,10 @@ async function adminMergeTables(payload) {
           participantOpenids: allMemberOpenids
         }
         delete replacementData._id
+        mergeWriteStage = 'replace-order-document'
         return transaction.collection('order').doc(order._id).set({ data: replacementData })
       })
+      mergeWriteStage = 'write-active-table-group'
       await transaction.collection('tableGroup').doc(tableGroupId).set({
         data: {
           tableGroupId,
@@ -5107,8 +5124,9 @@ async function adminMergeTables(payload) {
           updateTime: db.serverDate()
         }
       })
-      await runTransactionSequentially(inactiveGroupIds, groupId => (
-        transaction.collection('tableGroup').doc(groupId).set({
+      await runTransactionSequentially(inactiveGroupIds, groupId => {
+        mergeWriteStage = 'deactivate-previous-table-group'
+        return transaction.collection('tableGroup').doc(groupId).set({
           data: {
             tableGroupId: groupId,
             status: 'inactive',
@@ -5116,10 +5134,17 @@ async function adminMergeTables(payload) {
             updateTime: db.serverDate()
           }
         })
-      ))
+      })
       return { success: true, updatedOrders: currentOrders.length }
     }
-  )
+    )
+  } catch (error) {
+    console.error('[admin.table.merge diagnostic 2026-10-08-a] transaction failed', {
+      lastWriteStage: mergeWriteStage,
+      error: String(error && (error.message || error.errMsg) || error)
+    })
+    throw error
+  }
   if (!mergeResult || !mergeResult.success) {
     return mergeResult || { success: false, code: 'MERGE_FAILED', message: '拼桌失败，请刷新后重试' }
   }
