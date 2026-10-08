@@ -4964,15 +4964,19 @@ async function adminMergeTables(payload) {
       // These markers belong to an older visit or another root. Once the cart
       // is confirmed empty, clearing them cannot discard a pending customer action.
       mergeWriteStage = 'clear-stale-submission-markers'
-      await runTransactionSequentially(staleSubmissionCandidates, candidate => (
-        transaction.collection('tableOrderSession').doc(candidate.sessionId).update({
-          data: {
-            lastSubmittedCartVersion: 0,
-            lastSubmittedOrderId: '',
-            updateTime: db.serverDate()
-          }
+      await runTransactionSequentially(staleSubmissionCandidates, candidate => {
+        const existingSession = sessionsById[candidate.sessionId] || {}
+        const replacementData = {
+          ...existingSession,
+          lastSubmittedCartVersion: 0,
+          lastSubmittedOrderId: '',
+          updateTime: db.serverDate()
+        }
+        delete replacementData._id
+        return transaction.collection('tableOrderSession').doc(candidate.sessionId).set({
+          data: replacementData
         })
-      ))
+      })
 
       const existingPrimary = sessionsById[primarySessionId] || null
       const allMemberOpenids = normalizeOrderParticipantOpenids(
