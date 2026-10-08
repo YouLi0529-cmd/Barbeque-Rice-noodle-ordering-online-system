@@ -5139,10 +5139,16 @@ async function adminMergeTables(payload) {
     }
     )
   } catch (error) {
+    const originalMessage = String(error && (error.message || error.errMsg) || error)
     console.error('[admin.table.merge diagnostic 2026-10-08-a] transaction failed', {
       lastWriteStage: mergeWriteStage,
-      error: String(error && (error.message || error.errMsg) || error)
+      error: originalMessage
     })
+    // Surface the stage in the API response as well, so diagnosis does not
+    // depend on CloudBase log access being enabled or available.
+    if (error && typeof error === 'object') {
+      error.message = `[MERGE_DIAG:${mergeWriteStage}] ${originalMessage}`
+    }
     throw error
   }
   if (!mergeResult || !mergeResult.success) {
