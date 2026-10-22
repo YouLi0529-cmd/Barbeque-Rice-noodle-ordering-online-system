@@ -2,6 +2,9 @@ const TENANT_ID = 'zhangnan'
 const AUTH_TOKEN_KEY = 'tenantAuthToken'
 const AUTH_EXPIRES_AT_KEY = 'tenantAuthExpiresAt'
 const ADMIN_AUTH_TOKEN_KEY = 'adminAuthToken'
+// Development builds intentionally use the production zmbbq tenant API.
+// Requests from the developer tool can therefore read or change live store data.
+const ENABLE_TENANT_API_IN_DEVELOP = true
 
 // Fill this with the HTTP trigger URL of cloudfunctions/tenantApi after deployment.
 // Example: https://xxxx.service.tcloudbase.com/tenantApi
@@ -11,11 +14,15 @@ function getBaseUrl() {
   const override = wx.getStorageSync('tenantApiBaseUrl')
   if (override) return override
 
-  // Local development must opt in to a test endpoint. This prevents requests
-  // from the developer build from silently reaching the production backend.
+  // Allow this workspace's developer build to use the configured zmbbq API.
   try {
     const accountInfo = wx.getAccountInfoSync()
-    if (accountInfo && accountInfo.miniProgram && accountInfo.miniProgram.envVersion === 'develop') return ''
+    if (
+      accountInfo &&
+      accountInfo.miniProgram &&
+      accountInfo.miniProgram.envVersion === 'develop' &&
+      !ENABLE_TENANT_API_IN_DEVELOP
+    ) return ''
   } catch (err) {
     // Fail closed when the runtime cannot identify the current build.
     return ''

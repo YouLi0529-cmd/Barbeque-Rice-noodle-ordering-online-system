@@ -23,11 +23,18 @@
     "miniprogram": {
       "list": [
         {
+          "name": "packages/order/pages/index/index",
+          "pathName": "packages/order/pages/index/index",
+          "query": "scene=T09",
+          "scene": null,
+          "launchMode": "default"
+        },
+        {
           "name": "packages/admin/pages/admin/admin",
           "pathName": "packages/admin/pages/admin/admin",
           "query": "",
-          "scene": null,
-          "launchMode": "default"
+          "launchMode": "default",
+          "scene": null
         },
         {
           "name": "pages/covertest/covertest",

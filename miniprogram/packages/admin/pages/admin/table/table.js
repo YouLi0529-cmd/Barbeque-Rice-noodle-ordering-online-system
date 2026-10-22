@@ -324,16 +324,19 @@ Page({
   },
 
   startTableBoardSignalWatch() {
-    if (this.tableBoardSignalWatcher) return
+    if (this.tableBoardSignalWatcher || this.tableBoardSignalWatchToken) return
     const realtimeDb = cloudRealtime.getDatabase()
     if (!realtimeDb) return
+    const token = {}
+    this.tableBoardSignalWatchToken = token
 
     try {
-      this.tableBoardSignalWatcher = realtimeDb
+      const watcher = realtimeDb
         .collection(cloudRealtime.TABLE_BOARD_SIGNAL_COLLECTION)
         .doc(cloudRealtime.TABLE_BOARD_SIGNAL_ID)
         .watch({
           onChange: () => {
+            if (this.tableBoardSignalWatchToken !== token) return
             if (!this.tableBoardSignalReady) {
               this.tableBoardSignalReady = true
             }
@@ -341,24 +344,37 @@ Page({
             this.refreshTableBoard(true)
           },
           onError: err => {
+            if (this.tableBoardSignalWatchToken !== token) return
             console.warn('table board realtime signal failed, using polling', err)
-            this.stopTableBoardSignalWatch()
+            // The SDK owns the failure transition. Closing from its error
+            // callback can move it to CLOSED before initWatchFail is handled.
+            this.stopTableBoardSignalWatch(false)
             this.startTableBoardPolling(TABLE_BOARD_POLLING_INTERVAL_MS)
           }
         })
+      if (this.tableBoardSignalWatchToken === token) this.tableBoardSignalWatcher = watcher
     } catch (err) {
+      if (this.tableBoardSignalWatchToken !== token) return
       console.warn('start table board realtime signal failed, using polling', err)
-      this.stopTableBoardSignalWatch()
+      this.stopTableBoardSignalWatch(false)
       this.startTableBoardPolling(TABLE_BOARD_POLLING_INTERVAL_MS)
     }
   },
 
-  stopTableBoardSignalWatch() {
-    if (this.tableBoardSignalWatcher && typeof this.tableBoardSignalWatcher.close === 'function') {
-      this.tableBoardSignalWatcher.close()
-    }
+  stopTableBoardSignalWatch(closeWatcher = true) {
+    const watcher = this.tableBoardSignalWatcher
+    this.tableBoardSignalWatchToken = null
     this.tableBoardSignalWatcher = null
     this.tableBoardSignalReady = false
+    if (!closeWatcher || !watcher || typeof watcher.close !== 'function') return
+    try {
+      const closing = watcher.close()
+      if (closing && typeof closing.catch === 'function') {
+        closing.catch(err => console.warn('close table board realtime signal failed', err))
+      }
+    } catch (err) {
+      console.warn('close table board realtime signal failed', err)
+    }
   },
 
   startTableBoardPolling(interval) {

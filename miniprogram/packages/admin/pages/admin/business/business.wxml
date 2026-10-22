@@ -1,10 +1,11 @@
 <view class="business-page" capture-bind:tap="onAdminTap">
   <view class="business-head">
-    <view class="business-title">{{ui.title}}</view>
-    <view class="business-refresh" bindtap="refreshStats">{{refreshing ? '...' : ui.refresh}}</view>
+    <view class="business-title">{{salesView === 'result' ? '销量查询' : ui.title}}</view>
+    <view wx:if="{{salesView === 'result'}}" class="business-refresh" bindtap="openSalesQuery">返回</view>
+    <view wx:else class="business-refresh" bindtap="refreshStats">{{refreshing ? '...' : ui.refresh}}</view>
   </view>
 
-  <scroll-view class="business-scroll" scroll-y enable-flex>
+  <scroll-view wx:if="{{salesView !== 'result'}}" class="business-scroll" scroll-y enable-flex>
     <view class="business-summary">
       <view class="summary-card revenue-card">
         <view class="summary-head">
@@ -59,6 +60,7 @@
     <view class="dish-section">
       <view class="dish-section-head">
         <view class="dish-section-title">{{ui.dishSales}}</view>
+        <view class="sales-query-entry" bindtap="openSalesQuery">销量查询</view>
         <view class="dish-filter-controls">
           <view class="dish-sort-control">
             <view
@@ -120,6 +122,70 @@
       <view class="stats-error" wx:if="{{loadError}}">{{loadError}}</view>
     </view>
   </scroll-view>
+
+  <scroll-view wx:if="{{salesView === 'result'}}" class="business-scroll" scroll-y>
+    <view class="sales-result">
+      <view class="sales-result-title">{{salesResultCategory}}</view>
+      <view class="sales-result-subtitle">{{salesResultDates}}（北京时间，含首尾两天）</view>
+      <view class="sales-result-note">仅统计有效结算记录。{{salesIsGroupBuy ? '同一订单的套餐有菜品保留即计原套数，全部移除计0套。' : '金额为下单时菜单价合计，含赠送菜、套餐内菜品，不等于营业实收。'}}</view>
+      <view class="sales-result-row sales-result-header">
+        <view class="sales-result-name">{{salesIsGroupBuy ? '团购套餐' : '菜品'}}</view>
+        <view class="sales-result-count">{{salesIsGroupBuy ? '售出套数' : '售出份数'}}</view>
+        <view wx:if="{{!salesIsGroupBuy}}" class="sales-result-amount">销售金额</view>
+      </view>
+      <view class="sales-result-row" wx:for="{{salesRows}}" wx:key="id">
+        <view class="sales-result-name">{{item.name}}</view>
+        <view class="sales-result-count">{{item.quantity}}</view>
+        <view wx:if="{{!salesIsGroupBuy}}" class="sales-result-amount">¥{{item.amountText}}</view>
+      </view>
+      <view wx:if="{{!salesRows.length}}" class="stats-empty">该品类在所选时间段没有有效销量</view>
+      <view class="sales-result-row sales-result-total">
+        <view class="sales-result-name">合计</view>
+        <view class="sales-result-count">{{salesTotalQuantity}}{{salesIsGroupBuy ? '套' : '份'}}</view>
+        <view wx:if="{{!salesIsGroupBuy}}" class="sales-result-amount">¥{{salesTotalAmount}}</view>
+      </view>
+      <view class="sales-result-back" bindtap="openSalesQuery">返回</view>
+    </view>
+  </scroll-view>
+
+  <view class="sales-modal-mask" wx:if="{{salesView === 'filter'}}">
+    <view class="sales-modal-backdrop" catchtap="cancelSalesQuery"></view>
+    <view class="sales-modal">
+      <view class="sales-modal-title">销量查询</view>
+      <scroll-view class="sales-modal-body" scroll-y style="height: {{salesSelection ? '340rpx' : '155rpx'}};">
+        <view class="sales-field-label">查询时间段 <text class="sales-required">*</text></view>
+        <view class="sales-date-range">
+          <view class="sales-picker sales-date-trigger" bindtap="openSalesDate" data-field="start">{{salesStartDate || '开始日期'}} ▾</view>
+          <text>至</text>
+          <view class="sales-picker sales-date-trigger" bindtap="openSalesDate" data-field="end">{{salesEndDate || '结束日期'}} ▾</view>
+        </view>
+        <view class="sales-calendar" wx:if="{{salesSelection === 'start' || salesSelection === 'end'}}">
+          <view class="sales-calendar-head">
+            <view class="sales-month-button" bindtap="changeSalesMonth" data-step="-1">‹ 上月</view>
+            <text>{{salesCalendarMonth}} · {{salesSelection === 'start' ? '开始日期' : '结束日期'}}</text>
+            <view class="sales-month-button" bindtap="changeSalesMonth" data-step="1">下月 ›</view>
+          </view>
+          <view class="sales-calendar-grid">
+            <view class="sales-calendar-cell sales-weekday" wx:for="{{salesWeekdays}}" wx:key="*this">{{item}}</view>
+            <view wx:for="{{salesCalendarDays}}" wx:key="key" class="sales-calendar-cell {{item.disabled ? 'sales-day-disabled' : ''}} {{item.date && (item.date === salesStartDate || item.date === salesEndDate) ? 'sales-day-selected' : ''}}" bindtap="selectSalesDate" data-date="{{item.date}}">{{item.label}}</view>
+          </view>
+        </view>
+        <view class="sales-field-label">查询品类 <text class="sales-required">*</text></view>
+        <view class="sales-picker" bindtap="toggleSalesCategories">{{salesCategoryLabel || '请选择查询品类'}} ▾</view>
+        <scroll-view wx:if="{{salesSelection === 'category'}}" class="sales-category-list" scroll-y>
+          <view class="sales-category-option {{item.key === salesCategoryKey ? 'sales-day-selected' : ''}}" wx:for="{{salesCategories}}" wx:key="key" bindtap="selectSalesCategory" data-key="{{item.key}}">{{item.label}}</view>
+          <view class="sales-progress" wx:if="{{salesOptionsLoading}}">更多品类正在加载…</view>
+        </scroll-view>
+        <view class="sales-progress" wx:if="{{salesOptionsLoading}}">正在补齐历史品类，已检查 {{salesOptionsScanned}} 条结算订单；可先选择日期及已加载品类…</view>
+        <view class="sales-progress" wx:if="{{salesQuerying}}">{{salesProgress}}</view>
+        <view class="sales-error" wx:if="{{salesOptionsError || salesError}}">{{salesOptionsError || salesError}}</view>
+      </scroll-view>
+      <view class="sales-modal-actions">
+        <button class="sales-action sales-action-cancel" bindtap="cancelSalesQuery">取消</button>
+        <button class="sales-action sales-action-query" disabled="{{salesOptionsLoading || salesOptionsError || salesQuerying}}" bindtap="submitSalesQuery">{{salesQuerying ? '查询中…' : '查询'}}</button>
+      </view>
+    </view>
+  </view>
 
   <admin-info-center id="admin-info-center"></admin-info-center>
 </view>

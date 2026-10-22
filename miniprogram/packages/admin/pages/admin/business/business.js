@@ -1,5 +1,6 @@
 const apiClient = require('../../../../../utils/apiClient')
 const adminSound = require('../../../utils/adminSound')
+const salesQuery = require('../../../../../utils/salesQuery')
 
 const UI = {
   title: '\u8425\u4e1a\u7edf\u8ba1',
@@ -129,7 +130,31 @@ Page({
     arrivalPeopleCount: 0,
     allDishes: [],
     dishList: [],
-    isTruncated: false
+    isTruncated: false,
+    salesView: '',
+    salesSelection: '',
+    salesCalendarMonth: '',
+    salesCalendarDays: [],
+    salesWeekdays: ['日', '一', '二', '三', '四', '五', '六'],
+    salesStartDate: '',
+    salesEndDate: '',
+    salesTodayDate: salesQuery.todayBeijing(),
+    salesCategories: [],
+    salesCategoryKey: '',
+    salesCategoryLabel: '',
+    salesCategoryIndex: -1,
+    salesOptionsLoading: false,
+    salesOptionsScanned: 0,
+    salesOptionsError: '',
+    salesQuerying: false,
+    salesProgress: '',
+    salesError: '',
+    salesRows: [],
+    salesTotalQuantity: 0,
+    salesTotalAmount: '0.00',
+    salesIsGroupBuy: false,
+    salesResultCategory: '',
+    salesResultDates: ''
   },
 
   onLoad() {
@@ -138,6 +163,141 @@ Page({
 
   onShow() {
     if (!this.data.loading && !this.data.refreshing) this.loadStats(true)
+  },
+
+  onUnload() {
+    this.salesRequestToken = null
+    this.salesOptionsToken = null
+  },
+
+  async openSalesQuery() {
+    this.salesRequestToken = null
+    const token = {}
+    this.salesOptionsToken = token
+    let categories = salesQuery.mergeCategories([], [])
+    this.setData({ salesView: 'filter', salesSelection: '', salesCategories: categories, salesOptionsLoading: true,
+      salesOptionsError: '', salesOptionsScanned: 0, salesError: '', salesQuerying: false, salesProgress: '', salesCategoryIndex: -1, salesTodayDate: salesQuery.todayBeijing() })
+    try {
+      let cursor = ''
+      do {
+        const res = await apiClient.call('admin.business.salesOptions', { cursor })
+        if (this.salesOptionsToken !== token) return
+        const data = res.data || {}
+        categories = salesQuery.mergeCategories(categories, data.categories || [])
+        const selectedIndex = categories.findIndex(item => item.key === this.data.salesCategoryKey)
+        this.setData({ salesCategories: categories, salesCategoryIndex: selectedIndex,
+          salesCategoryLabel: selectedIndex >= 0 ? categories[selectedIndex].label : '',
+          salesOptionsScanned: Number(data.scannedOrders || 0) })
+        if (data.done === true) break
+        if (!data.cursor || data.cursor === cursor) throw new Error('分类查询未完成，请重新打开查询')
+        cursor = data.cursor
+      } while (true)
+      const index = categories.findIndex(item => item.key === this.data.salesCategoryKey)
+      this.setData({ salesCategoryKey: index >= 0 ? categories[index].key : '',
+        salesCategoryLabel: index >= 0 ? categories[index].label : '', salesCategoryIndex: index })
+    } catch (err) {
+      if (this.salesOptionsToken !== token) return
+      this.setData({ salesOptionsError: err.message || '品类加载失败，请重新打开查询' })
+    } finally {
+      if (this.salesOptionsToken === token) this.setData({ salesOptionsLoading: false })
+    }
+  },
+
+  cancelSalesQuery() {
+    this.salesOptionsToken = null
+    this.salesRequestToken = null
+    this.setData({ salesView: '', salesQuerying: false, salesOptionsLoading: false, salesRows: [], salesError: '' })
+  },
+
+  onSalesStartDate(e) { this.setData({ salesStartDate: e.detail.value, salesError: '' }) },
+  onSalesEndDate(e) { this.setData({ salesEndDate: e.detail.value, salesError: '' }) },
+  openSalesDate(e) {
+    if (this.data.salesQuerying) return
+    const field = e.currentTarget.dataset.field
+    if (field !== 'start' && field !== 'end') return
+    if (this.data.salesSelection === field) { this.setData({ salesSelection: '' }); return }
+    const value = field === 'start' ? this.data.salesStartDate : this.data.salesEndDate
+    this.setData({ salesSelection: field })
+    this.renderSalesCalendar((value || this.data.salesTodayDate).slice(0, 7))
+  },
+  renderSalesCalendar(month) {
+    const [year, number] = month.split('-').map(Number)
+    const first = new Date(Date.UTC(year, number - 1, 1)).getUTCDay()
+    const count = new Date(Date.UTC(year, number, 0)).getUTCDate()
+    const days = Array.from({ length: first }, (_, index) => ({ key: `blank-${index}`, date: '', label: '' }))
+    for (let day = 1; day <= count; day++) {
+      const date = `${month}-${String(day).padStart(2, '0')}`
+      days.push({ key: date, date, label: day, disabled: date > this.data.salesTodayDate })
+    }
+    this.setData({ salesCalendarMonth: month, salesCalendarDays: days })
+  },
+  changeSalesMonth(e) {
+    const step = Number(e.currentTarget.dataset.step)
+    if (step !== -1 && step !== 1) return
+    const [year, month] = this.data.salesCalendarMonth.split('-').map(Number)
+    const next = new Date(Date.UTC(year, month - 1 + step, 1)).toISOString().slice(0, 7)
+    if (next < '1900-01' || next > this.data.salesTodayDate.slice(0, 7)) return
+    this.renderSalesCalendar(next)
+  },
+  selectSalesDate(e) {
+    if (this.data.salesQuerying) return
+    const date = e.currentTarget.dataset.date
+    if (!date || date > this.data.salesTodayDate) return
+    const field = this.data.salesSelection === 'start' ? 'salesStartDate' : this.data.salesSelection === 'end' ? 'salesEndDate' : ''
+    if (field) this.setData({ [field]: date, salesSelection: '', salesError: '' })
+  },
+  toggleSalesCategories() {
+    if (this.data.salesQuerying || this.data.salesOptionsError) return
+    this.setData({ salesSelection: this.data.salesSelection === 'category' ? '' : 'category' })
+  },
+  selectSalesCategory(e) {
+    if (this.data.salesQuerying) return
+    const index = this.data.salesCategories.findIndex(item => item.key === e.currentTarget.dataset.key)
+    if (index < 0) return
+    this.onSalesCategory({ detail: { value: index } })
+    this.setData({ salesSelection: '' })
+  },
+  onSalesCategory(e) {
+    const index = Number(e.detail.value)
+    const category = this.data.salesCategories[index]
+    if (!category) return
+    this.setData({ salesCategoryKey: category.key, salesCategoryLabel: category.label, salesCategoryIndex: index, salesError: '' })
+  },
+
+  async submitSalesQuery() {
+    if (this.data.salesQuerying) return
+    const message = salesQuery.validateSalesFilters(this.data.salesStartDate, this.data.salesEndDate, this.data.salesCategoryKey)
+    if (message) { wx.showToast({ title: message, icon: 'none' }); return }
+    if (this.data.salesOptionsLoading || this.data.salesOptionsError) return
+    const token = {}
+    this.salesRequestToken = token
+    const filters = { startDate: this.data.salesStartDate, endDate: this.data.salesEndDate, categoryKey: this.data.salesCategoryKey }
+    const label = this.data.salesCategoryLabel
+    const rows = new Map()
+    this.setData({ salesQuerying: true, salesError: '', salesRows: [], salesProgress: '正在查询，请稍候…' })
+    try {
+      let cursor = ''
+      do {
+        const res = await apiClient.call('admin.business.salesQuery', { ...filters, cursor })
+        if (this.salesRequestToken !== token) return
+        const data = res.data || {}
+        salesQuery.mergeSalesRows(rows, data.rows || [])
+        this.setData({ salesProgress: data.phase === 'verify'
+          ? '正在核对结算记录，请稍候…' : `正在查询，已检查 ${Number(data.scannedOrders || 0)} 条订单…` })
+        if (data.done === true) break
+        if (!data.cursor || data.cursor === cursor) throw new Error('查询尚未完成，请重新查询')
+        cursor = data.cursor
+      } while (true)
+      const result = salesQuery.buildSalesResult(rows)
+      this.setData({ salesView: 'result', salesRows: result.rows, salesTotalQuantity: result.quantity,
+        salesTotalAmount: result.amountText, salesIsGroupBuy: filters.categoryKey === salesQuery.GROUP_BUY_KEY,
+        salesResultCategory: label, salesResultDates: `${filters.startDate} 至 ${filters.endDate}` })
+    } catch (err) {
+      if (this.salesRequestToken !== token) return
+      this.setData({ salesError: err.message || '销量查询失败，请重试', salesRows: [] })
+    } finally {
+      if (this.salesRequestToken === token) this.setData({ salesQuerying: false, salesProgress: '' })
+    }
   },
 
   selectRevenueRange(e) {

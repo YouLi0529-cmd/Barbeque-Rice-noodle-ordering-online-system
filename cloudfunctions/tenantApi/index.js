@@ -4,6 +4,7 @@ const fs = require('fs')
 const https = require('https')
 const path = require('path')
 const { createPrintService } = require('./printService')
+const { createSalesQueryService } = require('./salesQueryService')
 const customerReceiptState = require('./customerReceiptState')
 const { getTableSettlementSummary } = require('./tableSettlementSummary')
 const { runTransactionSequentially, runTransactionWithBusyRetry } = require('./tableCheckoutTransaction')
@@ -81,6 +82,8 @@ const printService = createPrintService({
   _,
   defaultTenantId: DEFAULT_TENANT_ID
 })
+
+const salesQueryService = createSalesQueryService({ db, _, getTenantId })
 
 let ensureSessionCollectionPromise = null
 const AUTH_SESSION_CACHE_TTL_MS = 60 * 1000
@@ -5250,8 +5253,9 @@ async function adminTransferTable(payload) {
     }
   }
 
-  const directSourceOrders = (await getSingleAdminTableOrders(sourceRef.areaKey, sourceRef.tableNumber))
-    .filter(order => !isAdminPaidOrder(order))
+  // Find live orders before applying the query limit. Reading the oldest
+  // historical orders first can hide the current visit on a busy table.
+  const directSourceOrders = await getCurrentAdminTableOrders(sourceRef.areaKey, sourceRef.tableNumber)
   const sourceOrders = await expandActiveTableOrderTree(directSourceOrders)
   if (sourceOrders.length === 0) {
     return {
@@ -5261,8 +5265,7 @@ async function adminTransferTable(payload) {
     }
   }
 
-  const targetOrders = (await getSingleAdminTableOrders(targetRef.areaKey, targetRef.tableNumber))
-    .filter(order => !isAdminPaidOrder(order))
+  const targetOrders = await getCurrentAdminTableOrders(targetRef.areaKey, targetRef.tableNumber)
   if (targetOrders.length > 0) {
     return {
       success: false,
@@ -11711,6 +11714,8 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.giftDishes') return completeAdminTableMutation(adminGiftDishes(payload))
   if (action === 'admin.table.updateDish') return completeAdminTableMutation(adminUpdateTableDish(payload))
   if (action === 'admin.business.stats') return adminGetBusinessStats(payload)
+  if (action === 'admin.business.salesOptions') return salesQueryService.options(payload)
+  if (action === 'admin.business.salesQuery') return salesQueryService.query(payload)
   if (action === 'admin.settlement.list') return adminListSettlementRecords(payload)
   if (action === 'admin.settlement.detail') return adminGetSettlementRecord(payload)
   if (action === 'admin.settlement.edit') return adminEditSettlement(payload)

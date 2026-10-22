@@ -151,16 +151,19 @@ Component({
     },
 
     startSignalWatch() {
-      if (this.signalWatcher || !this.data.enabled) return
+      if (this.signalWatcher || this.signalWatchToken || !this.data.enabled) return
       const realtimeDb = cloudRealtime.getDatabase()
       if (!realtimeDb) return
+      const token = {}
+      this.signalWatchToken = token
 
       try {
-        this.signalWatcher = realtimeDb
+        const watcher = realtimeDb
           .collection(cloudRealtime.TABLE_BOARD_SIGNAL_COLLECTION)
           .doc(cloudRealtime.TABLE_BOARD_SIGNAL_ID)
           .watch({
             onChange: () => {
+              if (this.signalWatchToken !== token) return
               if (!this.signalWatchReady) {
                 this.signalWatchReady = true
               }
@@ -168,24 +171,36 @@ Component({
               this.activate(true)
             },
             onError: err => {
+              if (this.signalWatchToken !== token) return
               console.warn('admin info realtime signal failed, using polling', err)
-              this.stopSignalWatch()
+              // Do not close reentrantly while the SDK handles watch failure.
+              this.stopSignalWatch(false)
               this.startPolling()
             }
           })
+        if (this.signalWatchToken === token) this.signalWatcher = watcher
       } catch (err) {
+        if (this.signalWatchToken !== token) return
         console.warn('start admin info realtime signal failed, using polling', err)
-        this.stopSignalWatch()
+        this.stopSignalWatch(false)
         this.startPolling()
       }
     },
 
-    stopSignalWatch() {
-      if (this.signalWatcher && typeof this.signalWatcher.close === 'function') {
-        this.signalWatcher.close()
-      }
+    stopSignalWatch(closeWatcher = true) {
+      const watcher = this.signalWatcher
+      this.signalWatchToken = null
       this.signalWatcher = null
       this.signalWatchReady = false
+      if (!closeWatcher || !watcher || typeof watcher.close !== 'function') return
+      try {
+        const closing = watcher.close()
+        if (closing && typeof closing.catch === 'function') {
+          closing.catch(err => console.warn('close admin info realtime signal failed', err))
+        }
+      } catch (err) {
+        console.warn('close admin info realtime signal failed', err)
+      }
     },
 
     togglePanel() {
