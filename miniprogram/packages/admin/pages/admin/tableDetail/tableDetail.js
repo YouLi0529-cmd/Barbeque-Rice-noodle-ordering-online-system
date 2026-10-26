@@ -470,6 +470,7 @@ Page({
     ui: UI,
     table: {},
     billGroups: [],
+    billSnapshot: null,
     itemCount: 0,
     totalPriceText: '0',
     selectedDishRowId: '',
@@ -658,6 +659,7 @@ Page({
       this.setData({
         table: nextTable,
         billGroups,
+        billSnapshot: data.billSnapshot || null,
         itemCount: Number(data.itemCount || billGroups.reduce((sum, group) => sum + Number(group.goodsCount || 0), 0)),
         totalPriceText,
         selectedDishRowId: '',
@@ -2168,6 +2170,12 @@ Page({
         areaKey: table.areaKey,
         tableNumber: table.tableNumber,
         combinedTableNumbers,
+        expectedBillSnapshot: this.data.billSnapshot,
+        ...(combinedTableNumbers.length ? {
+          expectedCombinedBillSnapshots: [this.data.billSnapshot].concat(
+            (this.data.combinedCheckoutTables || []).map(item => item.billSnapshot || null)
+          )
+        } : {}),
         paymentMethod: this.data.paymentMethod,
         discountType: this.data.discountType,
         discountValue: this.data.discountValue,
