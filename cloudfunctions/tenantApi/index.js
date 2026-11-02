@@ -9,6 +9,7 @@ const { createBusinessStatsReader } = require('./businessStatsReader')
 const customerReceiptState = require('./customerReceiptState')
 const { getTableSettlementSummary } = require('./tableSettlementSummary')
 const { runTransactionSequentially, runTransactionWithBusyRetry } = require('./tableCheckoutTransaction')
+const { nextBillVersion, getBillSnapshot, matchesBillSnapshot, getOrderBillFingerprint, getCheckoutBillDigest } = require('./tableBillVersion')
 const {
   getArrivalTableCountKey,
   shouldCountArrivalPeopleFromOrder,
@@ -1282,6 +1283,7 @@ async function createOrder(payload) {
         visitId: tableVisitId,
         activeOrderRootId: savedRootOrderId,
         addOnCount: parentOrderId ? addOnIndex : 0,
+        billVersion: nextBillVersion(session),
         cartVersion: expectedCartVersion + 1,
         lastSubmittedCartVersion: expectedCartVersion,
         lastSubmittedOrderId: orderRes._id,
@@ -1472,6 +1474,7 @@ async function adminCreateOfflineOrder(payload) {
       visitHistory: [],
       memberOpenids: isAddOnOrder && sessionActive && Array.isArray(session.memberOpenids) ? session.memberOpenids : [],
       activeOrderRootId: savedRootOrderId, addOnCount: addOnIndex,
+      billVersion: nextBillVersion(isAddOnOrder && sessionActive ? session : null),
       ...customerReceiptFields,
       sharedCartActiveUntil: isAddOnOrder && sessionActive ? session.sharedCartActiveUntil || null : null,
       createTime: isAddOnOrder && sessionActive && session.createTime ? session.createTime : db.serverDate(),
@@ -2680,6 +2683,17 @@ function getMergedTablesFromOrders(orders, fallbackTable) {
   return Object.keys(map)
     .map(key => map[key])
     .sort((a, b) => a.tableKey.localeCompare(b.tableKey))
+}
+
+function getActiveTableGroupIdSet(tableGroups = []) {
+  const ids = new Set()
+  ;(tableGroups || []).forEach(group => {
+    const groupId = String(getTableGroupId(group) || '').trim()
+    if (groupId && String(group && group.status || '').trim() === 'active') {
+      ids.add(groupId)
+    }
+  })
+  return ids
 }
 
 function getMergedTableText(tables) {
@@ -3895,9 +3909,12 @@ function summarizeAdminTable(table, orders, tableGroup, tableSession) {
   const userIds = []
   const tableRef = getAdminTableRef(table && table.areaKey, table && table.tableNumber)
   const groupSnapshot = getTableGroupSnapshot(tableGroup, tableRef)
+  // Embedded tableGroupTables can remain on old orders after a completed or
+  // interrupted merge. Only an active tableGroup may make one order occupy
+  // multiple table cards; otherwise the order belongs to its tableNumber.
   const mergedTables = groupSnapshot
     ? mergeAdminTableRefs(getMergedTablesFromOrders(activeOrders, table), groupSnapshot.tableGroupTables)
-    : getMergedTablesFromOrders(activeOrders, table)
+    : (tableRef ? [tableRef] : [])
   const tableGroupId = (activeOrders.find(order => order.tableGroupId) || {}).tableGroupId ||
     (groupSnapshot && groupSnapshot.tableGroupId) ||
     ''
@@ -3984,18 +4001,20 @@ function summarizeAdminTable(table, orders, tableGroup, tableSession) {
 // Keep every table-facing operation on the same definition of "belongs to this
 // table". In particular, an add-on order must appear in the detail view when
 // it has already contributed to the table board total.
-function getAdminOrderTableRefs(order) {
+function getAdminOrderTableRefs(order, activeTableGroupIds = new Set()) {
   const parsed = parseAdminTableNumber(order && order.tableNumber)
   const tableRefs = normalizeAdminTableRefs(order && order.tableGroupTables)
-  if (tableRefs.length > 1) return tableRefs
+  const tableGroupId = String(order && order.tableGroupId || '').trim()
+  if (tableRefs.length > 1 && tableGroupId && activeTableGroupIds.has(tableGroupId)) return tableRefs
   return parsed ? [getAdminTableRef(parsed.areaKey, parsed.tableNumber)] : []
 }
 
-function getAdminOrdersForTableRef(orders, tableRef) {
+function getAdminOrdersForTableRef(orders, tableRef, tableGroups = []) {
   if (!tableRef) return []
+  const activeTableGroupIds = getActiveTableGroupIdSet(tableGroups)
   return (orders || [])
     .filter(isAdminTableOrder)
-    .filter(order => getAdminOrderTableRefs(order).some(ref => isSameAdminTableRef(ref, tableRef)))
+    .filter(order => getAdminOrderTableRefs(order, activeTableGroupIds).some(ref => isSameAdminTableRef(ref, tableRef)))
     .sort((left, right) => getTimeValue(left.createTime) - getTimeValue(right.createTime))
 }
 
@@ -4006,8 +4025,9 @@ function buildAdminTableSections(orders, tableGroups = [], tableSessions = []) {
   const tableGroupsByTable = {}
   const tableSessionsByTable = {}
 
+  const activeTableGroupIds = getActiveTableGroupIdSet(tableGroups)
   ;(orders || []).filter(isAdminTableOrder).forEach(order => {
-    const targetRefs = getAdminOrderTableRefs(order)
+    const targetRefs = getAdminOrderTableRefs(order, activeTableGroupIds)
 
     targetRefs.forEach(ref => {
       if (!ref || !tableMap[ref.tableKey]) return
@@ -4402,8 +4422,118 @@ async function getAdminTableOrders(payload) {
   // The table board and the detail page must be based on the exact same order
   // set. The old detail-only query could omit later add-on orders while their
   // amounts were already included by buildAdminTableSections().
-  const visibleOrders = await listVisibleTableOrders()
-  return getAdminOrdersForTableRef(visibleOrders.data || [], tableRef)
+  const [visibleOrders, tableGroups] = await Promise.all([
+    listVisibleTableOrders(),
+    listActiveTableGroups()
+  ])
+  return getAdminOrdersForTableRef(visibleOrders.data || [], tableRef, tableGroups)
+}
+
+async function queryAdminBillDocuments(collectionName, condition) {
+  const documents = []
+  for (let skip = 0; skip < 10000; skip += 100) {
+    const result = await db.collection(collectionName).where(condition).orderBy('_id', 'asc').skip(skip).limit(100).get()
+    const page = result.data || []
+    documents.push(...page)
+    if (page.length < 100) return documents
+  }
+  throw new Error('账单记录过多，请联系管理员检查')
+}
+
+async function getAdminBillSession(sessionId) {
+  const result = await db.collection('tableOrderSession').where({ _id: sessionId }).limit(1).get()
+  return (result.data || [])[0] || null
+}
+
+async function assertNoUntrackedAdminBill(ref) {
+  const candidates = getAdminTableNumberCandidates(ref.areaKey, ref.tableNumber)
+  if (!candidates.length) return
+  const orders = await queryAdminBillDocuments('order', {
+    type: 'order', tableNumber: _.in(candidates), status: _.in(ACTIVE_ADMIN_TABLE_ORDER_STATUSES)
+  })
+  if (orders.some(order => isAdminTableOrder(order) && !isClosedOrderContext(order) &&
+    isSameAdminTableRef(getOrderTableRef(order), ref))) {
+    throw new Error('桌台有未结订单但用餐状态不一致，请联系管理员核查')
+  }
+}
+
+// An active bill belongs to the current visit or to the current merge group.
+// It must never be reconstructed from the first page of all store orders.
+async function getAdminTableBill(ref, options = {}) {
+  if (!ref) return { orders: [], session: null, group: null }
+  const localSessionId = getSharedCartSessionId(formatAdminTableNumber(ref))
+  const localSession = await getAdminBillSession(localSessionId)
+  let session = localSession
+  if (isMergedTableSession(localSession)) {
+    const primaryId = String(localSession.mergedIntoSessionId || '').trim()
+    if (!primaryId) throw new Error('拼桌状态异常，请刷新后联系管理员')
+    session = await getAdminBillSession(primaryId)
+    if (!session || String(session.tableGroupId || '') !== String(localSession.tableGroupId || '')) {
+      throw new Error('拼桌状态异常，请刷新后联系管理员')
+    }
+  }
+
+  if (!isActiveTableSession(session)) {
+    await assertNoUntrackedAdminBill(ref)
+    if (!options.includePaid) return { orders: [], session: null, group: null }
+    const candidates = getAdminTableNumberCandidates(ref.areaKey, ref.tableNumber)
+    const orders = candidates.length ? await queryAdminBillDocuments('order', {
+      type: 'order', tableNumber: _.in(candidates)
+    }) : []
+    return {
+      orders: orders.filter(order => isAdminTableOrder(order) && isAdminPaidOrder(order) &&
+        isSameAdminTableRef(getOrderTableRef(order), ref))
+        .sort((left, right) => getTimeValue(left.createTime) - getTimeValue(right.createTime)),
+      session: null,
+      group: null
+    }
+  }
+
+  const rootId = String(session.activeOrderRootId || '').trim()
+  const visitId = String(session.visitId || '').trim()
+  const groupId = String(session.tableGroupId || '').trim()
+  if (!rootId) {
+    await assertNoUntrackedAdminBill(ref)
+    return { orders: [], session, group: null }
+  }
+  if (!visitId) throw new Error('桌台用餐标识缺失，请刷新后联系管理员')
+
+  let group = null
+  let candidates
+  if (groupId) {
+    const groupResult = await db.collection('tableGroup').where({ _id: groupId }).limit(1).get()
+    group = (groupResult.data || [])[0] || null
+    const groupSnapshot = getTableGroupSnapshot(group, ref)
+    if (!group || group.status !== 'active' || !groupSnapshot ||
+      !getTableGroupRefs(group).some(item => isSameAdminTableRef(item, ref)) ||
+      String(group.primarySessionId || getSharedCartSessionId(formatAdminTableNumber(groupSnapshot.tableGroupPrimary))) !== String(session._id || '')) {
+      throw new Error('拼桌状态异常，请刷新后联系管理员')
+    }
+    candidates = await queryAdminBillDocuments('order', { type: 'order', tableGroupId: groupId })
+  } else {
+    candidates = await queryAdminBillDocuments('order', { type: 'order', rootOrderId: rootId })
+    const rootResult = await db.collection('order').where({ _id: rootId }).limit(1).get()
+    if (rootResult.data && rootResult.data[0]) candidates.push(rootResult.data[0])
+  }
+
+  const byId = {}
+  for (const order of candidates) {
+    if (!order || !order._id || !isAdminTableOrder(order) || isClosedOrderContext(order)) continue
+    if (groupId) {
+      if (String(order.tableGroupId || '') !== groupId) continue
+    } else {
+      if (String(order.rootOrderId || order._id || '') !== rootId ||
+        !isSameAdminTableRef(getOrderTableRef(order), ref)) continue
+      if (String(order.tableVisitId || '').trim() !== visitId) continue
+    }
+    byId[String(order._id)] = order
+  }
+  return {
+    orders: Object.keys(byId).map(id => byId[id])
+      .sort((left, right) => getTimeValue(left.createTime) - getTimeValue(right.createTime)),
+    session,
+    group
+  }
 }
 
 async function expandActiveTableOrderTree(orders, options = {}) {
@@ -4507,36 +4637,18 @@ function getCombinedCheckoutUnitRequest(ref, tableGroups = []) {
 // A combined checkout works on settlement units. A normal table is one unit;
 // an active merged group is one unit represented by its primary table. This
 // keeps child tables from being counted twice without changing the merge data.
-async function getCombinedCheckoutUnitContext(unit, sessions = []) {
-  const directOrderGroups = await Promise.all((unit.refs || []).map(ref => (
-    getCurrentAdminTableOrders(ref.areaKey, ref.tableNumber)
-  )))
-  const directOrderMap = {}
-  directOrderGroups.forEach(groupOrders => {
-    ;(groupOrders || []).forEach(order => {
-      if (order && order._id) directOrderMap[String(order._id)] = order
-    })
-  })
-  const orders = (await expandActiveTableOrderTree(Object.keys(directOrderMap)
-    .map(orderId => directOrderMap[orderId])))
-    .filter(order => !isClosedOrderContext(order))
+async function getCombinedCheckoutUnitContext(unit) {
+  const bill = await getAdminTableBill(unit.ref)
+  const billGroupId = String(bill.group && getTableGroupId(bill.group) || '')
+  if (billGroupId !== String(unit.groupSnapshot && unit.groupSnapshot.tableGroupId || '')) {
+    throw new Error('桌台拼桌状态已变化，请刷新后重试')
+  }
+  const orders = bill.orders
   const settlementState = getOrdersSettlementState(orders)
   const rootOrderIds = Array.from(new Set(orders
     .map(order => String(order.rootOrderId || order._id || '').trim())
     .filter(Boolean)))
-  const maxAddOnByRoot = {}
-  orders.forEach(order => {
-    const rootId = String(order.rootOrderId || order._id || '').trim()
-    if (!rootId) return
-    maxAddOnByRoot[rootId] = Math.max(
-      Number(maxAddOnByRoot[rootId] || 0),
-      Math.max(0, Math.floor(Number(order.addOnIndex || 0)))
-    )
-  })
-  const session = unit.groupSnapshot
-    ? (sessions || []).find(item => String(item && item._id || '') === String(unit.group && unit.group.primarySessionId || '')) ||
-      findActiveTableSessionForRef(sessions, unit.ref)
-    : findActiveTableSessionForRef(sessions, unit.ref)
+  const session = bill.session
 
   return {
     ref: unit.ref,
@@ -4546,10 +4658,15 @@ async function getCombinedCheckoutUnitContext(unit, sessions = []) {
     orders,
     orderIds: orders.map(order => String(order._id)).sort(),
     rootOrderIds,
-    maxAddOnByRoot,
     settlementState,
     session: session ? {
       _id: String(session._id || ''),
+      visitId: String(session.visitId || ''),
+      billVersion: session.billVersion,
+      status: session.status,
+      checkoutStatus: session.checkoutStatus,
+      tableGroupId: session.tableGroupId,
+      mergedIntoSessionId: session.mergedIntoSessionId,
       activeOrderRootId: String(session.activeOrderRootId || '').trim(),
       addOnCount: Math.max(0, Math.floor(Number(session.addOnCount || 0))),
       cartVersion: Math.max(0, Math.floor(Number(session.cartVersion || 0)))
@@ -4576,6 +4693,7 @@ function serializeCombinedCheckoutTable(context) {
     tableNumber: formatAdminTableNumber(context.ref),
     label: memberLabels.length ? `${context.ref.label}（含${memberLabels.join('、')}）` : context.ref.label,
     tableGroupTables: refs,
+    billSnapshot: context.billSnapshot || null,
     grossAmount: state.grossAmount || 0,
     settledAmount: state.settledAmount || 0,
     outstandingAmount: state.outstandingAmount || 0,
@@ -4625,10 +4743,22 @@ async function getCombinedCheckoutContexts(payload = {}) {
     targetUnits.push(unit)
   }
 
-  const sessions = await listActiveTableSessions()
   const contexts = await Promise.all([sourceUnit].concat(targetUnits).map(unit => (
-    getCombinedCheckoutUnitContext(unit, sessions)
+    getCombinedCheckoutUnitContext(unit)
   )))
+  const sessionsAfterOrders = await Promise.all(contexts.map(context => context.session && context.session._id
+    ? getAdminBillSession(context.session._id) : null))
+  contexts.forEach((context, index) => {
+    const before = context.session
+    const after = sessionsAfterOrders[index]
+    const snapshot = before && after && getCheckoutSessionRevision(before) === getCheckoutSessionRevision(after)
+      ? getBillSnapshot(after) : null
+    context.billSnapshot = snapshot ? {
+      ...snapshot,
+      sessionId: before._id,
+      digest: getCheckoutBillDigest(context.orders)
+    } : null
+  })
   const unavailable = contexts.find(context => (
     !context.orders.length || Number(context.settlementState && context.settlementState.outstandingAmount || 0) <= 0
   ))
@@ -4690,22 +4820,44 @@ async function adminGetTableDetail(payload) {
     }
   }
 
-  const directOrders = await getAdminTableOrders({ areaKey, tableNumber })
+  const initialBill = await getAdminTableBill(baseTable, { includePaid: true })
+  const initialGroup = initialBill.group
+  const initialGroupSnapshot = getTableGroupSnapshot(initialGroup, baseTable)
+  const initialSession = initialBill.session
   // A paid table remains inspectable until staff explicitly clears it, but it
   // is never reused as an active shared-cart order after its session closes.
-  const orders = await expandActiveTableOrderTree(directOrders, { includePaid: true })
-  const tableGroup = await getActiveTableGroupForRef(baseTable)
-  const tableSession = await getActiveTableSessionForRef(baseTable)
+  const orders = initialBill.orders
+  const groupResult = initialGroupSnapshot
+    ? await db.collection('tableGroup').where({ _id: initialGroupSnapshot.tableGroupId }).limit(1).get()
+    : null
+  const tableGroup = groupResult ? ((groupResult.data || [])[0] || null) : null
+  const tableSession = initialSession ? await getAdminBillSession(String(initialSession._id || '')) : null
   const table = summarizeAdminTable(baseTable, orders, tableGroup, tableSession)
   const ordersWithImages = await normalizeOrderGoodsImages(orders)
   const billGroups = buildAdminBillGroups(ordersWithImages)
   const totalPrice = roundMoney(billGroups.reduce((sum, group) => sum + Number(group.finalPrice || 0), 0))
   const itemCount = billGroups.reduce((sum, group) => sum + Number(group.goodsCount || 0), 0)
+  const currentGroupSnapshot = getTableGroupSnapshot(tableGroup, baseTable)
+  const groupUnchanged = (!initialGroupSnapshot && !currentGroupSnapshot) ||
+    (initialGroupSnapshot && currentGroupSnapshot &&
+      String(tableGroup && tableGroup.status || '') === 'active' &&
+      initialGroupSnapshot.tableGroupId === currentGroupSnapshot.tableGroupId &&
+      isSameAdminTableRefSet(initialGroupSnapshot.tableGroupTables, currentGroupSnapshot.tableGroupTables))
+  const snapshot = groupUnchanged && initialSession && tableSession &&
+    String(initialSession._id || '') === String(tableSession._id || '') &&
+    getCheckoutSessionRevision(initialSession) === getCheckoutSessionRevision(tableSession)
+    ? getBillSnapshot(tableSession) : null
+  const billSnapshot = snapshot ? {
+    ...snapshot,
+    sessionId: String(tableSession._id || ''),
+    digest: getCheckoutBillDigest(orders.filter(order => !isClosedOrderContext(order)))
+  } : null
 
   return {
     success: true,
     data: {
       table,
+      billSnapshot,
       billGroups,
       totalPrice,
       totalPriceText: String(totalPrice),
@@ -4983,13 +5135,19 @@ async function adminMergeTables(payload) {
         mergedPeopleCount,
         ...sessionIds.map(sessionId => Math.floor(Number((sessionsById[sessionId] || {}).peopleCount || 0)))
       )
-      const sessionRootId = String(existingPrimary && existingPrimary.activeOrderRootId || primaryOrderRootId).trim()
-      const sessionAddOnCount = Math.max(
-        Math.floor(Number(existingPrimary && existingPrimary.addOnCount || 0)),
-        ...currentOrders.filter(order => String(order.rootOrderId || order._id || '') === sessionRootId)
-          .map(order => Math.floor(Number(order.addOnIndex || 0))),
-        0
-      )
+      const currentRootIds = new Set(currentOrders
+        .map(order => String(order.rootOrderId || order._id || '').trim())
+        .filter(Boolean))
+      const existingPrimaryRootId = String(existingPrimary && existingPrimary.activeOrderRootId || '').trim()
+      const sessionRootId = currentRootIds.has(existingPrimaryRootId)
+        ? existingPrimaryRootId
+        : primaryOrderRootId
+      // The order tree is the source of truth for this sequence. Carrying a
+      // larger historical session value would later look like a phantom add-on
+      // during checkout.
+      const sessionAddOnCount = currentOrders
+        .filter(order => String(order.rootOrderId || order._id || '') === sessionRootId)
+        .reduce((max, order) => Math.max(max, Math.floor(Number(order.addOnIndex || 0))), 0)
       const sessionVisitId = String(existingPrimary && existingPrimary.visitId || primaryOrder && primaryOrder.tableVisitId || crypto.randomBytes(16).toString('hex'))
       const primaryData = {
         tableNumber: primaryTableNumber,
@@ -5006,6 +5164,7 @@ async function adminMergeTables(payload) {
         visitHistory: [],
         activeOrderRootId: sessionRootId,
         addOnCount: sessionAddOnCount,
+        billVersion: nextBillVersion(existingPrimary),
         tableGroupId,
         tableGroupPrimary: primaryRef,
         tableGroupTables: mergedTables,
@@ -5195,7 +5354,7 @@ async function adminTransferTable(payload) {
     return {
       success: false,
       code: 'NO_ACTIVE_ORDER',
-      message: 'no active order'
+      message: '原桌没有未结订单，请刷新后确认该桌仍在用餐'
     }
   }
 
@@ -5216,48 +5375,19 @@ async function adminTransferTable(payload) {
     }
   }
 
-  const sourceOrderMap = {}
-  sourceOrders.forEach(order => {
-    if (order._id) sourceOrderMap[order._id] = order
-  })
-
-  const groupIds = Array.from(new Set(sourceOrders.map(order => String(order.tableGroupId || '').trim()).filter(Boolean)))
-  const groupOrderMap = {}
-  if (groupIds.length > 0) {
-    const groupRes = await db.collection('order')
-      .where({
-        type: 'order',
-        tableGroupId: _.in(groupIds)
-      })
-      .limit(200)
-      .get()
-    ;(groupRes.data || []).forEach(order => {
-      if (isAdminTableOrder(order) && !isAdminPaidOrder(order) && order._id) {
-        groupOrderMap[order._id] = order
-      }
-    })
-  }
-
   const transferTime = new Date()
   const targetTableNumber = formatAdminTableNumber(targetRef)
-  const allGroupOrders = Object.keys(groupOrderMap).map(key => groupOrderMap[key])
-  const groupTables = replaceAdminTableRef(
-    getMergedTablesFromOrders(allGroupOrders.length > 0 ? allGroupOrders : sourceOrders, sourceRef),
-    sourceRef,
-    targetRef
-  )
 
   const updates = []
   sourceOrders.forEach(order => {
-    const nextGroupTables = order.tableGroupId
-      ? groupTables
-      : replaceAdminTableRef([sourceRef], sourceRef, targetRef)
-    const nextPrimary = isSameAdminTableRef(
-      getAdminTableRef(order.tableGroupPrimary && order.tableGroupPrimary.areaKey, order.tableGroupPrimary && order.tableGroupPrimary.tableNumber),
-      sourceRef
-    ) ? targetRef : (order.tableGroupPrimary || targetRef)
     const updateData = {
       tableNumber: targetTableNumber,
+      // A live tableGroup was rejected above. Any group fields on these
+      // orders are therefore historical residue and must not follow a normal
+      // transfer to the new table.
+      tableGroupId: '',
+      tableGroupPrimary: null,
+      tableGroupTables: [],
       transferFromTable: sourceRef,
       transferToTable: targetRef,
       transferAt: transferTime,
@@ -5272,30 +5402,7 @@ async function adminTransferTable(payload) {
       updateTime: db.serverDate()
     }
 
-    if (order.tableGroupId) {
-      updateData.tableGroupPrimary = nextPrimary
-      updateData.tableGroupTables = nextGroupTables
-    }
-
     updates.push(db.collection('order').doc(order._id).update({
-      data: updateData
-    }))
-  })
-
-  Object.keys(groupOrderMap).forEach(orderId => {
-    if (sourceOrderMap[orderId]) return
-    const order = groupOrderMap[orderId]
-    const updateData = {
-      tableGroupTables: groupTables,
-      updateTime: db.serverDate()
-    }
-    if (order.tableGroupPrimary) {
-      updateData.tableGroupPrimary = isSameAdminTableRef(
-        getAdminTableRef(order.tableGroupPrimary && order.tableGroupPrimary.areaKey, order.tableGroupPrimary && order.tableGroupPrimary.tableNumber),
-        sourceRef
-      ) ? targetRef : order.tableGroupPrimary
-    }
-    updates.push(db.collection('order').doc(orderId).update({
       data: updateData
     }))
   })
@@ -5313,17 +5420,6 @@ async function adminTransferTable(payload) {
       migrated: false,
       error: err && err.message || 'shared cart migration failed'
     }
-  }
-
-  if (groupIds.length > 0) {
-    await Promise.all(groupIds.map(groupId => db.collection('tableGroup').doc(groupId).set({
-      data: {
-        tableGroupId: groupId,
-        tables: groupTables,
-        status: 'active',
-        updateTime: db.serverDate()
-      }
-    })))
   }
 
   return {
@@ -5488,8 +5584,27 @@ function buildAdminCheckoutSummary(orders, payload, options = {}) {
   }
 }
 
+function getCheckoutSessionRevision(session) {
+  if (!session) return ''
+  return JSON.stringify({
+    status: session.status || '', checkoutStatus: session.checkoutStatus || '',
+    visitId: session.visitId || '', activeOrderRootId: session.activeOrderRootId || '',
+    addOnCount: session.addOnCount || 0, billVersion: session.billVersion || 0,
+    tableGroupId: session.tableGroupId || '', mergedIntoSessionId: session.mergedIntoSessionId || ''
+  })
+}
+
 async function adminFinishTableCheckout(payload) {
-  const orders = await getAdminTableOrders(payload)
+  const expectsSnapshot = Object.prototype.hasOwnProperty.call(payload, 'expectedBillSnapshot')
+  if (!expectsSnapshot && process.env.BILL_VERSION_ENFORCE === '1') {
+    return { success: false, code: 'CLIENT_UPDATE_REQUIRED', message: '请更新商户端后再结账' }
+  }
+  if (expectsSnapshot && !payload.expectedBillSnapshot) {
+    return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '账单状态尚未确认，请刷新后重试' }
+  }
+  const tableRef = getAdminTableRef(payload.areaKey, payload.tableNumber)
+  const initialBill = await getAdminTableBill(tableRef)
+  const orders = initialBill.orders
   const targetOrders = orders.filter(order => !isAdminPaidOrder(order))
 
   if (targetOrders.length === 0) {
@@ -5502,9 +5617,31 @@ async function adminFinishTableCheckout(payload) {
 
   const checkoutTime = new Date()
   const checkoutBatchId = `checkout_${checkoutTime.getTime()}_${targetOrders.map(order => order._id).sort().join('_')}`
-  const tableNumbers = getCheckoutSharedCartTableNumbers(targetOrders, payload)
-  const sessionIds = Array.from(new Set(tableNumbers.map(getRawSharedCartSessionId)))
   const groupIds = Array.from(new Set(targetOrders.map(order => String(order.tableGroupId || '').trim()).filter(Boolean)))
+  const initialGroupIdByOrderId = {}
+  targetOrders.forEach(order => {
+    initialGroupIdByOrderId[String(order._id)] = String(order.tableGroupId || '').trim()
+  })
+  const initialGroupSnapshots = await Promise.all(groupIds.map(groupId => (
+    db.collection('tableGroup').doc(groupId).get().catch(() => ({ data: null }))
+  )))
+  const initialTableGroups = initialGroupSnapshots.map(snapshot => snapshot && snapshot.data).filter(Boolean)
+  const tableNumbers = getCheckoutSharedCartTableNumbers(targetOrders, payload, initialTableGroups)
+  const sessionIds = Array.from(new Set(tableNumbers.map(getRawSharedCartSessionId)))
+  // Legacy table-number aliases are still read so a successful checkout can
+  // remove them. Only canonical sessions may decide whether a new order was
+  // submitted concurrently; an old alias must never block the current table.
+  const currentSessionIds = getCheckoutCurrentSessionIds(targetOrders, payload, initialTableGroups)
+  const initialSessions = await Promise.all(sessionIds.map(sessionId => (
+    db.collection('tableOrderSession').doc(sessionId).get().catch(() => ({ data: null }))
+  )))
+  const checkedBill = await getAdminTableBill(tableRef)
+  if (!initialBill.session || !checkedBill.session ||
+    String(initialBill.session._id || '') !== String(checkedBill.session._id || '') ||
+    getCheckoutSessionRevision(initialBill.session) !== getCheckoutSessionRevision(checkedBill.session) ||
+    getCheckoutBillDigest(targetOrders) !== getCheckoutBillDigest(checkedBill.orders)) {
+    return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台账单已变化，请刷新后重试' }
+  }
   let checkoutSummary = null
 
   // Payment, session closure, and merge-group closure commit together. This
@@ -5523,44 +5660,82 @@ async function adminFinishTableCheckout(payload) {
       transaction.collection('tableGroup').doc(groupId).get().catch(() => ({ data: null }))
     ))
     const currentOrders = orderSnapshots.map(snapshot => snapshot && snapshot.data).filter(Boolean)
-    if (currentOrders.length !== targetOrders.length || currentOrders.some(isAdminPaidOrder)) {
+    if (currentOrders.length !== targetOrders.length || currentOrders.some(isClosedOrderContext)) {
       return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u8ba2\u5355\u72b6\u6001\u5df2\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u91cd\u8bd5' }
+    }
+    if (getCheckoutBillDigest(currentOrders) !== getCheckoutBillDigest(targetOrders)) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台账单已变化，请刷新后重试' }
+    }
+
+    if (currentOrders.some(order => (
+      String(order.tableGroupId || '').trim() !== initialGroupIdByOrderId[String(order._id)]
+    ))) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u684c\u53f0\u5173\u8054\u5173\u7cfb\u5df2\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u91cd\u8bd5' }
     }
 
     const targetRootIds = new Set(currentOrders.map(order => String(order.rootOrderId || order._id)))
-    const maxAddOnByRoot = new Map()
-    currentOrders.forEach(order => {
-      const rootId = String(order.rootOrderId || order._id)
-      const addOnIndex = Math.max(0, Math.floor(Number(order.addOnIndex || 0)))
-      maxAddOnByRoot.set(rootId, Math.max(maxAddOnByRoot.get(rootId) || 0, addOnIndex))
+    const currentTableGroups = groupSnapshots.map(snapshot => snapshot && snapshot.data).filter(Boolean)
+    const currentGroupById = {}
+    currentTableGroups.forEach(group => {
+      currentGroupById[String(getTableGroupId(group) || '').trim()] = group
     })
-    const currentTableNumbers = getCheckoutSharedCartTableNumbers(currentOrders, payload).sort()
+    const activeGroupChanged = initialTableGroups.some(group => {
+      if (String(group && group.status || '').trim() !== 'active') return false
+      const initialSnapshot = getTableGroupSnapshot(group)
+      if (!initialSnapshot) return false
+      const currentGroup = currentGroupById[initialSnapshot.tableGroupId]
+      const currentSnapshot = getTableGroupSnapshot(currentGroup)
+      return !currentGroup || String(currentGroup.status || '').trim() !== 'active' || !currentSnapshot ||
+        !isSameAdminTableRef(currentSnapshot.tableGroupPrimary, initialSnapshot.tableGroupPrimary) ||
+        !isSameAdminTableRefSet(currentSnapshot.tableGroupTables, initialSnapshot.tableGroupTables)
+    })
+    if (activeGroupChanged) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u684c\u53f0\u5173\u8054\u5173\u7cfb\u5df2\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u91cd\u8bd5' }
+    }
+    const currentTableNumbers = getCheckoutSharedCartTableNumbers(currentOrders, payload, currentTableGroups).sort()
     if (currentTableNumbers.join('|') !== tableNumbers.slice().sort().join('|')) {
       return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u684c\u53f0\u5173\u8054\u5173\u7cfb\u5df2\u53d8\u5316\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u91cd\u8bd5' }
     }
     // A finished session can retain historical fields in older data. It must
     // not be mistaken for a customer who has just submitted another order.
-    const activeSessionSnapshots = sessionSnapshots.filter(snapshot => (
-      isActiveTableSession(snapshot && snapshot.data)
-    ))
+    const sessionSnapshotById = {}
+    sessionIds.forEach((sessionId, index) => {
+      sessionSnapshotById[sessionId] = sessionSnapshots[index]
+    })
+    const billSessionId = String(initialBill.session && initialBill.session._id || '')
+    const billSessionSnapshot = sessionSnapshotById[billSessionId]
+    const billSession = billSessionSnapshot && billSessionSnapshot.data
+    if (!currentSessionIds.includes(billSessionId) || !isActiveTableSession(billSession) ||
+      getCheckoutSessionRevision(initialBill.session) !== getCheckoutSessionRevision(billSession)) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台账单已变化，请刷新后重试' }
+    }
+    if (expectsSnapshot) {
+      const expected = payload.expectedBillSnapshot
+      const sessionSnapshot = sessionSnapshotById[String(expected.sessionId || '')]
+      const session = sessionSnapshot && sessionSnapshot.data
+      if (!currentSessionIds.includes(String(expected.sessionId || '')) ||
+        !isActiveTableSession(session) || !matchesBillSnapshot(session, expected) ||
+        typeof expected.digest !== 'string' || expected.digest !== getCheckoutBillDigest(currentOrders)) {
+        return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台账单已变化，请刷新后重试' }
+      }
+    }
+    if (sessionIds.some((sessionId, index) => currentSessionIds.includes(sessionId) &&
+      getCheckoutSessionRevision(initialSessions[index] && initialSessions[index].data) !==
+        getCheckoutSessionRevision(sessionSnapshots[index] && sessionSnapshots[index].data))) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台账单已变化，请刷新后重试' }
+    }
+    const activeSessionSnapshots = currentSessionIds
+      .map(sessionId => sessionSnapshotById[sessionId])
+      .filter(snapshot => isActiveTableSession(snapshot && snapshot.data))
     const activeRootsToCheck = Array.from(new Set(activeSessionSnapshots
       .map(snapshot => String(snapshot && snapshot.data && snapshot.data.activeOrderRootId || '').trim())
       .filter(rootId => rootId && !targetRootIds.has(rootId))))
-    const hasNewAddOnSinceCheckoutRead = activeSessionSnapshots.some(snapshot => {
-      const session = snapshot && snapshot.data
-      const rootId = String(session && session.activeOrderRootId || '').trim()
-      return rootId && targetRootIds.has(rootId) &&
-        Math.floor(Number(session.addOnCount || 0)) > (maxAddOnByRoot.get(rootId) || 0)
-    })
-    if (hasNewAddOnSinceCheckoutRead) {
-      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u8fd9\u684c\u6709\u83dc\u54c1\u521a\u63d0\u4ea4\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u7ed3\u8d26' }
-    }
     const externalRootSnapshots = await runTransactionSequentially(activeRootsToCheck, rootId => (
       transaction.collection('order').doc(rootId).get().catch(() => ({ data: null }))
     ))
     const hasUnsettledOrderOutsideCheckout = externalRootSnapshots.some(snapshot => {
       const order = snapshot && snapshot.data
-      return order && !isAdminPaidOrder(order) && order.tableCleared !== true && order.deleted !== true
+      return isAdminTableOrder(order) && !isClosedOrderContext(order)
     })
     if (hasUnsettledOrderOutsideCheckout) {
       return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '\u8fd9\u684c\u6709\u65b0\u8ba2\u5355\u521a\u63d0\u4ea4\uff0c\u8bf7\u5237\u65b0\u684c\u53f0\u8d26\u5355\u540e\u7ed3\u8d26' }
@@ -5618,9 +5793,8 @@ async function adminFinishTableCheckout(payload) {
         updateTime: db.serverDate()
       }
       const groupRef = transaction.collection('tableGroup').doc(groupId)
-      return group
-        ? groupRef.update({ data })
-        : groupRef.set({ data: { tableGroupId: groupId, ...data } })
+      if (!group || String(group.status || '').trim() !== 'active') return null
+      return groupRef.update({ data })
     })
 
     return { success: true, orders: currentOrders }
@@ -5723,6 +5897,15 @@ async function adminFinishCombinedTableCheckout(payload) {
   }
 
   const contexts = contextResult.contexts
+  const expectsSnapshots = Object.prototype.hasOwnProperty.call(payload, 'expectedCombinedBillSnapshots')
+  const expectedSnapshots = payload.expectedCombinedBillSnapshots
+  if (!expectsSnapshots && process.env.BILL_VERSION_ENFORCE === '1') {
+    return { success: false, code: 'CLIENT_UPDATE_REQUIRED', message: '请更新商户端后再结账' }
+  }
+  if (expectsSnapshots && (!Array.isArray(expectedSnapshots) || expectedSnapshots.length !== contexts.length ||
+    expectedSnapshots.some(snapshot => !snapshot || !snapshot.sessionId))) {
+    return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '账单状态尚未确认，请刷新后重试' }
+  }
   const sourceContext = contextResult.source
   const checkoutTime = new Date()
   const allOrderIds = Array.from(new Set(contexts.reduce((ids, context) => ids.concat(context.orderIds || []), [])))
@@ -5735,6 +5918,20 @@ async function adminFinishCombinedTableCheckout(payload) {
     summary.outstandingAmount = roundMoney(summary.outstandingAmount + Number(state.outstandingAmount || 0))
     return summary
   }, { grossAmount: 0, settledAmount: 0, outstandingAmount: 0 })
+  const initialSessionEntries = getCombinedCheckoutSessionEntries(contexts)
+  const initialSessions = await Promise.all(initialSessionEntries.map(entry => (
+    db.collection('tableOrderSession').doc(entry.sessionId).get().catch(() => ({ data: null }))
+  )))
+  const verifiedBills = await Promise.all(contexts.map(context => getAdminTableBill(context.ref)))
+  if (contexts.some((context, index) => {
+    const verified = verifiedBills[index]
+    return !context.session || !verified.session ||
+      String(context.session._id || '') !== String(verified.session._id || '') ||
+      getCheckoutSessionRevision(context.session) !== getCheckoutSessionRevision(verified.session) ||
+      getCheckoutBillDigest(context.orders) !== getCheckoutBillDigest(verified.orders)
+  })) {
+    return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台账单已变化，请刷新后重试' }
+  }
   let checkoutSummary = null
 
   await ensureCollection('checkoutPayment')
@@ -5791,6 +5988,13 @@ async function adminFinishCombinedTableCheckout(payload) {
     const sessionSnapshots = await runTransactionSequentially(sessionEntries, entry => (
       transaction.collection('tableOrderSession').doc(entry.sessionId).get().catch(() => ({ data: null }))
     ))
+    if (sessionEntries.some((entry, index) => !initialSessionEntries[index] ||
+      entry.sessionId !== initialSessionEntries[index].sessionId ||
+      getCheckoutSessionRevision(initialSessions[index] && initialSessions[index].data) !==
+        getCheckoutSessionRevision(sessionSnapshots[index] && sessionSnapshots[index].data))) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台账单已变化，请刷新后重试' }
+    }
+    const externalRootIds = []
     for (let index = 0; index < sessionEntries.length; index += 1) {
       const entry = sessionEntries[index]
       const context = entry.context
@@ -5813,13 +6017,28 @@ async function adminFinishCombinedTableCheckout(payload) {
       if (!isActiveTableSession(session)) {
         return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台点单状态已变化，请刷新后重试' }
       }
+      if (expectsSnapshots) {
+        const matching = expectedSnapshots.filter(snapshot => String(snapshot.sessionId) === entry.sessionId)
+        if (matching.length !== 1 || !matchesBillSnapshot(session, matching[0]) ||
+          typeof matching[0].digest !== 'string' || matching[0].digest !== getCheckoutBillDigest(context.orders)) {
+          return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台账单已变化，请刷新后重试' }
+        }
+      }
       const activeRootId = String(session.activeOrderRootId || '').trim()
       if (activeRootId && context.rootOrderIds.indexOf(activeRootId) === -1) {
-        return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台有新订单刚提交，请刷新后重试' }
+        externalRootIds.push(activeRootId)
       }
-      if (activeRootId && Math.floor(Number(session.addOnCount || 0)) > Number(context.maxAddOnByRoot[activeRootId] || 0)) {
-        return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台有菜品刚提交，请刷新后重试' }
-      }
+    }
+    const externalRootSnapshots = await runTransactionSequentially(
+      Array.from(new Set(externalRootIds)),
+      rootId => transaction.collection('order').doc(rootId).get().catch(() => ({ data: null }))
+    )
+    const hasUnsettledExternalRoot = externalRootSnapshots.some(snapshot => {
+      const order = snapshot && snapshot.data
+      return isAdminTableOrder(order) && !isClosedOrderContext(order)
+    })
+    if (hasUnsettledExternalRoot) {
+      return { success: false, code: 'CHECKOUT_STATE_CHANGED', message: '桌台有新订单刚提交，请刷新后重试' }
     }
 
     const combinedState = currentContexts.reduce((summary, context) => {
@@ -6683,6 +6902,46 @@ function getDishOriginalSubtotal(item, count) {
   return roundMoney(Number(item.originalSubtotal || 0) * count / originalCount)
 }
 
+async function commitAdminOrderBillUpdate(expectedOrder, updateData) {
+  const expectedFingerprint = getOrderBillFingerprint(expectedOrder)
+  const sessionId = getSharedCartSessionId(expectedOrder.tableNumber)
+
+  return runTransactionWithBusyRetry(callback => db.runTransaction(callback), async transaction => {
+    const orderRef = transaction.collection('order').doc(expectedOrder._id)
+    const orderRes = await orderRef.get()
+    const currentOrder = orderRes && orderRes.data
+    if (!isAdminTableOrder(currentOrder) || isAdminPaidOrder(currentOrder) ||
+        getOrderBillFingerprint(currentOrder) !== expectedFingerprint) {
+      return { success: false, code: 'ORDER_STATE_CHANGED', message: '订单已变化，请刷新后重试' }
+    }
+
+    let sessionRef = transaction.collection('tableOrderSession').doc(sessionId)
+    let sessionRes = await sessionRef.get()
+    let session = sessionRes && sessionRes.data
+    if (isMergedTableSession(session)) {
+      const primarySessionId = String(session.mergedIntoSessionId || '').trim()
+      sessionRef = transaction.collection('tableOrderSession').doc(primarySessionId)
+      sessionRes = await sessionRef.get()
+      session = sessionRes && sessionRes.data
+    }
+
+    const rootId = String(currentOrder.rootOrderId || currentOrder._id || '').trim()
+    const orderVisitId = String(currentOrder.tableVisitId || '').trim()
+    const sessionVisitId = String(session && session.visitId || '').trim()
+    const sameVisit = !orderVisitId || !sessionVisitId || orderVisitId === sessionVisitId
+    const sameRoot = sameVisit && rootId && rootId === String(session && session.activeOrderRootId || '').trim()
+    const groupId = String(currentOrder.tableGroupId || '').trim()
+    const sameGroup = groupId && groupId === String(session && session.tableGroupId || '').trim()
+    const canTrackVersion = isActiveTableSession(session) && (sameRoot || sameGroup)
+    if (!canTrackVersion) {
+      return { success: false, code: 'TABLE_SESSION_MISMATCH', message: '桌台用餐状态不一致，请刷新后重试' }
+    }
+    await orderRef.update({ data: updateData })
+    await sessionRef.update({ data: { billVersion: nextBillVersion(session), updateTime: db.serverDate() } })
+    return { success: true, versionTracked: true }
+  })
+}
+
 async function refundOrderDishes(orderId, dishRequests, payload = {}) {
   if (!orderId) {
     return {
@@ -6782,9 +7041,8 @@ async function refundOrderDishes(orderId, dishRequests, payload = {}) {
     updateData.status = 'cancelled'
   }
 
-  await db.collection('order').doc(orderId).update({
-    data: updateData
-  })
+  const updateResult = await commitAdminOrderBillUpdate(order, updateData)
+  if (!updateResult.success) return updateResult
 
   let refundPrintJobs = []
   let refundPrintError = ''
@@ -6982,8 +7240,7 @@ async function giftOrderDishes(orderId, dishIndexes) {
     return sum + subtotal
   }, 0))
 
-  await db.collection('order').doc(orderId).update({
-    data: {
+  const updateResult = await commitAdminOrderBillUpdate(order, {
       goods: nextGoods,
       totalPrice,
       finalPrice: totalPrice,
@@ -6992,8 +7249,8 @@ async function giftOrderDishes(orderId, dishIndexes) {
         ...giftLogs
       ],
       updateTime: db.serverDate()
-    }
   })
+  if (!updateResult.success) return updateResult
 
   return {
     success: true,
@@ -7145,8 +7402,7 @@ async function adminUpdateTableDish(payload) {
     createTime: editTime
   }
 
-  await db.collection('order').doc(orderId).update({
-    data: {
+  const updateResult = await commitAdminOrderBillUpdate(order, {
       goods: nextGoods,
       totalPrice,
       finalPrice: totalPrice,
@@ -7155,8 +7411,8 @@ async function adminUpdateTableDish(payload) {
         editLog
       ],
       updateTime: db.serverDate()
-    }
   })
+  if (!updateResult.success) return updateResult
 
   return {
     success: true,
@@ -7200,6 +7456,7 @@ function getNewTableVisitSessionFields() {
     appliedCartPatchIds: [],
     activeOrderRootId: '',
     addOnCount: 0,
+    billVersion: 0,
     lastSubmittedCartVersion: 0,
     lastSubmittedOrderId: '',
     customerReceiptOrderId: '',
@@ -7372,21 +7629,40 @@ async function getPendingSharedCartTableRefs(refs) {
   return Object.keys(pendingTableMap).map(key => pendingTableMap[key])
 }
 
-function getCheckoutSharedCartTableNumbers(orders, fallbackPayload) {
+function getCheckoutTableRefs(orders, fallbackPayload, tableGroups = []) {
   const refMap = {}
+  const activeTableGroupIds = getActiveTableGroupIdSet(tableGroups)
+  const groupsById = {}
+  ;(tableGroups || []).forEach(group => {
+    const groupId = String(getTableGroupId(group) || '').trim()
+    if (groupId && activeTableGroupIds.has(groupId)) groupsById[groupId] = group
+  })
   const fallbackRef = getAdminTableRef(fallbackPayload && fallbackPayload.areaKey, fallbackPayload && fallbackPayload.tableNumber)
   if (fallbackRef) refMap[fallbackRef.tableKey] = fallbackRef
 
   ;(orders || []).forEach(order => {
     const orderRef = getOrderTableRef(order)
     if (orderRef) refMap[orderRef.tableKey] = orderRef
-    normalizeAdminTableRefs(order.tableGroupTables).forEach(ref => {
-      refMap[ref.tableKey] = ref
-    })
+    const group = groupsById[String(order && order.tableGroupId || '').trim()]
+    if (group) {
+      getTableGroupRefs(group).forEach(ref => {
+        refMap[ref.tableKey] = ref
+      })
+    }
   })
 
-  return Array.from(new Set(Object.keys(refMap).reduce((list, key) => {
-    return list.concat(getSharedCartTableNumbersForAdminRef(refMap[key]))
+  return Object.keys(refMap).map(key => refMap[key])
+}
+
+function getCheckoutCurrentSessionIds(orders, fallbackPayload, tableGroups) {
+  return Array.from(new Set(getCheckoutTableRefs(orders, fallbackPayload, tableGroups).map(ref => (
+    getSharedCartSessionId(formatAdminTableNumber(ref))
+  ))))
+}
+
+function getCheckoutSharedCartTableNumbers(orders, fallbackPayload, tableGroups) {
+  return Array.from(new Set(getCheckoutTableRefs(orders, fallbackPayload, tableGroups).reduce((list, ref) => {
+    return list.concat(getSharedCartTableNumbersForAdminRef(ref))
   }, [])))
 }
 
@@ -7477,9 +7753,11 @@ async function migrateSharedCartSessionForTableTransfer(sourceRef, targetRef, so
   const rootOrderId = String((sourceOrders || []).map(order => (
     order && (order.rootOrderId || order._id)
   )).find(Boolean) || '').trim()
-  const addOnCount = (sourceOrders || []).reduce((max, order) => (
-    Math.max(max, Math.floor(Number(order && order.addOnIndex || 0)))
-  ), Math.max(0, Math.floor(Number(sourceSession && sourceSession.addOnCount || 0))))
+  // Orders are authoritative. Do not carry a larger old session sequence to
+  // the target table, because checkout would interpret it as a new add-on.
+  const addOnCount = (sourceOrders || [])
+    .filter(order => String(order && (order.rootOrderId || order._id) || '').trim() === rootOrderId)
+    .reduce((max, order) => Math.max(max, Math.floor(Number(order && order.addOnIndex || 0))), 0)
   const peopleCount = Math.max(
     Math.floor(Number(sourceSession && sourceSession.peopleCount || 0)),
     ...(sourceOrders || []).map(order => Math.floor(Number(order && order.peopleCount || 0))),
@@ -7514,6 +7792,7 @@ async function migrateSharedCartSessionForTableTransfer(sourceRef, targetRef, so
         : [],
       visitId: String(sourceSession && sourceSession.visitId || crypto.randomBytes(16).toString('hex')),
       visitHistory: [],
+      billVersion: nextBillVersion(sourceSession),
       activeOrderRootId: rootOrderId,
       addOnCount,
       lastSubmittedCartVersion: Number(sourceSession && sourceSession.lastSubmittedCartVersion || 0),
