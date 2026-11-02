@@ -5,6 +5,7 @@ const https = require('https')
 const path = require('path')
 const { createPrintService } = require('./printService')
 const { createSalesQueryService } = require('./salesQueryService')
+const { createBusinessStatsReader } = require('./businessStatsReader')
 const customerReceiptState = require('./customerReceiptState')
 const { getTableSettlementSummary } = require('./tableSettlementSummary')
 const { runTransactionSequentially, runTransactionWithBusyRetry } = require('./tableCheckoutTransaction')
@@ -84,6 +85,7 @@ const printService = createPrintService({
 })
 
 const salesQueryService = createSalesQueryService({ db, _, getTenantId })
+const readBusinessStatsRecords = createBusinessStatsReader({ db, _ })
 
 let ensureSessionCollectionPromise = null
 const AUTH_SESSION_CACHE_TTL_MS = 60 * 1000
@@ -3370,40 +3372,8 @@ function buildBusinessStatsSnapshot(orders = [], range, jointCheckoutPayments = 
   }
 }
 
-async function listJointCheckoutPayments(tenantId, earliestStart) {
-  await ensureCollection('checkoutPayment')
-  const payments = []
-  const pageSize = 100
-  const maxPayments = 1000
-  try {
-    for (let page = 0; page < maxPayments / pageSize; page += 1) {
-      const res = await db.collection('checkoutPayment')
-        .where({
-          type: 'joint_checkout',
-          storeId: tenantId,
-          checkoutAt: _.gte(new Date(earliestStart))
-        })
-        .orderBy('checkoutAt', 'desc')
-        .skip(page * pageSize)
-        .limit(pageSize)
-        .get()
-      const pageData = res.data || []
-      payments.push(...pageData)
-      if (pageData.length < pageSize) break
-    }
-  } catch (err) {
-    console.warn('list joint checkout payments fallback', err)
-    const res = await db.collection('checkoutPayment')
-      .where({ type: 'joint_checkout', storeId: tenantId })
-      .limit(maxPayments)
-      .get()
-    ;(res.data || []).forEach(payment => {
-      if (getTimeValue(payment.checkoutAt || payment.createTime || payment.updateTime) >= earliestStart) {
-        payments.push(payment)
-      }
-    })
-  }
-  return payments
+async function listJointCheckoutPayments(tenantId, intervals) {
+  return readBusinessStatsRecords({ collection: 'checkoutPayment', type: 'joint_checkout', tenantId, intervals })
 }
 
 async function adminGetBusinessStats(payload) {
@@ -3412,56 +3382,20 @@ async function adminGetBusinessStats(payload) {
   const revenueDate = String(payload.revenueDate || '').trim()
   const dishDate = String(payload.dishDate || '').trim()
   const now = new Date()
-  const earliestStart = Math.min(
-    getBusinessStatsRangeStart(revenueRange, now, revenueDate).getTime(),
-    getBusinessStatsRangeStart(dishRange, now, dishDate).getTime()
-  )
+  // Keep the two requested windows separate; a past revenue day plus today's
+  // dish tab must not force a read of every day in between.
+  const intervals = [[revenueRange, revenueDate], [dishRange, dishDate]].map(([range, date]) => ({
+    startAt: getBusinessStatsRangeStart(range, now, date).getTime(),
+    endAt: getBusinessStatsRangeEnd(range, now, date) || now.getTime() + 1
+  }))
   const tenantId = getTenantId(payload)
 
   await Promise.all([ensureCollection('order'), ensureCollection('checkoutPayment')])
-  const query = {
-    type: 'order',
-    storeId: tenantId,
-    checkoutAt: _.gte(new Date(earliestStart)),
-    deleted: _.neq(true)
-  }
-  const pageSize = 100
-  const maxOrders = 1000
-  const orders = []
-  const arrivalPromise = getTableArrivalSnapshot(revenueRange, now, revenueDate)
-
-  try {
-    for (let page = 0; page < maxOrders / pageSize; page += 1) {
-      const res = await db.collection('order')
-        .where(query)
-        .orderBy('checkoutAt', 'desc')
-        .skip(page * pageSize)
-        .limit(pageSize)
-        .get()
-      const pageData = res.data || []
-      orders.push(...pageData)
-      if (pageData.length < pageSize) break
-    }
-  } catch (err) {
-    // Older environments may only have the previous paid-order compound index.
-    // Fall back to a bounded scan so partial settlement events do not break stats.
-    console.warn('list business stats orders fallback', err)
-    for (let page = 0; page < maxOrders / pageSize; page += 1) {
-      const res = await db.collection('order')
-        .where({ type: 'order', storeId: tenantId })
-        .skip(page * pageSize)
-        .limit(pageSize)
-        .get()
-      const pageData = (res.data || []).filter(order => (
-        getTimeValue(order.checkoutAt) >= earliestStart && order.deleted !== true
-      ))
-      orders.push(...pageData)
-      if ((res.data || []).length < pageSize) break
-    }
-  }
-  const [arrival, jointCheckoutPayments] = await Promise.all([
-    arrivalPromise,
-    listJointCheckoutPayments(tenantId, earliestStart)
+  // Fail explicitly on index/network errors instead of displaying a partial zero.
+  const [orders, arrival, jointCheckoutPayments] = await Promise.all([
+    readBusinessStatsRecords({ collection: 'order', type: 'order', tenantId, intervals }),
+    getTableArrivalSnapshot(revenueRange, now, revenueDate),
+    listJointCheckoutPayments(tenantId, intervals)
   ])
 
   return {
@@ -3471,7 +3405,7 @@ async function adminGetBusinessStats(payload) {
       dishes: buildBusinessStatsSnapshot(orders, dishRange, jointCheckoutPayments, dishDate),
       arrival,
       fetchedOrderCount: orders.length,
-      isTruncated: orders.length === maxOrders
+      isTruncated: false
     }
   }
 }
