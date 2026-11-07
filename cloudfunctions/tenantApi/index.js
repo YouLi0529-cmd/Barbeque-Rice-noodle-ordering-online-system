@@ -6,6 +6,7 @@ const path = require('path')
 const { createPrintService } = require('./printService')
 const { createSalesQueryService } = require('./salesQueryService')
 const { createBusinessStatsReader } = require('./businessStatsReader')
+const { isRefundedVisitRoot, hasLiveVisitAddOns } = require('./tableVisitOrders')
 const customerReceiptState = require('./customerReceiptState')
 const { getTableSettlementSummary } = require('./tableSettlementSummary')
 const { runTransactionSequentially, runTransactionWithBusyRetry } = require('./tableCheckoutTransaction')
@@ -1112,6 +1113,9 @@ async function createOrder(payload) {
   if (orderScene === 'dineIn') {
     const resolvedSession = await resolveSharedCartSession(tableNumber, sharedSessionId)
     if (resolvedSession.redirected) {
+      const sourceSession = await getAdminBillSession(sharedSessionId)
+      if (isStaleTableVisit(payload, sourceSession)) return closedTableVisitResult()
+      payload = { ...payload, tableVisitId: String(resolvedSession.session && resolvedSession.session.visitId || '') }
       tableNumber = resolvedSession.tableNumber
       sharedSessionId = resolvedSession.sessionId
     }
@@ -1136,7 +1140,7 @@ async function createOrder(payload) {
       const sessionRef = transaction.collection('tableOrderSession').doc(sharedSessionId)
       const sessionRes = await sessionRef.get()
       session = sessionRes.data
-      if (!isActiveTableSession(session)) {
+      if (!isActiveTableSession(session) || isStaleTableVisit(payload, session)) {
         return { success: false, code: 'TABLE_SESSION_CLOSED', message: '\u672c\u684c\u672c\u6b21\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u5f00\u53f0' }
       }
       if (!buildSharedCartPeopleState(session).peopleConfirmed) {
@@ -1200,8 +1204,12 @@ async function createOrder(payload) {
     if (parentOrderId) {
       const parentRes = await transaction.collection('order').doc(parentOrderId).get()
       const parentOrder = parentRes.data
-      if (!parentOrder || parentOrder.orderScene !== orderScene || isClosedOrderContext(parentOrder)) {
+      const continuingRefundedRoot = orderScene === 'dineIn' &&
+        await canContinueRefundedVisit(parentOrder, session, transaction)
+      if (!parentOrder || parentOrder.orderScene !== orderScene ||
+          (isClosedOrderContext(parentOrder) && !continuingRefundedRoot)) {
         if (orderScene === 'dineIn' && session) {
+          await assertNoUntrackedAdminBill(getOrderTableRef({ tableNumber }), transaction)
           await transaction.collection('tableOrderSession').doc(sharedSessionId).update({
             data: buildClosedTableSessionData(session, new Date())
           })
@@ -1338,14 +1346,16 @@ async function adminCreateOfflineOrder(payload) {
     ? getTableGroupPrimary(activeTableGroup, requestedTableRef)
     : requestedTableRef
 
-  const activeOrders = (await getAdminTableOrders({ areaKey: tableRef.areaKey, tableNumber: tableRef.tableNumber }))
-    .filter(order => !isAdminPaidOrder(order) && order.tableCleared !== true && order.deleted !== true && order.status !== 'cancelled' && hasOrderableGoods(order))
-
-  const parentOrder = activeOrders.find(order => order.isAddOnOrder !== true) || activeOrders[0] || null
-  const peopleCount = Math.max(1, Math.min(99, Math.floor(Number(
-    payload.peopleCount || parentOrder && parentOrder.peopleCount || 1
-  ))))
   const sessionId = getSharedCartSessionId(formatAdminTableNumber(tableRef))
+  const initialSession = await getAdminBillSession(sessionId)
+  // Only use this snapshot to reject a request whose dining visit changed.
+  // The writable bill must be read again inside the transaction below.
+  const initialVisit = {
+    clearRequestId: String(initialSession && initialSession.tableClearRequestId || ''),
+    active: isActiveTableSession(initialSession),
+    visitId: String(initialSession && initialSession.visitId || ''),
+    rootId: String(initialSession && initialSession.activeOrderRootId || '')
+  }
   const requestId = String(payload.requestId || crypto.randomBytes(16).toString('hex')).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)
   const requestScope = `${getTenantId(payload)}:${requestId}`
   const requestDocId = `waiter-${crypto.createHash('sha256').update(requestScope).digest('hex')}`
@@ -1361,6 +1371,25 @@ async function adminCreateOfflineOrder(payload) {
     const session = sessionRes.data || null
     const sessionActive = isActiveTableSession(session)
     const sessionRootOrderId = sessionActive ? String(session.activeOrderRootId || '').trim() : ''
+    if (initialVisit.clearRequestId !== String(session && session.tableClearRequestId || '')) {
+      return { success: false, code: 'TABLE_SESSION_MISMATCH', message: '本次用餐已由前台结束，请刷新后重试' }
+    }
+    if (initialVisit.active && (!sessionActive ||
+        initialVisit.visitId !== String(session.visitId || '') ||
+        (initialVisit.rootId && initialVisit.rootId !== sessionRootOrderId))) {
+      return { success: false, code: 'TABLE_SESSION_MISMATCH', message: '桌台用餐状态已变化，请刷新后重试' }
+    }
+    const currentBill = await getAdminTableBill(tableRef, {}, transaction)
+    if ((currentBill.session && currentBill.session._id !== sessionId) ||
+        String(getTableGroupId(currentBill.group) || '') !== String(getTableGroupId(activeTableGroup) || '')) {
+      return { success: false, code: 'TABLE_SESSION_MISMATCH', message: '桌台用餐状态已变化，请刷新后重试' }
+    }
+    const activeOrders = currentBill.orders
+      .filter(order => !isAdminPaidOrder(order) && hasOrderableGoods(order))
+    const parentOrder = activeOrders.find(order => order.isAddOnOrder !== true) || activeOrders[0] || null
+    const peopleCount = Math.max(1, Math.min(99, Math.floor(Number(
+      payload.peopleCount || parentOrder && parentOrder.peopleCount || 1
+    ))))
     const candidateOrderIds = []
     activeOrders
       .slice()
@@ -1380,6 +1409,13 @@ async function adminCreateOfflineOrder(payload) {
           !hasOrderableGoods(candidate)) continue
       activeAnchorOrder = candidate
       break
+    }
+    const sameActiveGroup = sessionActive && session.tableGroupId && activeAnchorOrder &&
+      activeAnchorOrder.tableGroupId === session.tableGroupId
+    if (activeAnchorOrder && !sameActiveGroup && (!sessionActive ||
+        String(activeAnchorOrder.rootOrderId || activeAnchorOrder._id) !== sessionRootOrderId ||
+        String(activeAnchorOrder.tableVisitId || '') !== String(session.visitId || ''))) {
+      return { success: false, code: 'TABLE_SESSION_MISMATCH', message: '桌台用餐状态已变化，请刷新后重试' }
     }
     // Treat the page's create/add choice as a hint. Server state is authoritative:
     // a live order in this table group becomes an add-on; an empty/cancelled stale
@@ -4255,23 +4291,11 @@ function buildAdminBillGroups(orders) {
 }
 
 async function listVisibleTableOrders() {
-  try {
-    return await db.collection('order')
-      .where({
-        type: 'order',
-        tableCleared: _.neq(true)
-      })
-      .limit(300)
-      .get()
-  } catch (err) {
-    // Keep the table board usable if a legacy environment lacks this index.
-    console.warn('list visible table orders fallback', err)
-    return db.collection('order')
-      .where({ type: 'order' })
-      .orderBy('createTime', 'desc')
-      .limit(300)
-      .get()
-  }
+  return { data: await queryAdminBillDocuments('order', {
+    type: 'order', tableCleared: _.neq(true), deleted: _.neq(true),
+    status: _.nin(['cancelled', '3', 3]),
+    orderScene: _.neq('camping'), orderType: _.neq('camping')
+  }) }
 }
 
 async function adminListTables() {
@@ -4429,10 +4453,10 @@ async function getAdminTableOrders(payload) {
   return getAdminOrdersForTableRef(visibleOrders.data || [], tableRef, tableGroups)
 }
 
-async function queryAdminBillDocuments(collectionName, condition) {
+async function queryAdminBillDocuments(collectionName, condition, reader = db) {
   const documents = []
   for (let skip = 0; skip < 10000; skip += 100) {
-    const result = await db.collection(collectionName).where(condition).orderBy('_id', 'asc').skip(skip).limit(100).get()
+    const result = await reader.collection(collectionName).where(condition).orderBy('_id', 'asc').skip(skip).limit(100).get()
     const page = result.data || []
     documents.push(...page)
     if (page.length < 100) return documents
@@ -4440,17 +4464,42 @@ async function queryAdminBillDocuments(collectionName, condition) {
   throw new Error('账单记录过多，请联系管理员检查')
 }
 
-async function getAdminBillSession(sessionId) {
-  const result = await db.collection('tableOrderSession').where({ _id: sessionId }).limit(1).get()
+async function getAdminBillSession(sessionId, reader = db) {
+  const result = await reader.collection('tableOrderSession').where({ _id: sessionId }).limit(1).get()
   return (result.data || [])[0] || null
 }
 
-async function assertNoUntrackedAdminBill(ref) {
+async function canContinueRefundedVisit(root, session, reader = db) {
+  if (!isActiveTableSession(session) || !isRefundedVisitRoot(root, session)) return false
+  const groupId = String(session.tableGroupId || '').trim()
+  if (groupId) {
+    // A merged bill can still contain another table's root and visit. Verify
+    // the current group before allowing that bill to keep this anchor alive.
+    const result = await reader.collection('tableGroup').where({ _id: groupId }).limit(1).get()
+    const group = (result.data || [])[0]
+    const ref = getOrderTableRef(root)
+    const snapshot = getTableGroupSnapshot(group, ref)
+    if (!group || group.status !== 'active' || !snapshot || root.tableGroupId !== groupId ||
+        !getTableGroupRefs(group).some(item => isSameAdminTableRef(item, ref)) ||
+        String(group.primarySessionId || getSharedCartSessionId(formatAdminTableNumber(snapshot.tableGroupPrimary))) !== String(session._id || '')) {
+      throw new Error('拼桌状态异常，请刷新后联系管理员')
+    }
+    const orders = await queryAdminBillDocuments('order', { type: 'order', tableGroupId: groupId, storeId: root.storeId }, reader)
+    return orders.some(order => isAdminTableOrder(order) && !isClosedOrderContext(order) && hasOrderableGoods(order))
+  }
+  const orders = await queryAdminBillDocuments('order', {
+    type: 'order', rootOrderId: root._id, tableVisitId: session.visitId, storeId: root.storeId
+  }, reader)
+  return hasLiveVisitAddOns(root, session, orders)
+}
+
+async function assertNoUntrackedAdminBill(ref, reader = db) {
+  if (!ref) throw new Error('桌台标识无效，请重新扫码')
   const candidates = getAdminTableNumberCandidates(ref.areaKey, ref.tableNumber)
   if (!candidates.length) return
   const orders = await queryAdminBillDocuments('order', {
     type: 'order', tableNumber: _.in(candidates), status: _.in(ACTIVE_ADMIN_TABLE_ORDER_STATUSES)
-  })
+  }, reader)
   if (orders.some(order => isAdminTableOrder(order) && !isClosedOrderContext(order) &&
     isSameAdminTableRef(getOrderTableRef(order), ref))) {
     throw new Error('桌台有未结订单但用餐状态不一致，请联系管理员核查')
@@ -4459,27 +4508,27 @@ async function assertNoUntrackedAdminBill(ref) {
 
 // An active bill belongs to the current visit or to the current merge group.
 // It must never be reconstructed from the first page of all store orders.
-async function getAdminTableBill(ref, options = {}) {
+async function getAdminTableBill(ref, options = {}, reader = db) {
   if (!ref) return { orders: [], session: null, group: null }
   const localSessionId = getSharedCartSessionId(formatAdminTableNumber(ref))
-  const localSession = await getAdminBillSession(localSessionId)
+  const localSession = await getAdminBillSession(localSessionId, reader)
   let session = localSession
   if (isMergedTableSession(localSession)) {
     const primaryId = String(localSession.mergedIntoSessionId || '').trim()
     if (!primaryId) throw new Error('拼桌状态异常，请刷新后联系管理员')
-    session = await getAdminBillSession(primaryId)
+    session = await getAdminBillSession(primaryId, reader)
     if (!session || String(session.tableGroupId || '') !== String(localSession.tableGroupId || '')) {
       throw new Error('拼桌状态异常，请刷新后联系管理员')
     }
   }
 
   if (!isActiveTableSession(session)) {
-    await assertNoUntrackedAdminBill(ref)
+    await assertNoUntrackedAdminBill(ref, reader)
     if (!options.includePaid) return { orders: [], session: null, group: null }
     const candidates = getAdminTableNumberCandidates(ref.areaKey, ref.tableNumber)
     const orders = candidates.length ? await queryAdminBillDocuments('order', {
       type: 'order', tableNumber: _.in(candidates)
-    }) : []
+    }, reader) : []
     return {
       orders: orders.filter(order => isAdminTableOrder(order) && isAdminPaidOrder(order) &&
         isSameAdminTableRef(getOrderTableRef(order), ref))
@@ -4493,7 +4542,7 @@ async function getAdminTableBill(ref, options = {}) {
   const visitId = String(session.visitId || '').trim()
   const groupId = String(session.tableGroupId || '').trim()
   if (!rootId) {
-    await assertNoUntrackedAdminBill(ref)
+    await assertNoUntrackedAdminBill(ref, reader)
     return { orders: [], session, group: null }
   }
   if (!visitId) throw new Error('桌台用餐标识缺失，请刷新后联系管理员')
@@ -4501,7 +4550,7 @@ async function getAdminTableBill(ref, options = {}) {
   let group = null
   let candidates
   if (groupId) {
-    const groupResult = await db.collection('tableGroup').where({ _id: groupId }).limit(1).get()
+    const groupResult = await reader.collection('tableGroup').where({ _id: groupId }).limit(1).get()
     group = (groupResult.data || [])[0] || null
     const groupSnapshot = getTableGroupSnapshot(group, ref)
     if (!group || group.status !== 'active' || !groupSnapshot ||
@@ -4509,10 +4558,10 @@ async function getAdminTableBill(ref, options = {}) {
       String(group.primarySessionId || getSharedCartSessionId(formatAdminTableNumber(groupSnapshot.tableGroupPrimary))) !== String(session._id || '')) {
       throw new Error('拼桌状态异常，请刷新后联系管理员')
     }
-    candidates = await queryAdminBillDocuments('order', { type: 'order', tableGroupId: groupId })
+    candidates = await queryAdminBillDocuments('order', { type: 'order', tableGroupId: groupId }, reader)
   } else {
-    candidates = await queryAdminBillDocuments('order', { type: 'order', rootOrderId: rootId })
-    const rootResult = await db.collection('order').where({ _id: rootId }).limit(1).get()
+    candidates = await queryAdminBillDocuments('order', { type: 'order', rootOrderId: rootId }, reader)
+    const rootResult = await reader.collection('order').where({ _id: rootId }).limit(1).get()
     if (rootResult.data && rootResult.data[0]) candidates.push(rootResult.data[0])
   }
 
@@ -6271,94 +6320,112 @@ async function adminPrintCustomerOrder(payload) {
   return adminPrintTableReceipt(payload, 'customer_order')
 }
 
+// Preview and execution share a digest. Every session read here is also written
+// during clear, so cart submissions and a new scan conflict with the transaction.
+async function getTableClearContext(tableRef, reader) {
+  const groups = await queryAdminBillDocuments('tableGroup', { status: 'active' }, reader)
+  const group = findTableGroupForRef(groups, tableRef)
+  const refs = group ? mergeAdminTableRefs(getTableGroupRefs(group), [tableRef]) : [tableRef]
+  const sessions = []
+  const items = []
+  const sessionIds = new Set()
+  const ordersById = new Map()
+  for (const ref of refs) {
+    const candidates = getAdminTableNumberCandidates(ref.areaKey, ref.tableNumber)
+    const orders = await queryAdminBillDocuments('order', {
+      type: 'order', tableNumber: _.in(candidates), tableCleared: _.neq(true)
+    }, reader)
+    for (const order of orders) {
+      if (isSameAdminTableRef(getOrderTableRef(order), ref)) ordersById.set(order._id, order)
+    }
+    for (const number of getSharedCartTableNumbersForAdminRef(ref)) {
+      sessionIds.add(getRawSharedCartSessionId(number))
+    }
+  }
+  // Batch legacy aliases, while keeping transaction operations sequential.
+  // Missing aliases remain in the digest and receive closed tombstones on clear.
+  const ids = Array.from(sessionIds)
+  for (let offset = 0; offset < ids.length; offset += 20) {
+    const batch = ids.slice(offset, offset + 20)
+    const rows = await queryAdminBillDocuments('tableOrderSession', { _id: _.in(batch) }, reader)
+    const byId = new Map(rows.map(row => [row._id, row]))
+    sessions.push(...batch.map(id => ({ id, data: byId.get(id) || null })))
+    items.push(...await queryAdminBillDocuments('tableCartItem', { sessionId: _.in(batch) }, reader))
+  }
+  const orders = Array.from(ordersById.values()).sort((a, b) => String(a._id).localeCompare(String(b._id)))
+  sessions.sort((a, b) => a.id.localeCompare(b.id))
+  items.sort((a, b) => String(a._id).localeCompare(String(b._id)))
+  const snapshot = {
+    group: group && [getTableGroupId(group), refs.map(ref => ref.tableKey)],
+    sessions: sessions.map(({ id, data }) => [id, data && [data.visitId, data.status,
+      data.checkoutStatus, data.activeOrderRootId, data.tableGroupId, data.mergedIntoSessionId,
+      data.cartVersion, data.billVersion, data.peopleCount, data.peopleConfirmed, getTimeValue(data.finishedAt)]]),
+    orders: orders.map(order => [order._id, order.tableVisitId, order.rootOrderId,
+      order.tableNumber, order.tableGroupId, order.status, isAdminPaidOrder(order),
+      order.deleted, order.tableCleared, order.finalPrice, order.totalPrice, order.goods,
+      order.partialSettlementAmount, order.partialSettlementDishCounts, order.checkoutBatchId]),
+    items: items.map(item => [item._id, item.count, item.deleted, item.cartKey])
+  }
+  return { refs, group, sessions, items, orders, token: hashToken(JSON.stringify(snapshot)) }
+}
+
 async function adminClearTable(payload) {
-  const areaKey = String(payload.areaKey || 'normal').trim() || 'normal'
-  const tableNumber = padTableNumber(payload.tableNumber)
-  const tableRef = getAdminTableRef(areaKey, tableNumber)
-
-  if (!tableRef) {
-    return {
-      success: false,
-      code: 'TABLE_NOT_FOUND',
-      message: 'table not found'
+  const tableRef = getAdminTableRef(String(payload.areaKey || 'normal'), padTableNumber(payload.tableNumber))
+  if (!tableRef) return { success: false, code: 'TABLE_NOT_FOUND', message: '桌台不存在' }
+  return runTransactionWithBusyRetry(callback => db.runTransaction(callback), async transaction => {
+    const context = await getTableClearContext(tableRef, transaction)
+    const unpaidOrders = context.orders.filter(order => isAdminTableOrder(order) && !isClosedOrderContext(order))
+    const liveItems = context.items.filter(item => item.deleted !== true && Number(item.count || 0) > 0)
+    const hasSession = context.sessions.some(({ data }) => data && (isActiveTableSession(data) || isMergedTableSession(data)))
+    if (!context.orders.length && !liveItems.length && !hasSession && !context.group) {
+      return { success: false, code: 'NO_TABLE_STATE', message: '该桌暂无需要清除的状态' }
     }
-  }
-
-  const orders = await getAdminTableOrders({ areaKey, tableNumber })
-  const unclearedOrders = orders.filter(order => order.tableCleared !== true)
-  const activeGroup = await getActiveTableGroupForRef(tableRef)
-  const activeSession = await getActiveTableSessionForRef(tableRef)
-  const clearRefMap = {
-    [tableRef.tableKey]: tableRef
-  }
-  getTableGroupRefs(activeGroup).forEach(ref => {
-    clearRefMap[ref.tableKey] = ref
+    const summary = {
+      confirmationToken: context.token,
+      tables: context.refs.map(ref => ({ areaKey: ref.areaKey, tableNumber: ref.tableNumber, label: ref.label })),
+      unpaidOrderCount: unpaidOrders.length,
+      unpaidAmount: getOrdersSettlementState(unpaidOrders).outstandingAmount,
+      cartItemCount: liveItems.reduce((sum, item) => sum + Number(item.count || 0), 0),
+      ordering: hasSession,
+      kitchenWarning: unpaidOrders.some(order => order.kitchenPrinted === true || isAdminPreparingOrder(order) ||
+        ['queued', 'printing', 'printed', 'partial_failed'].includes(String(order.kitchenPrintStatus || '')))
+    }
+    if (payload.preview === true) return { success: true, data: summary }
+    if (payload.confirm !== true || !payload.confirmationToken) {
+      return { success: false, code: 'TABLE_CLEAR_CONFIRM_REQUIRED', message: '请更新小程序并确认清台范围后重试' }
+    }
+    if (payload.confirmationToken !== context.token) {
+      return { success: false, code: 'TABLE_CLEAR_STATE_CHANGED', message: '桌台用餐或订单已变化，请刷新后重新确认清台' }
+    }
+    const clearedAt = new Date()
+    const audit = {
+      tableClearRequestId: context.token,
+      tableClearedBy: String(payload.clearActorId || ''),
+      tableClearReason: unpaidOrders.length ? 'admin_force_clear' : 'admin_clear'
+    }
+    for (const order of context.orders) {
+      const cancel = unpaidOrders.some(item => item._id === order._id)
+      await transaction.collection('order').doc(order._id).update({ data: {
+        ...audit, tableCleared: true, tableClearedAt: clearedAt, updateTime: db.serverDate(),
+        ...(cancel ? { status: 'cancelled', checkoutStatus: 'cleared', cancelReason: 'admin_force_clear',
+          cancelledAt: clearedAt, cancelledBy: audit.tableClearedBy } : {})
+      } })
+    }
+    for (const item of context.items) await transaction.collection('tableCartItem').doc(item._id).remove()
+    for (const session of context.sessions) {
+      const data = { ...buildClosedTableSessionData(session.data, clearedAt), ...audit,
+        tableClearedVisitId: String(session.data && session.data.visitId || '') }
+      const ref = transaction.collection('tableOrderSession').doc(session.id)
+      if (session.data) await ref.update({ data })
+      else await ref.set({ data: { ...data, tableNumber: formatAdminTableNumber(tableRef) } })
+    }
+    if (context.group) await transaction.collection('tableGroup').doc(context.group._id).update({ data: {
+      status: 'inactive', clearedAt, ...audit, updateTime: db.serverDate()
+    } })
+    return { success: true, data: { ...summary, clearedOrders: context.orders.length,
+      cancelledOrders: unpaidOrders.length, clearedGroups: context.group ? 1 : 0,
+      sharedCartRemoved: context.items.length } }
   })
-  unclearedOrders.forEach(order => {
-    const orderRef = getOrderTableRef(order)
-    if (orderRef) clearRefMap[orderRef.tableKey] = orderRef
-    normalizeAdminTableRefs(order.tableGroupTables).forEach(ref => {
-      clearRefMap[ref.tableKey] = ref
-    })
-  })
-  const clearRefs = Object.keys(clearRefMap).map(key => clearRefMap[key])
-
-  if (unclearedOrders.length === 0 && !activeGroup && !activeSession) {
-    return {
-      success: false,
-      code: 'NO_TABLE_STATE',
-      message: '该桌暂无需要清除的状态'
-    }
-  }
-
-  const clearedAt = new Date()
-  await Promise.all(unclearedOrders.map(order => db.collection('order').doc(order._id).update({
-    data: {
-      tableCleared: true,
-      tableClearedAt: clearedAt,
-      checkoutStatus: order.checkoutStatus || 'cleared',
-      updateTime: db.serverDate()
-    }
-  })))
-
-  const groupIds = Array.from(new Set(unclearedOrders.map(order => String(order.tableGroupId || '').trim()).filter(Boolean)))
-  const activeGroupId = getTableGroupId(activeGroup)
-  if (activeGroupId && groupIds.indexOf(activeGroupId) === -1) {
-    groupIds.push(activeGroupId)
-  }
-
-  await Promise.all(groupIds.map(groupId => db.collection('tableGroup').doc(groupId).update({
-    data: {
-      status: 'inactive',
-      clearedAt,
-      updateTime: db.serverDate()
-    }
-  }).catch(() => db.collection('tableGroup').doc(groupId).set({
-    data: {
-      tableGroupId: groupId,
-      status: 'inactive',
-      clearedAt,
-      updateTime: db.serverDate()
-    }
-  }))))
-
-  const sharedCartTableNumbers = Array.from(new Set(clearRefs.reduce((list, ref) => {
-    return list.concat(getSharedCartTableNumbersForAdminRef(ref))
-  }, [])))
-  const sharedCartResults = []
-  for (const cartTableNumber of sharedCartTableNumbers) {
-    sharedCartResults.push(await clearSharedCartSessionByTableNumber(cartTableNumber, clearedAt))
-  }
-
-  return {
-    success: true,
-    data: {
-      clearedOrders: unclearedOrders.length,
-      clearedGroups: groupIds.length,
-      sharedCartRemoved: sharedCartResults.reduce((sum, item) => sum + Number(item.removed || 0), 0),
-      sharedCartTables: sharedCartTableNumbers
-    }
-  }
 }
 
 async function adminSendTableToKitchen(payload) {
@@ -8139,10 +8206,18 @@ async function adminAuditOrphanedOrderRoots(payload) {
     })
   }
 
+  const continuingRefundedVisits = new Set()
+  for (const session of activeSessions) {
+    const root = roots[String(session.activeOrderRootId || '').trim()]
+    if (root && await canContinueRefundedVisit(root, session)) {
+      continuingRefundedVisits.add(`${root._id}|${session.visitId}`)
+    }
+  }
   const issues = candidates.map(order => {
     const rootOrderId = String(order.rootOrderId || order.parentOrderId || '').trim()
     const root = roots[rootOrderId] || null
     if (root && !isClosedOrderContext(root)) return null
+    if (continuingRefundedVisits.has(`${rootOrderId}|${order.tableVisitId}`)) return null
     return {
       orderId: String(order._id || ''),
       title: String(order.orderCardTitle || '\u52a0\u83dc\u5355'),
@@ -8162,6 +8237,7 @@ async function adminAuditOrphanedOrderRoots(payload) {
     const rootOrderId = String(session.activeOrderRootId || '').trim()
     const root = roots[rootOrderId] || null
     if (root && !isClosedOrderContext(root)) return null
+    if (continuingRefundedVisits.has(`${rootOrderId}|${session.visitId}`)) return null
     const ref = getTableSessionRef(session)
     return {
       sessionId: String(session._id || ''),
@@ -8369,41 +8445,19 @@ async function adminRepairOrphanedOrderRoot(payload) {
   }
 }
 
-async function autoClearPaidTableOrdersForNewSession(tableNumber, clearedAt) {
+async function autoClearPaidTableOrdersForNewSession(tableNumber, clearedAt, reader = db) {
   const parsed = parseAdminTableNumber(tableNumber)
-  if (!parsed) {
-    return {
-      clearedOrders: 0,
-      clearedGroups: 0
-    }
-  }
-
-  // A new scan only clears the paid context of this physical table. It must not
-  // follow historical table-group links into another table.
-  const orders = await getSingleAdminTableOrders(parsed.areaKey, parsed.tableNumber)
-  const paidOrders = (orders || []).filter(order => {
-    return isAdminPaidOrder(order) && order.tableCleared !== true
-  })
-
-  if (paidOrders.length === 0) {
-    return {
-      clearedOrders: 0,
-      clearedGroups: 0
-    }
-  }
-
-  await Promise.all(paidOrders.map(order => db.collection('order').doc(order._id).update({
-    data: {
-      tableCleared: true,
-      tableClearedAt: clearedAt,
-      updateTime: db.serverDate()
-    }
-  })))
-
-  return {
-    clearedOrders: paidOrders.length,
-    clearedGroups: 0
-  }
+  if (!parsed) return { clearedOrders: 0, clearedGroups: 0 }
+  const orders = await queryAdminBillDocuments('order', {
+    type: 'order', tableNumber: _.in(getAdminTableNumberCandidates(parsed.areaKey, parsed.tableNumber)),
+    tableCleared: _.neq(true)
+  }, reader)
+  const paidOrders = orders.filter(order => isSameAdminTableRef(getOrderTableRef(order), parsed) &&
+    isAdminPaidOrder(order) && order.tableCleared !== true)
+  for (const order of paidOrders) await reader.collection('order').doc(order._id).update({ data: {
+    tableCleared: true, tableClearedAt: clearedAt, updateTime: db.serverDate()
+  } })
+  return { clearedOrders: paidOrders.length, clearedGroups: 0 }
 }
 
 function getSharedCartDocId(sessionId, cartKey) {
@@ -8435,6 +8489,7 @@ function buildSharedCartSessionState(session) {
   const sessionActive = isActiveTableSession(session)
   const sharedCartActiveUntil = toTime(session && session.sharedCartActiveUntil)
   return {
+    tableVisitId: String(session && session.visitId || ''),
     sessionActive,
     sessionClosed: !session || !sessionActive,
     sessionStatus: String(session && session.status || ''),
@@ -8753,7 +8808,11 @@ function buildSharedCartOrderCards(orders) {
 }
 
 async function getActiveTableOrderContext(tableNumber) {
-  const activeOrders = await listActiveTableOrdersForSharedCart(tableNumber)
+  const ref = getOrderTableRef({ tableNumber })
+  const activeOrders = ref ? (await queryAdminBillDocuments('order', {
+    type: 'order', tableNumber: _.in(getAdminTableNumberCandidates(ref.areaKey, ref.tableNumber)),
+    status: _.in(ACTIVE_ADMIN_TABLE_ORDER_STATUSES)
+  })).filter(order => isVisibleSharedCartOrder(order) && isSameAdminTableRef(getOrderTableRef(order), ref)) : []
 
   if (!activeOrders.length) {
     return {
@@ -8782,12 +8841,13 @@ async function getActiveTableOrderContext(tableNumber) {
     .map(order => String(order.rootOrderId || order._id || '').trim())
     .filter(Boolean)))
 
-  if (verifiedRootIds.length === 0) {
+  if (verifiedRootIds.length !== rootOrderIds.length) {
     return {
       activeOrderRootId: '',
       addOnCount: 0,
       peopleCount: 0,
-      ambiguous: false
+      ambiguous: true,
+      rootOrderIds
     }
   }
   if (verifiedRootIds.length > 1) {
@@ -8837,6 +8897,40 @@ async function addSharedCartParticipantToActiveOrders(tableNumber, openid, sessi
   return targets.length
 }
 
+function getTableJoinIdentity(session) {
+  return JSON.stringify(session && [session.visitId, session.status, session.checkoutStatus,
+    session.activeOrderRootId, session.tableGroupId, session.mergedIntoSessionId, session.tableClearRequestId, getTimeValue(session.finishedAt)])
+}
+
+async function commitTableJoin(sessionId, previous, data, tableNumber, reset) {
+  return runTransactionWithBusyRetry(callback => db.runTransaction(callback), async transaction => {
+    const ref = transaction.collection('tableOrderSession').doc(sessionId)
+    const current = await ref.get()
+    if (getTableJoinIdentity(current.data || null) !== getTableJoinIdentity(previous || null)) {
+      throw new Error('桌台用餐状态已变化，请重新扫码')
+    }
+    let cleared = { clearedOrders: 0, clearedGroups: 0 }
+    if (reset) {
+      await assertNoUntrackedAdminBill(getOrderTableRef({ tableNumber }), transaction)
+      const items = await queryAdminBillDocuments('tableCartItem', { sessionId }, transaction)
+      for (const item of items) await transaction.collection('tableCartItem').doc(item._id).remove()
+      cleared = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date(), transaction)
+    }
+    if (current.data) await ref.update({ data })
+    else await ref.set({ data })
+    return cleared
+  })
+}
+
+function isStaleTableVisit(payload, session) {
+  return !!(payload.tableVisitId && String(payload.tableVisitId) !== String(session && session.visitId || ''))
+}
+
+function closedTableVisitResult() {
+  return { success: false, code: 'SESSION_CLOSED', sessionClosed: true,
+    message: '本次用餐已结束，请重新扫码开台' }
+}
+
 async function joinSharedCart(payload) {
   const auth = await getAuthSession(payload)
   if (!auth.success) return auth
@@ -8861,13 +8955,11 @@ async function joinSharedCart(payload) {
     const wasPrimaryMember = Array.isArray(primarySession.memberOpenids) &&
       primarySession.memberOpenids.includes(auth.data.openid)
     const sharedCartActiveUntil = new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS)
-    await db.collection('tableOrderSession').doc(primarySessionId).update({
-      data: {
+    await commitTableJoin(primarySessionId, primarySession, {
         memberOpenids: _.addToSet(auth.data.openid),
         sharedCartActiveUntil,
         updateTime: db.serverDate()
-      }
-    })
+    }, mergedSession.tableNumber, false)
     const nextSession = {
       ...primarySession,
       tableNumber: mergedSession.tableNumber,
@@ -8915,12 +9007,18 @@ async function joinSharedCart(payload) {
     if (oldRootOrderId) {
       const oldOrderRes = await db.collection('order').doc(oldRootOrderId).get().catch(() => ({ data: null }))
       const oldOrder = oldOrderRes.data
-      hasClosedOrderContext = !oldOrder || isClosedOrderContext(oldOrder)
+      hasClosedOrderContext = !oldOrder || (isClosedOrderContext(oldOrder) &&
+        !await canContinueRefundedVisit(oldOrder, oldSession))
     }
     const shouldResetSession = oldSession.status === 'finished' ||
       oldSession.checkoutStatus === 'finished' ||
       !isActiveTableSession(oldSession) ||
       hasClosedOrderContext
+    if (shouldResetSession) {
+      // Never discard a live add-on just because its root was refunded, the
+      // session expired, or another client is trying to start a new visit.
+      await assertNoUntrackedAdminBill(getOrderTableRef({ tableNumber }))
+    }
     const updateData = {
       tableNumber,
       status: 'ordering',
@@ -8962,13 +9060,9 @@ async function joinSharedCart(payload) {
         peopleConfirmedAt: null,
         sharedCartActiveUntil
       })
-      await clearSharedCartItemsBySessionId(sessionId)
-      clearedForNewSession = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date())
     }
     if (!shouldResetSession && !oldSession.visitId) updateData.visitId = newVisitId()
-    await sessionRef.update({
-      data: updateData
-    })
+    clearedForNewSession = await commitTableJoin(sessionId, oldSession, updateData, tableNumber, shouldResetSession)
     nextSession = shouldResetSession
       ? {
         ...getNewTableVisitSessionFields(),
@@ -8977,18 +9071,20 @@ async function joinSharedCart(payload) {
         peopleCount: 0,
         peopleConfirmed: false,
         cartVersion: 0,
-        visitId: newVisitId(),
+        visitId: updateData.visitId,
         visitHistory: [],
         sharedCartActiveUntil
       }
       : {
         ...oldSession,
+        visitId: updateData.visitId || oldSession.visitId,
         ...(inferredOrderContext || {}),
         peopleCount: updateData.peopleCount !== undefined ? updateData.peopleCount : oldSession.peopleCount,
         peopleConfirmed: updateData.peopleConfirmed !== undefined ? updateData.peopleConfirmed : oldSession.peopleConfirmed,
         sharedCartActiveUntil
       }
   } else {
+    await assertNoUntrackedAdminBill(getOrderTableRef({ tableNumber }))
     const inferredOrderContext = await getActiveTableOrderContext(tableNumber)
     if (inferredOrderContext.ambiguous) {
       return {
@@ -8999,8 +9095,8 @@ async function joinSharedCart(payload) {
     }
     const inheritedPeopleCount = Math.max(0, Math.floor(Number(inferredOrderContext.peopleCount || 0)))
     const inheritedPeopleConfirmed = inheritedPeopleCount > 0
-    await sessionRef.set({
-      data: {
+    const visitId = newVisitId()
+    clearedForNewSession = await commitTableJoin(sessionId, null, {
         ...getNewTableVisitSessionFields(),
         tableNumber,
         status: 'ordering',
@@ -9008,7 +9104,7 @@ async function joinSharedCart(payload) {
         peopleConfirmed: inheritedPeopleConfirmed,
         peopleConfirmedAt: inheritedPeopleConfirmed ? db.serverDate() : null,
         cartVersion: 0,
-        visitId: newVisitId(),
+        visitId,
         visitHistory: [],
         activeOrderRootId: inferredOrderContext.activeOrderRootId || '',
         addOnCount: inferredOrderContext.addOnCount || 0,
@@ -9016,9 +9112,7 @@ async function joinSharedCart(payload) {
         memberOpenids: [auth.data.openid],
         createTime: db.serverDate(),
         updateTime: db.serverDate()
-      }
-    })
-    clearedForNewSession = await autoClearPaidTableOrdersForNewSession(tableNumber, new Date())
+    }, tableNumber, true)
     nextSession = {
       ...getNewTableVisitSessionFields(),
       tableNumber,
@@ -9026,7 +9120,7 @@ async function joinSharedCart(payload) {
       peopleCount: inheritedPeopleCount,
       peopleConfirmed: inheritedPeopleConfirmed,
       cartVersion: 0,
-      visitId: newVisitId(),
+      visitId,
       activeOrderRootId: inferredOrderContext.activeOrderRootId || '',
       addOnCount: inferredOrderContext.addOnCount || 0,
       sharedCartActiveUntil
@@ -9076,12 +9170,16 @@ async function getSharedCart(payload) {
 
   const resolvedSession = await resolveSharedCartSession(tableNumber, sessionId)
   if (resolvedSession.redirected) {
+    const sourceSession = await getAdminBillSession(sessionId)
+    if (isStaleTableVisit(payload, sourceSession)) return closedTableVisitResult()
+    payload = { ...payload, tableVisitId: String(resolvedSession.session && resolvedSession.session.visitId || '') }
     tableNumber = resolvedSession.tableNumber
     sessionId = resolvedSession.sessionId
   }
   const session = resolvedSession.redirected
     ? resolvedSession.session
     : (await db.collection('tableOrderSession').doc(sessionId).get()).data
+  if (isStaleTableVisit(payload, session)) return closedTableVisitResult()
   const sessionState = buildSharedCartSessionState(session)
   const responseIdentity = {
     sessionId,
@@ -9148,12 +9246,16 @@ async function getSharedCartStatus(payload) {
 
   const resolvedSession = await resolveSharedCartSession(tableNumber, sessionId)
   if (resolvedSession.redirected) {
+    const sourceSession = await getAdminBillSession(sessionId)
+    if (isStaleTableVisit(payload, sourceSession)) return closedTableVisitResult()
+    payload = { ...payload, tableVisitId: String(resolvedSession.session && resolvedSession.session.visitId || '') }
     tableNumber = resolvedSession.tableNumber
     sessionId = resolvedSession.sessionId
   }
   const session = resolvedSession.redirected
     ? resolvedSession.session
     : (await db.collection('tableOrderSession').doc(sessionId).get()).data
+  if (isStaleTableVisit(payload, session)) return closedTableVisitResult()
   const accessPayload = getSharedCartAccessTokenPayload(
     payload.sharedCartAccessToken,
     getTenantId(payload),
@@ -9206,6 +9308,9 @@ async function setSharedCartPeople(payload) {
 
   const resolvedSession = await resolveSharedCartSession(tableNumber, sessionId)
   if (resolvedSession.redirected) {
+    const sourceSession = await getAdminBillSession(sessionId)
+    if (isStaleTableVisit(payload, sourceSession)) return closedTableVisitResult()
+    payload = { ...payload, tableVisitId: String(resolvedSession.session && resolvedSession.session.visitId || '') }
     tableNumber = resolvedSession.tableNumber
     sessionId = resolvedSession.sessionId
   }
@@ -9215,7 +9320,7 @@ async function setSharedCartPeople(payload) {
   const oldSession = oldSessionRes.data
   const oldPeopleState = buildSharedCartPeopleState(oldSession)
 
-  if (oldSession && !isActiveTableSession(oldSession)) {
+  if (!oldSession || !isActiveTableSession(oldSession) || isStaleTableVisit(payload, oldSession)) {
     return {
       success: false,
       code: 'SESSION_CLOSED',
@@ -9224,12 +9329,9 @@ async function setSharedCartPeople(payload) {
   }
 
   if (oldSession && isActiveTableSession(oldSession) && oldPeopleState.peopleConfirmed) {
-    await sessionRef.update({
-      data: {
-        memberOpenids: _.addToSet(auth.data.openid),
-        updateTime: db.serverDate()
-      }
-    })
+    await commitTableJoin(sessionId, oldSession, {
+      memberOpenids: _.addToSet(auth.data.openid), updateTime: db.serverDate()
+    }, tableNumber, false)
     return {
       success: true,
       sessionId,
@@ -9257,16 +9359,7 @@ async function setSharedCartPeople(payload) {
     updateTime: db.serverDate()
   }
 
-  if (oldSession) {
-    await sessionRef.update({ data })
-  } else {
-    await sessionRef.set({
-      data: {
-        ...data,
-        createTime: db.serverDate()
-      }
-    })
-  }
+  await commitTableJoin(sessionId, oldSession, data, tableNumber, false)
 
   return {
     success: true,
@@ -9309,6 +9402,9 @@ async function patchSharedCart(payload) {
 
   const resolvedSession = await resolveSharedCartSession(tableNumber, sessionId)
   if (resolvedSession.redirected) {
+    const sourceSession = await getAdminBillSession(sessionId)
+    if (isStaleTableVisit(payload, sourceSession)) return closedTableVisitResult()
+    payload = { ...payload, tableVisitId: String(resolvedSession.session && resolvedSession.session.visitId || '') }
     tableNumber = resolvedSession.tableNumber
     sessionId = resolvedSession.sessionId
   }
@@ -9326,7 +9422,8 @@ async function patchSharedCart(payload) {
   const transactionResult = await db.runTransaction(async transaction => {
     const txSessionRef = transaction.collection('tableOrderSession').doc(sessionId)
     const txSessionRes = await txSessionRef.get()
-    if (!isActiveTableSession(txSessionRes.data)) throw new Error('TABLE_SESSION_CLOSED')
+    if (!isActiveTableSession(txSessionRes.data) || isStaleTableVisit(payload, txSessionRes.data) ||
+        !(txSessionRes.data.memberOpenids || []).includes(auth.data.openid)) return closedTableVisitResult()
     const session = txSessionRes.data || {}
     const currentVersion = Math.max(0, Math.floor(Number(session.cartVersion || 0)))
     const appliedPatchIds = Array.isArray(session.appliedCartPatchIds) ? session.appliedCartPatchIds : []
@@ -9396,6 +9493,8 @@ async function patchSharedCart(payload) {
 
   const sharedCartActiveUntil = new Date(Date.now() + SHARED_CART_ACTIVE_WINDOW_MS)
 
+  if (transactionResult.success === false) return transactionResult
+
   return {
     success: true,
     sessionId,
@@ -9429,29 +9528,24 @@ async function clearSharedCart(payload) {
 
   const resolvedSession = await resolveSharedCartSession(tableNumber, sessionId)
   if (resolvedSession.redirected) {
+    const sourceSession = await getAdminBillSession(sessionId)
+    if (isStaleTableVisit(payload, sourceSession)) return closedTableVisitResult()
+    payload = { ...payload, tableVisitId: String(resolvedSession.session && resolvedSession.session.visitId || '') }
     tableNumber = resolvedSession.tableNumber
     sessionId = resolvedSession.sessionId
   }
 
-  const res = await db.collection('tableCartItem')
-    .where({
-      sessionId,
-      deleted: _.neq(true)
-    })
-    .limit(200)
-    .get()
-
-  await Promise.all((res.data || []).map(item => {
-    return db.collection('tableCartItem').doc(item._id).remove()
-  }))
-
-  await db.collection('tableOrderSession').doc(sessionId).update({
-    data: {
-      cartVersion: _.inc(1),
-      sharedCartActiveUntil: null,
-      updateTime: db.serverDate()
-    }
+  const result = await db.runTransaction(async transaction => {
+    const ref = transaction.collection('tableOrderSession').doc(sessionId)
+    const session = (await ref.get()).data
+    if (!isActiveTableSession(session) || isStaleTableVisit(payload, session) ||
+        !(session.memberOpenids || []).includes(auth.data.openid)) return closedTableVisitResult()
+    const items = await queryAdminBillDocuments('tableCartItem', { sessionId }, transaction)
+    for (const item of items) await transaction.collection('tableCartItem').doc(item._id).remove()
+    await ref.update({ data: { cartVersion: _.inc(1), sharedCartActiveUntil: null, updateTime: db.serverDate() } })
+    return { success: true, removed: items.length }
   })
+  if (!result.success) return result
 
   return {
     success: true,
@@ -9463,7 +9557,7 @@ async function clearSharedCart(payload) {
         tenantId: getTenantId(payload), sessionId, openid: auth.data.openid
       })
     } : {}),
-    removed: (res.data || []).length,
+    removed: result.removed,
     sharedCartSyncActive: false,
     sharedCartActiveUntil: 0
   }
@@ -11869,6 +11963,7 @@ async function handleAction(action, payload) {
   ) {
     const adminAuth = await requireAdminAuth(payload)
     if (!adminAuth.success) return adminAuth
+    if (action === 'admin.table.clear') payload.clearActorId = String(adminAuth.admin._id || adminAuth.admin.username || '')
   }
 
   if (action === 'admin.category.list') return adminListCategories(payload)
@@ -11909,7 +12004,12 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.finishCombinedCheckout') return completeAdminTableMutation(adminFinishCombinedTableCheckout(payload))
   if (action === 'admin.table.prebill') return adminPrintPrebill(payload)
   if (action === 'admin.table.printCustomerOrder') return adminPrintCustomerOrder(payload)
-  if (action === 'admin.table.clear') return completeAdminTableMutation(adminClearTable(payload))
+  if (action === 'admin.table.clearPreview') return adminClearTable({ ...payload, preview: true })
+  if (action === 'admin.table.clear') {
+    const result = await adminClearTable(payload)
+    if (result.success && payload.preview !== true) await touchAdminTableBoard()
+    return result
+  }
   if (action === 'admin.table.sendKitchen') return completeAdminTableMutation(adminSendTableToKitchen(payload))
   if (action === 'admin.table.sendKitchenItems') return completeAdminTableMutation(adminSendKitchenItems(payload))
   if (action === 'admin.table.retryFailedKitchenItems') return completeAdminTableMutation(adminRetryFailedKitchenItems(payload))

@@ -66,6 +66,17 @@
     </view>
   </view>
 
+  <view wx:if="{{showSubmitConfirmation}}" class="submit-confirm-mask" catchtap="catchSubmitConfirmationTap" catchtouchmove="catchSubmitLoadingMove">
+    <view class="submit-confirm-dialog" role="dialog" aria-label="请核对菜品" aria-modal="true" catchtap="catchSubmitConfirmationTap">
+      <view class="submit-confirm-title">请核对菜品</view>
+      <view class="submit-confirm-message">因本店所有菜品为新鲜拌制，上桌后概不退不换，望谅解！</view>
+      <view class="submit-confirm-actions">
+        <button class="submit-confirm-button submit-confirm-review" bindtap="cancelSubmitConfirmation">重新核对</button>
+        <button class="submit-confirm-button submit-confirm-accept" bindtap="confirmSubmitOrder">确认提交</button>
+      </view>
+    </view>
+  </view>
+
   <!-- 用户信息授权组件 -->
   <avatar-nickname-modal 
     showAvaModal="{{showAuthModal}}" 

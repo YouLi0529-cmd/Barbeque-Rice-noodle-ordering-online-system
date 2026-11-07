@@ -815,64 +815,78 @@ Page({
 
   async confirmClearTable() {
     if (this.data.clearingTable) return
-    const tables = Object.keys(this.data.selectedTableMap || {})
-      .map(key => this.data.selectedTableMap[key])
-      .filter(table => table && table.tableNumber)
-    if (tables.length === 0) {
-      wx.showToast({
-        title: UI.clearSelectFirst,
-        icon: 'none'
-      })
+    const tables = Object.values(this.data.selectedTableMap || {}).filter(table => table && table.tableNumber)
+    if (!tables.length) {
+      wx.showToast({ title: UI.clearSelectFirst, icon: 'none' })
       return
     }
-
-    const confirmed = await new Promise(resolve => {
-      wx.showModal({
-        title: UI.clearConfirmTitle,
-        content: `${UI.clearConfirmPrefix}${tables.map(table => table.label).join(', ')}${UI.clearConfirmSuffix}`,
-        confirmText: UI.clearTable,
-        cancelText: '\u53d6\u6d88',
-        success: res => resolve(res.confirm === true),
-        fail: () => resolve(false)
-      })
-    })
-    if (!confirmed) return
-
+    this.setData({ clearingTable: true })
+    wx.showLoading({ title: '检查中', mask: true })
     try {
-      this.setData({ clearingTable: true })
-      const results = []
+      const previews = []
+      const covered = new Set()
       for (const table of tables) {
+        const key = `${table.areaKey}-${table.tableNumber}`
+        if (covered.has(key)) continue
         try {
-          await apiClient.call('admin.table.clear', {
-            areaKey: table.areaKey,
-            tableNumber: table.tableNumber
+          const result = await apiClient.call('admin.table.clearPreview', {
+            areaKey: table.areaKey, tableNumber: table.tableNumber
           })
-          results.push({ table, cleared: true })
+          const preview = result.data
+          for (const ref of preview.tables) covered.add(`${ref.areaKey}-${ref.tableNumber}`)
+          previews.push({ table, preview })
         } catch (err) {
-          results.push({ table, error: err })
+          if (err.code !== 'NO_TABLE_STATE') throw err
         }
       }
-      const failed = results.filter(item => item.error && item.error.code !== 'NO_TABLE_STATE')
-      if (failed.length > 0) {
-        throw failed[0].error
+      wx.hideLoading()
+      if (!previews.length) {
+        wx.showToast({ title: '所选桌台已清台', icon: 'none' })
+        return
       }
-      this.setData({
-        selectedTableMap: {},
-        selectedTableCount: 0
-      })
-      wx.showToast({
-        title: UI.clearSuccess,
-        icon: 'success'
-      })
-      await this.loadTables(true)
+      const refs = previews.flatMap(item => item.preview.tables)
+      const labels = refs.map(ref => ref.label || `${ref.areaKey}-${ref.tableNumber}`).join('、')
+      const count = previews.reduce((sum, item) => sum + item.preview.unpaidOrderCount, 0)
+      const amount = previews.reduce((sum, item) => sum + Number(item.preview.unpaidAmount || 0), 0)
+      const hasCart = previews.some(item => item.preview.cartItemCount > 0 || item.preview.ordering)
+      const messages = [`将结束 ${labels} 的本次用餐${refs.length > previews.length ? '，拼桌将整组清台' : ''}。`]
+      if (count) messages.push(`还有 ${count} 笔未结订单、未结金额 ¥${amount.toFixed(2)}，确认后作废并保留记录。`)
+      else if (hasCart) messages.push('该桌存在点菜会话，确认后结束会话并清空购物车。')
+      if (previews.some(item => item.preview.kitchenWarning)) messages.push('菜品可能已发送后厨，请通知后厨停止制作，已打印纸单需人工处理。')
+      const confirmed = await new Promise((resolve, reject) => wx.showModal({
+        title: count ? '确认作废并清台' : '确认清台', content: messages.join('\n'),
+        confirmText: count ? '作废清台' : '确认清台', confirmColor: '#c0392b',
+        success: result => resolve(result.confirm === true),
+        fail: err => {
+          const error = new Error('清台确认框未能打开，请重试')
+          error.code = 'TABLE_CLEAR_DIALOG_FAILED'
+          error.cause = err
+          reject(error)
+        }
+      }))
+      if (!confirmed) return
+      wx.showLoading({ title: '正在作废并清台', mask: true })
+      for (const { table, preview } of previews) {
+        await apiClient.call('admin.table.clear', {
+          areaKey: table.areaKey, tableNumber: table.tableNumber,
+          confirm: true, confirmationToken: preview.confirmationToken
+        })
+      }
+      wx.hideLoading()
+      this.setData({ selectedTableMap: {}, selectedTableCount: 0 })
+      wx.showToast({ title: UI.clearSuccess, icon: 'success' })
     } catch (err) {
+      wx.hideLoading()
       console.error('clear table failed', err)
-      wx.showToast({
-        title: err.message || UI.clearFailed,
-        icon: 'none'
-      })
+      const message = /timeout/i.test(String(err.errMsg || err.message || ''))
+        ? '清台请求超时，请刷新确认桌台状态后重试'
+        : (err.message || UI.clearFailed)
+      wx.showToast({ title: message, icon: 'none', duration: 3000 })
     } finally {
+      wx.hideLoading()
       this.setData({ clearingTable: false })
+      // Refresh after releasing the button, even when the refresh itself times out.
+      await this.loadTables(true)
     }
   },
 

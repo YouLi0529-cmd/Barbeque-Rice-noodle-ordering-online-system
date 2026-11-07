@@ -23,6 +23,7 @@ Page({
     orderScene: 'dineIn',
     userInfo: null,
     submitting: false,
+    showSubmitConfirmation: false,
     canSubmit: false,
     showAuthModal: false,
     orderSubmitted: false,
@@ -33,6 +34,7 @@ Page({
     sessionTotalPrice: 0,
     sessionGoodsCount: 0,
     activeOrderSession: null,
+    tableVisitId: '',
     sharedSessionId: '',
     sharedCartVersion: 0,
     appendToOrderId: '',
@@ -50,6 +52,14 @@ Page({
   onShow() {
     this.loadUserInfo()
     this.updateCanSubmit()
+  },
+
+  onHide() {
+    this.cancelSubmitConfirmation()
+  },
+
+  onUnload() {
+    this.submitConfirmationSnapshot = null
   },
 
   buildOrderCard(options) {
@@ -224,6 +234,8 @@ Page({
           tags: displayTags,
           tagText: displayTags.join('、'),
           subtotal,
+          packageId: item.packageId || '',
+          packageCount: item.packageId ? Math.floor(Number(item.packageCount || 0)) : 0,
           freeByThreshold: !!item.freeByThreshold
         })
       }
@@ -258,6 +270,7 @@ Page({
         orderType: cartData.orderType || 'dineIn',
         orderScene,
         sharedSessionId: cartData.sharedSessionId || '',
+        tableVisitId: cartData.tableVisitId || '',
         sharedCartVersion: Number(cartData.sharedCartVersion || 0),
         submitLoadingGif: orderScene === 'camping'
           ? '/images/loadinggif-cutout-transparent.gif'
@@ -394,25 +407,100 @@ Page({
     )
   },
 
-  async submitOrder() {
-    if (!this.data.canSubmit || this.data.submitting) {
-      return
+  getSubmitGoodsFingerprint(goods = []) {
+    const rows = goods.map(item => ({
+      dishId: String(item.dishId || ''),
+      count: Number(item.count || 0),
+      price: Number(item.price || 0),
+      tags: (Array.isArray(item.tags) ? item.tags : []).map(tag => String(tag).replace(/^备注[:：]/, '')).sort(),
+      packageId: String(item.packageId || ''),
+      packageCount: Number(item.packageCount || 0)
+    }))
+    rows.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+    return JSON.stringify(rows)
+  },
+
+  buildGoodsFromSharedCart(cart = {}) {
+    return Object.keys(cart).map(key => {
+      const item = cart[key] || {}
+      const info = item.info || {}
+      const tags = Array.isArray(item.tagLabels)
+        ? item.tagLabels
+        : Object.values(item.tags || {}).flatMap(value => Array.isArray(value) ? value : (value ? [value] : []))
+      const price = Number(item.displayPrice !== undefined ? item.displayPrice : info.price || 0)
+      const count = Math.floor(Number(item.count || 0))
+      return {
+        dishId: item.dishId || info._id || '',
+        dishName: info.name || '',
+        dishImage: info.image || '',
+        price, count, tags,
+        tagText: tags.map(tag => String(tag).replace(/^备注[:：]/, '')).join('、'),
+        subtotal: Number(item.subtotal !== undefined ? item.subtotal : price * count).toFixed(2),
+        packageId: item.packageId || '',
+        packageCount: item.packageId ? Math.floor(Number(item.packageCount || 0)) : 0
+      }
+    }).filter(item => item.dishId && item.count > 0)
+  },
+
+  refreshPendingOrderDetails(indexPage) {
+    if (!indexPage || !indexPage.data || !indexPage.data.cart) return
+    const goods = this.buildGoodsFromSharedCart(indexPage.data.cart)
+    const totalPrice = Number(indexPage.data.cartTotalPrice || 0)
+    const pendingCard = this.buildOrderCard({
+      cardId: 'pending-current-order', title: this.data.currentCardTitle,
+      goods, totalPrice, finalPrice: totalPrice, isAddOnOrder: this.data.isAddOnOrder
+    })
+    this.setData({
+      orderGoods: goods, orderGoodsCount: pendingCard.goodsCount,
+      totalPrice, finalPrice: totalPrice,
+      sharedCartVersion: Number(indexPage.data.sharedCartVersion || 0),
+      ...this.getOrderCardsData((this.data.previousOrderCards || []).concat(pendingCard))
+    })
+    this.updateCanSubmit()
+  },
+
+  submitOrder() {
+    if (!this.data.canSubmit || this.data.submitting || this.data.orderSubmitted || this.data.showSubmitConfirmation) return
+    if (this.data.orderScene === 'camping') return this.performSubmitOrder()
+    this.submitConfirmationSnapshot = {
+      goods: this.getSubmitGoodsFingerprint(this.data.orderGoods),
+      cartVersion: Number(this.data.sharedCartVersion || 0),
+      tableNumber: this.data.tableNumber,
+      sessionId: this.data.sharedSessionId,
+      visitId: this.data.tableVisitId
     }
+    this.setData({ showSubmitConfirmation: true })
+  },
 
-    await this.loadUserInfoFromDB()
+  cancelSubmitConfirmation() {
+    this.submitConfirmationSnapshot = null
+    if (this.data.showSubmitConfirmation) this.setData({ showSubmitConfirmation: false })
+  },
 
+  confirmSubmitOrder() {
+    if (!this.data.showSubmitConfirmation || this.data.submitting || !this.submitConfirmationSnapshot) return
+    const snapshot = this.submitConfirmationSnapshot
+    this.submitConfirmationSnapshot = null
+    this.setData({ showSubmitConfirmation: false })
+    return this.performSubmitOrder(snapshot)
+  },
+
+  catchSubmitConfirmationTap() {},
+
+  async performSubmitOrder(confirmation) {
+    if (!this.data.canSubmit || this.data.submitting || this.data.orderSubmitted) return
+    if (this.data.orderScene !== 'camping' && !confirmation) return
     if (this.data.orderScene !== 'camping' && !this.data.tableNumber) {
-      wx.showToast({
-        title: '请先扫描桌码',
-        icon: 'none'
-      })
+      wx.showToast({ title: '请先扫描桌码', icon: 'none' })
       return
     }
 
     let submissionCompleted = false
+    const indexPage = getCurrentPages().find(page => page.route === 'packages/order/pages/index/index')
     this.setData({ submitting: true })
 
     try {
+      await this.loadUserInfoFromDB()
       const orderPayload = {
         orderGoods: this.data.orderGoods,
         totalPrice: this.data.totalPrice,
@@ -421,12 +509,12 @@ Page({
         orderType: this.data.orderType,
         orderScene: this.data.orderScene,
         sharedSessionId: this.data.sharedSessionId,
+        tableVisitId: this.data.tableVisitId,
         cartVersion: this.data.sharedCartVersion,
         parentOrderId: this.data.appendToOrderId,
         addOnIndex: this.data.addOnIndex,
         orderCardTitle: this.data.currentCardTitle
       }
-      const indexPage = getCurrentPages().find(page => page.route === 'packages/order/pages/index/index')
       if (indexPage && this.data.orderScene !== 'camping' && typeof indexPage.ensureSharedCartReadyForSubmit === 'function') {
         await indexPage.ensureSharedCartReadyForSubmit()
         orderPayload.cartVersion = Number(indexPage.data.sharedCartVersion || orderPayload.cartVersion || 0)
@@ -435,24 +523,18 @@ Page({
       // latest local cart after queued shared-cart writes finish so fallback
       // order paths cannot submit stale quantities.
       if (indexPage && this.data.orderScene !== 'camping' && indexPage.data && indexPage.data.cart) {
-        const latestCart = indexPage.data.cart
-        orderPayload.orderGoods = Object.keys(latestCart).map(key => {
-          const item = latestCart[key] || {}
-          const info = item.info || {}
-          const tags = Array.isArray(item.tagLabels)
-            ? item.tagLabels
-            : Object.values(item.tags || {}).flatMap(value => Array.isArray(value) ? value : (value ? [value] : []))
-          return {
-            dishId: item.dishId || info._id || '',
-            dishName: info.name || '',
-            dishImage: info.image || '',
-            price: Number(item.displayPrice !== undefined ? item.displayPrice : info.price || 0),
-            count: Math.floor(Number(item.count || 0)),
-            tags,
-            packageId: item.packageId || '',
-            packageCount: item.packageId ? Math.floor(Number(item.packageCount || 0)) : 0
-          }
-        }).filter(item => item.dishId && item.count > 0)
+        orderPayload.orderGoods = this.buildGoodsFromSharedCart(indexPage.data.cart)
+      }
+      if (confirmation && (
+        confirmation.goods !== this.getSubmitGoodsFingerprint(orderPayload.orderGoods) ||
+        confirmation.cartVersion !== orderPayload.cartVersion ||
+        confirmation.tableNumber !== orderPayload.tableNumber ||
+        confirmation.sessionId !== orderPayload.sharedSessionId ||
+        confirmation.visitId !== orderPayload.tableVisitId
+      )) {
+        const error = new Error('菜品已变化，请重新核对')
+        error.code = 'SHARED_CART_CHANGED'
+        throw error
       }
       const doBuyResult = apiClient.isEnabled()
         ? await apiClient.call('order.create', orderPayload)
@@ -472,10 +554,14 @@ Page({
           return
         }
         if (doBuyResult?.code === 'SHARED_CART_CHANGED' || doBuyResult?.code === 'SHARED_CART_ALREADY_SUBMITTED') {
+          if (indexPage && typeof indexPage.fetchSharedCart === 'function') {
+            await indexPage.fetchSharedCart(false, true)
+            this.refreshPendingOrderDetails(indexPage)
+          }
           wx.showModal({
             title: '购物车状态有变化',
             content: doBuyResult.code === 'SHARED_CART_CHANGED'
-              ? '购物车刚刚发生变化，订单尚未提交。请核对菜品和数量后再提交。'
+              ? '菜品已变化，请重新核对菜品和数量后再提交。'
               : '这份购物车可能已经提交，请先返回订单页面确认，避免重复下单。',
             showCancel: false,
             confirmText: '我知道了'
@@ -583,10 +669,14 @@ Page({
         return
       }
       if (err && (err.code === 'SHARED_CART_CHANGED' || err.code === 'SHARED_CART_ALREADY_SUBMITTED')) {
+        if (indexPage && typeof indexPage.fetchSharedCart === 'function') {
+          await indexPage.fetchSharedCart(false, true)
+          this.refreshPendingOrderDetails(indexPage)
+        }
         wx.showModal({
           title: '购物车状态有变化',
           content: err.code === 'SHARED_CART_CHANGED'
-            ? '购物车刚刚发生变化，订单尚未提交。请核对菜品和数量后再提交。'
+            ? '菜品已变化，请重新核对菜品和数量后再提交。'
             : '这份购物车可能已经提交，请先返回订单页面确认，避免重复下单。',
           showCancel: false,
           confirmText: '我知道了'
@@ -695,6 +785,7 @@ Page({
         await apiClient.call('sharedCart.clear', {
           action: 'clear',
           sessionId: this.data.sharedSessionId,
+          tableVisitId: this.data.tableVisitId,
           tableNumber: this.data.tableNumber
         })
         return

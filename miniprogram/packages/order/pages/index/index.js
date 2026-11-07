@@ -63,6 +63,7 @@ Page({
     searchRowTop: 50,
     shopNavTotalHeight: 84,
     tableNumber: '', // 桌码号
+    sharedVisitId: '',
     sharedSessionId: '',
     sharedCartAccessToken: '',
     sharedCartReady: false,
@@ -254,6 +255,7 @@ Page({
     this.setData({
       tableNumber: nextTableNumber,
       sharedSessionId: nextSessionId,
+      sharedVisitId: result.tableVisitId || this.data.sharedVisitId,
       sharedCartAccessToken: result.sharedCartAccessToken || this.data.sharedCartAccessToken,
       sharedCartVersion: Number(result.cartVersion || 0),
       sharedCartHydrated: false,
@@ -271,6 +273,7 @@ Page({
     this.setData({
       tableNumber: '',
       sharedSessionId: '',
+      sharedVisitId: '',
       sharedCartAccessToken: '',
       sharedCartReady: false,
       sharedCartWatchReady: false,
@@ -378,16 +381,18 @@ Page({
   },
 
   async callSharedCartApi(action, data = {}) {
+    const requestData = action === 'sharedCart.join' ? data : { ...data, tableVisitId: data.tableVisitId || this.data.sharedVisitId }
     await this.ensureSharedCartApiAuth()
     try {
-      return await apiClient.call(action, data)
+      return await apiClient.call(action, requestData)
     } catch (err) {
       // A stale local token can occur after the user has left the program for
       // a while. Refresh it once so confirming diners never exposes login
       // state to the ordering flow.
+      if (this.isSharedSessionClosed(err || {})) this.handleSharedSessionClosed(err.message)
       if (!err || err.code !== 'AUTH_REQUIRED') throw err
       await this.ensureSharedCartApiAuth(true)
-      return apiClient.call(action, data)
+      return apiClient.call(action, requestData)
     }
   },
 
@@ -529,6 +534,7 @@ Page({
       this.setData({
         tableNumber: result.tableNumber || currentTable,
         sharedSessionId: result.sessionId,
+        sharedVisitId: result.tableVisitId || '',
         sharedCartAccessToken: result.sharedCartAccessToken || '',
         sharedCartReady: true,
         sharedCartVersion: Number(result.cartVersion || 0),
@@ -1031,6 +1037,7 @@ Page({
     const patch = {
       patchId: sharedCartSync.createPatchId(),
       sessionId: this.data.sharedSessionId,
+      tableVisitId: this.data.sharedVisitId,
       tableNumber: this.data.tableNumber,
       operations
     }
@@ -1056,7 +1063,7 @@ Page({
     const pendingPatches = this.sharedCartPendingPatches || []
     while (pendingPatches.length) {
       const patch = pendingPatches[0]
-      if (patch.sessionId !== this.data.sharedSessionId) {
+      if (patch.sessionId !== this.data.sharedSessionId || patch.tableVisitId !== this.data.sharedVisitId) {
         pendingPatches.shift()
         continue
       }
@@ -1065,6 +1072,7 @@ Page({
           ? await this.callSharedCartApi('sharedCart.patch', {
             action: 'patch',
             sessionId: patch.sessionId,
+            tableVisitId: patch.tableVisitId,
             tableNumber: patch.tableNumber,
             patchId: patch.patchId,
             operations: patch.operations
@@ -2850,6 +2858,7 @@ Page({
         orderType: 'dineIn',
         orderScene: 'dineIn',
         sharedSessionId: this.data.sharedSessionId || '',
+        tableVisitId: this.data.sharedVisitId || '',
         sharedCartVersion: Number(this.data.sharedCartVersion || 0),
         activeOrderSession: this.getActiveOrderSessionForSettle(),
         sharedOrderContext: this.data.sharedOrderRootId

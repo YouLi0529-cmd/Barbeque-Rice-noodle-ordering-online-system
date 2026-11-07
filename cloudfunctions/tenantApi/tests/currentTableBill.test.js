@@ -47,7 +47,7 @@ function makeHarness(data) {
     getTimeValue: value => value || 0
   }
   const bill = vm.runInNewContext(source.slice(start, end) + '\n;getAdminTableBill', context)
-  return { bill, queries }
+  return { bill, queries, reader: context.db }
 }
 
 const table = number => ({ areaKey: 'normal', tableNumber: number })
@@ -96,4 +96,29 @@ test('a paid, uncleared bill remains visible after its session ends', async () =
   const { bill } = makeHarness({ order: [order('paid', 'paid', 'v1', '01', { payStatus: true })] })
   assert.equal((await bill(table('01'), { includePaid: true })).orders.length, 1)
   assert.equal((await bill(table('01'))).orders.length, 0)
+})
+
+test('a refunded first order remains the visit anchor while its live add-on stays in the bill', async () => {
+  const { bill } = makeHarness({
+    tableOrderSession: [{ _id: 'table_01', status: 'ordering', visitId: 'v1', activeOrderRootId: 'root' }],
+    order: [order('root', 'root', 'v1', '01', { status: 'cancelled', goods: [], finalPrice: 0 }),
+      order('add1', 'root', 'v1', '01', { goods: [{ count: 1 }], finalPrice: 25 }),
+      order('other-visit', 'root', 'v2', '01', { finalPrice: 99 })]
+  })
+  const result = await bill(table('01'))
+  assert.deepEqual(Array.from(result.orders, item => item._id), ['add1'])
+  assert.equal(result.session.activeOrderRootId, 'root')
+  assert.equal(result.session.visitId, 'v1')
+})
+
+test('transaction bill reads use the supplied reader for sessions, roots and add-ons', async () => {
+  const outside = makeHarness({})
+  const inside = makeHarness({
+    tableOrderSession: [{ _id: 'table_01', status: 'ordering', visitId: 'v1', activeOrderRootId: 'root' }],
+    order: [order('root', 'root', 'v1', '01'), order('new-addon', 'root', 'v1', '01')]
+  })
+  const result = await outside.bill(table('01'), {}, inside.reader)
+  assert.deepEqual(Array.from(result.orders, row => row._id).sort(), ['new-addon', 'root'])
+  assert.equal(outside.queries.length, 0)
+  assert.ok(inside.queries.some(query => query.name === 'tableOrderSession'))
 })

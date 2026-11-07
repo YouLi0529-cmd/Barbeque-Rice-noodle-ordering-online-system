@@ -25,9 +25,23 @@
         {
           "name": "packages/order/pages/index/index",
           "pathName": "packages/order/pages/index/index",
-          "query": "scene=T09",
+          "query": "scene=T08",
           "scene": null,
           "launchMode": "default"
+        },
+        {
+          "name": "packages/order/pages/index/index?scene=T11",
+          "pathName": "packages/order/pages/index/index?scene=T11",
+          "query": "",
+          "launchMode": "default",
+          "scene": null
+        },
+        {
+          "name": "packages/order/pages/index/index",
+          "pathName": "packages/order/pages/index/index",
+          "query": "scene=T09",
+          "launchMode": "default",
+          "scene": null
         },
         {
           "name": "packages/admin/pages/admin/admin",
