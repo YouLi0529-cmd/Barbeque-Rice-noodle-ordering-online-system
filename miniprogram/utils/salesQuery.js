@@ -4,7 +4,7 @@ function todayBeijing() {
   return new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10)
 }
 
-function validateSalesFilters(startDate, endDate, categoryKey) {
+function validateDateRange(startDate, endDate) {
   if (!startDate || !endDate) return '请选择查询时间段'
   const validDate = value => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
@@ -13,6 +13,12 @@ function validateSalesFilters(startDate, endDate, categoryKey) {
   }
   if (!validDate(startDate) || !validDate(endDate)) return '查询日期无效'
   if (endDate < startDate) return '结束日期不能早于开始日期'
+  return ''
+}
+
+function validateSalesFilters(startDate, endDate, categoryKey) {
+  const message = validateDateRange(startDate, endDate)
+  if (message) return message
   if (!categoryKey) return '请选择查询品类'
   return ''
 }
@@ -55,4 +61,4 @@ function buildSalesResult(map) {
     quantity, amountText: money(amountCents) }
 }
 
-module.exports = { GROUP_BUY_KEY, todayBeijing, validateSalesFilters, mergeCategories, mergeSalesRows, buildSalesResult }
+module.exports = { GROUP_BUY_KEY, todayBeijing, validateDateRange, validateSalesFilters, mergeCategories, mergeSalesRows, buildSalesResult }

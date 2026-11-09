@@ -401,5 +401,6 @@
     </view>
   </view>
 
+  <canvas type="2d" id="dish-image-canvas" class="dish-image-canvas"></canvas>
 </view>
 <admin-info-center />

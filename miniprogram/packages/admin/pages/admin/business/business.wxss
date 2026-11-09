@@ -491,3 +491,16 @@ page {
     font-size: 9rpx;
   }
 }
+
+
+.revenue-value-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10rpx;
+}
+
+.revenue-query-cancel {
+  background: #FFFFFF;
+  border: 1rpx solid #E6D5C0;
+}

@@ -1,7 +1,8 @@
 <view class="business-page" capture-bind:tap="onAdminTap">
   <view class="business-head">
-    <view class="business-title">{{salesView === 'result' ? '销量查询' : ui.title}}</view>
-    <view wx:if="{{salesView === 'result'}}" class="business-refresh" bindtap="openSalesQuery">返回</view>
+    <view class="business-title">{{salesView === 'result' ? (queryMode === 'revenue' ? '某时间段营业额' : '销量查询') : ui.title}}</view>
+    <view wx:if="{{salesView === 'result' && queryMode === 'revenue'}}" class="business-refresh" bindtap="openRevenueQuery">返回</view>
+    <view wx:elif="{{salesView === 'result'}}" class="business-refresh" bindtap="openSalesQuery">返回</view>
     <view wx:else class="business-refresh" bindtap="refreshStats">{{refreshing ? '...' : ui.refresh}}</view>
   </view>
 
@@ -29,7 +30,10 @@
             </block>
           </view>
         </view>
-        <view class="revenue-value"><text class="money-symbol">{{ui.currency}}</text>{{revenueText}}</view>
+        <view class="revenue-value-row">
+          <view class="revenue-value"><text class="money-symbol">{{ui.currency}}</text>{{revenueText}}</view>
+          <view class="sales-query-entry" bindtap="openRevenueQuery">某时间段营业额</view>
+        </view>
         <view class="revenue-breakdown">
           <view class="revenue-breakdown-item">
             <text class="revenue-breakdown-label">{{ui.cashRevenue}}</text>
@@ -123,7 +127,7 @@
     </view>
   </scroll-view>
 
-  <scroll-view wx:if="{{salesView === 'result'}}" class="business-scroll" scroll-y>
+  <scroll-view wx:if="{{salesView === 'result' && queryMode !== 'revenue'}}" class="business-scroll" scroll-y>
     <view class="sales-result">
       <view class="sales-result-title">{{salesResultCategory}}</view>
       <view class="sales-result-subtitle">{{salesResultDates}}（北京时间，含首尾两天）</view>
@@ -148,10 +152,31 @@
     </view>
   </scroll-view>
 
+  <scroll-view wx:if="{{salesView === 'result' && queryMode === 'revenue'}}" class="business-scroll" scroll-y>
+    <view class="sales-result">
+      <view class="sales-result-title">收款汇总</view>
+      <view class="sales-result-subtitle">{{revenueResultDates}}（北京时间，包含选定的首尾两天）</view>
+      <view class="sales-result-note">按结账时间统计堂食与露营的有效结算收款。</view>
+      <view class="sales-result-row sales-result-total">
+        <view class="sales-result-name">总收款</view>
+        <view class="sales-result-amount">¥{{revenueResultTotal}}</view>
+      </view>
+      <view class="sales-result-row">
+        <view class="sales-result-name">现金收款</view>
+        <view class="sales-result-amount">¥{{revenueResultCash}}</view>
+      </view>
+      <view class="sales-result-row">
+        <view class="sales-result-name">网银收款</view>
+        <view class="sales-result-amount">¥{{revenueResultOnline}}</view>
+      </view>
+      <view class="sales-result-back" bindtap="openRevenueQuery">返回</view>
+    </view>
+  </scroll-view>
+
   <view class="sales-modal-mask" wx:if="{{salesView === 'filter'}}">
     <view class="sales-modal-backdrop" catchtap="cancelSalesQuery"></view>
     <view class="sales-modal">
-      <view class="sales-modal-title">销量查询</view>
+      <view class="sales-modal-title">{{queryMode === 'revenue' ? '某时间段营业额' : '销量查询'}}</view>
       <scroll-view class="sales-modal-body" scroll-y style="height: {{salesSelection ? '340rpx' : '155rpx'}};">
         <view class="sales-field-label">查询时间段 <text class="sales-required">*</text></view>
         <view class="sales-date-range">
@@ -170,18 +195,20 @@
             <view wx:for="{{salesCalendarDays}}" wx:key="key" class="sales-calendar-cell {{item.disabled ? 'sales-day-disabled' : ''}} {{item.date && (item.date === salesStartDate || item.date === salesEndDate) ? 'sales-day-selected' : ''}}" bindtap="selectSalesDate" data-date="{{item.date}}">{{item.label}}</view>
           </view>
         </view>
-        <view class="sales-field-label">查询品类 <text class="sales-required">*</text></view>
-        <view class="sales-picker" bindtap="toggleSalesCategories">{{salesCategoryLabel || '请选择查询品类'}} ▾</view>
-        <scroll-view wx:if="{{salesSelection === 'category'}}" class="sales-category-list" scroll-y>
-          <view class="sales-category-option {{item.key === salesCategoryKey ? 'sales-day-selected' : ''}}" wx:for="{{salesCategories}}" wx:key="key" bindtap="selectSalesCategory" data-key="{{item.key}}">{{item.label}}</view>
-          <view class="sales-progress" wx:if="{{salesOptionsLoading}}">更多品类正在加载…</view>
-        </scroll-view>
-        <view class="sales-progress" wx:if="{{salesOptionsLoading}}">正在补齐历史品类，已检查 {{salesOptionsScanned}} 条结算订单；可先选择日期及已加载品类…</view>
+        <block wx:if="{{queryMode !== 'revenue'}}">
+          <view class="sales-field-label">查询品类 <text class="sales-required">*</text></view>
+          <view class="sales-picker" bindtap="toggleSalesCategories">{{salesCategoryLabel || '请选择查询品类'}} ▾</view>
+          <scroll-view wx:if="{{salesSelection === 'category'}}" class="sales-category-list" scroll-y>
+            <view class="sales-category-option {{item.key === salesCategoryKey ? 'sales-day-selected' : ''}}" wx:for="{{salesCategories}}" wx:key="key" bindtap="selectSalesCategory" data-key="{{item.key}}">{{item.label}}</view>
+            <view class="sales-progress" wx:if="{{salesOptionsLoading}}">更多品类正在加载…</view>
+          </scroll-view>
+          <view class="sales-progress" wx:if="{{salesOptionsLoading}}">正在补齐历史品类，已检查 {{salesOptionsScanned}} 条结算订单；可先选择日期及已加载品类…</view>
+        </block>
         <view class="sales-progress" wx:if="{{salesQuerying}}">{{salesProgress}}</view>
         <view class="sales-error" wx:if="{{salesOptionsError || salesError}}">{{salesOptionsError || salesError}}</view>
       </scroll-view>
       <view class="sales-modal-actions">
-        <button class="sales-action sales-action-cancel" bindtap="cancelSalesQuery">取消</button>
+        <button class="sales-action sales-action-cancel {{queryMode === 'revenue' ? 'revenue-query-cancel' : ''}}" bindtap="cancelSalesQuery">取消</button>
         <button class="sales-action sales-action-query" disabled="{{salesOptionsLoading || salesOptionsError || salesQuerying}}" bindtap="submitSalesQuery">{{salesQuerying ? '查询中…' : '查询'}}</button>
       </view>
     </view>

@@ -191,16 +191,12 @@ test('waiter stops without writing if another request changes or ends the dining
   }
 })
 
-test('unpaid live add-ons require explicit confirmation before force clear', async () => {
+test('deployed clear behavior previews live add-ons and allows the legacy clear payload', async () => {
   const h = harness()
-  const rejected = await h.context.adminClearTable({ tableNumber: '03', areaKey: 'sky' })
-  assert.equal(rejected.code, 'TABLE_CLEAR_CONFIRM_REQUIRED')
-  assert.equal(h.writes.length, 0)
   const preview = await h.context.adminClearTable({ tableNumber: '03', areaKey: 'sky', preview: true })
   assert.equal(h.writes.length, 0)
   assert.equal(preview.data.unpaidOrderCount, 1)
-  const cleared = await h.context.adminClearTable({ tableNumber: '03', areaKey: 'sky',
-    confirm: true, confirmationToken: preview.data.confirmationToken })
+  const cleared = await h.context.adminClearTable({ tableNumber: '03', areaKey: 'sky' })
   assert.equal(cleared.success, true)
   assert.equal(h.addon.status, 'cancelled')
   assert.equal(h.addon.tableCleared, true)

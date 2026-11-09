@@ -121,7 +121,7 @@ test('preview is read-only; confirmation voids unpaid orders, closes carts, and 
   assert.equal(h.state.tableOrderSession[0].status, 'finished')
 })
 
-test('a changed visit, cart, order amount, or transferred table rejects the old confirmation without writes', async () => {
+test('deployed clear behavior reads current state even when the preview token is stale', async () => {
   const changes = [
     state => { state.tableOrderSession[0].visitId = 'new-visit' },
     state => { state.tableOrderSession[0].cartVersion++ },
@@ -131,9 +131,10 @@ test('a changed visit, cart, order amount, or transferred table rejects the old 
   for (const change of changes) {
     const h = harness(), preview = await h.preview()
     change(h.state)
-    const before = JSON.stringify(h.state)
-    assert.equal((await h.clear(preview.data.confirmationToken)).code, 'TABLE_CLEAR_STATE_CHANGED')
-    assert.equal(JSON.stringify(h.state), before)
+    assert.equal((await h.clear(preview.data.confirmationToken)).success, true)
+    assert.equal(h.state.tableOrderSession[0].status, 'finished')
+    const order = h.state.order[0]
+    assert.equal(order.status, order.tableNumber === '01' ? 'cancelled' : 'pending_prepare')
   }
 })
 
@@ -172,16 +173,17 @@ test('failed writes roll back order cancellation and cart removal', async () => 
   assert.equal(JSON.stringify(h.state), before)
 })
 
-test('a submission committed during clear forces recheck instead of clearing the changed bill', async () => {
+test('deployed clear behavior retries a transaction conflict and clears the latest bill', async () => {
   const h = harness(), preview = await h.preview()
   h.onCommit(state => {
     state.tableOrderSession[0].billVersion = 2
     state.order.push({ ...state.order[0], _id: 'late-order' })
   })
   const result = await h.clear(preview.data.confirmationToken)
-  assert.equal(result.code, 'TABLE_CLEAR_STATE_CHANGED')
-  assert.equal(h.state.order[0].status, 'pending_prepare')
-  assert.equal(h.state.tableCartItem.length, 1)
+  assert.equal(result.success, true)
+  assert.equal(h.state.order.length, 2)
+  assert.ok(h.state.order.every(order => order.status === 'cancelled'))
+  assert.equal(h.state.tableCartItem.length, 0)
 })
 
 test('a delayed join cannot reopen a session cleared after its initial read', async () => {
@@ -244,4 +246,10 @@ test('board queries exclude cancelled history at the database and retain every u
   assert.ok(result.data.some(row => row._id === 'paid'))
   assert.ok(result.data.some(row => row._id === 'legacy'))
   assert.equal(h.reads.length, 4)
+})
+
+
+test('clear implementation matches the supplied deployed code package', () => {
+  const code = extract('async function adminClearTable(', 'async function adminSendTableToKitchen(').replace(/\r+\n/g, '\n')
+  assert.equal(crypto.createHash('sha256').update(code).digest('hex'), 'ce8b8e67d585b546ca95ff12eeec8c6180f974aa5cd88b642503163bd1fc71fe')
 })

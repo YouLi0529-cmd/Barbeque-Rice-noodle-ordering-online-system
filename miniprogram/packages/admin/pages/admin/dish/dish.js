@@ -72,7 +72,7 @@ const UI = {
   imageUploading: '\u4e0a\u4f20\u4e2d...',
   imageUploaded: '\u56fe\u7247\u5df2\u4e0a\u4f20',
   imageUploadFailed: '\u56fe\u7247\u4e0a\u4f20\u5931\u8d25',
-  imageTooLarge: '\u56fe\u7247\u9700\u5c0f\u4e8e1MB',
+  imageTooLarge: '图片未能压缩至300KB以下，请换一张图片重试',
   imageInvalid: '\u4ec5\u652f\u6301 jpg/png/webp',
   inputSort: '\u6570\u5b57\u8d8a\u5c0f\u8d8a\u9760\u524d',
   loading: '\u52a0\u8f7d\u4e2d...',
@@ -95,7 +95,7 @@ const UI = {
   searchResult: '\u641c\u7d22\u7ed3\u679c',
   emptySearch: '\u672a\u627e\u5230\u83dc\u54c1',
   clearSearch: '\u6e05\u7a7a',
-  imageTip: '\u4ec5\u652f\u6301 jpg/png/webp\uff0c\u9009\u56fe\u540e\u53ef\u88c1\u526a\u4e3a\u65b9\u56fe\uff0c\u7cfb\u7edf\u4f1a\u81ea\u52a8\u538b\u7f29\u3002',
+  imageTip: '支持 JPG/PNG/WebP，可裁剪方图，上传前自动处理至300KB以下；大图可能缩小尺寸并转为JPG。',
   addPackage: '\u6dfb\u52a0\u5957\u9910',
   editPackage: '\u7f16\u8f91\u5957\u9910',
   emptyPackage: '\u6682\u65e0\u5957\u9910',
@@ -160,7 +160,7 @@ const DEFAULT_PACKAGE = {
   items: []
 }
 
-const MAX_IMAGE_SIZE = 1024 * 1024
+const MAX_IMAGE_SIZE = 300 * 1024
 const ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp']
 const DEFAULT_SPEC_OPTIONS = ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u6b63\u5e38\u8fa3']
 const SPEC_TEMPLATES = [
@@ -241,6 +241,11 @@ const SPEC_TEMPLATES = [
     value: 'custom'
   }
 ]
+
+function showImageUploadError(err) {
+  const detail = String(err && (err.message || err.errMsg) || UI.imageUploadFailed)
+  wx.showModal({ title: UI.imageUploadFailed, content: detail, showCancel: false, confirmText: '知道了' })
+}
 
 function showToast(title, icon = 'none') {
   wx.showToast({ title, icon })
@@ -1485,7 +1490,7 @@ Page({
           } catch (err) {
             wx.hideLoading()
             console.error('upload dish image failed', err)
-            showToast(err.message || UI.imageUploadFailed)
+            showImageUploadError(err)
           }
         }
       })
@@ -1495,6 +1500,7 @@ Page({
     wx.chooseMedia({
       count: 1,
       mediaType: ['image'],
+      sizeType: ['compressed'],
       sourceType: ['album', 'camera'],
       success: async res => {
         const file = res.tempFiles && res.tempFiles[0]
@@ -1502,11 +1508,11 @@ Page({
         try {
           const croppedPath = await this.cropDishImage(file.tempFilePath)
           if (!croppedPath) return
-          await this.uploadDishImage(croppedPath, file.size || 0)
+          await this.uploadDishImage(croppedPath)
         } catch (err) {
           wx.hideLoading()
           console.error('upload dish image failed', err)
-          showToast(err.message || UI.imageUploadFailed)
+          showImageUploadError(err)
         }
       }
     })
@@ -1541,15 +1547,58 @@ Page({
     })
   },
 
-  compressImage(filePath, quality = 72) {
-    return new Promise(resolve => {
-      wx.compressImage({
-        src: filePath,
-        quality,
-        success: res => resolve(res.tempFilePath || filePath),
-        fail: () => resolve(filePath)
+  async compressImage(filePath) {
+    const original = await this.getFileInfo(filePath)
+    if (!Number.isFinite(original.size) || original.size <= 0) throw new Error('无法读取图片大小，请重新选择')
+    if (original.size < MAX_IMAGE_SIZE) return filePath
+
+    const canvas = await new Promise((resolve, reject) => {
+      wx.createSelectorQuery().in(this).select('#dish-image-canvas').fields({ node: true }).exec(result => {
+        const node = result && result[0] && result[0].node
+        if (!node || !node.createImage) { reject(new Error('图片处理组件未就绪，请重新打开页面')); return }
+        resolve(node)
       })
     })
+    try {
+      const image = await new Promise((resolve, reject) => {
+        const source = canvas.createImage()
+        source.onload = () => resolve(source)
+        source.onerror = () => reject(new Error('无法读取图片内容，请选择JPG、PNG或WebP图片'))
+        source.src = filePath
+      })
+      const width = Number(image.width), height = Number(image.height)
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        throw new Error('图片尺寸无效，请重新选择')
+      }
+      const plans = [
+        { edge: 1280, quality: 0.85 }, { edge: 1280, quality: 0.65 },
+        { edge: 960, quality: 0.75 }, { edge: 720, quality: 0.7 },
+        { edge: 480, quality: 0.65 }, { edge: 320, quality: 0.6 }
+      ]
+      for (const plan of plans) {
+        const scale = Math.min(1, plan.edge / Math.max(width, height))
+        canvas.width = Math.max(1, Math.round(width * scale))
+        canvas.height = Math.max(1, Math.round(height * scale))
+        const context = canvas.getContext('2d')
+        // JPEG has no transparency. Fill the background before drawing.
+        context.fillStyle = '#FFFFFF'
+        context.fillRect(0, 0, canvas.width, canvas.height)
+        context.drawImage(image, 0, 0, canvas.width, canvas.height)
+        const output = await new Promise((resolve, reject) => wx.canvasToTempFilePath({
+          canvas, x: 0, y: 0, width: canvas.width, height: canvas.height,
+          destWidth: canvas.width, destHeight: canvas.height, fileType: 'jpg', quality: plan.quality,
+          success: resolve, fail: reject
+        }, this))
+        if (!output.tempFilePath) throw new Error('图片压缩失败，请重新选择')
+        const info = await this.getFileInfo(output.tempFilePath)
+        if (!Number.isFinite(info.size) || info.size <= 0) throw new Error('无法验证压缩后的图片大小')
+        if (info.size < MAX_IMAGE_SIZE) return output.tempFilePath
+      }
+      throw new Error(UI.imageTooLarge)
+    } finally {
+      canvas.width = 1
+      canvas.height = 1
+    }
   },
 
   uploadDishImageFile(filePath, dish = {}) {
@@ -1588,44 +1637,35 @@ Page({
     })
   },
 
-  async uploadDishImage(filePath, originalSize = 0) {
+  async uploadDishImage(filePath) {
+    if (this.dishImageUploading) return
     const ext = getFileExtension(filePath)
     if (ext && !ALLOWED_IMAGE_EXTENSIONS.includes(ext)) {
       showToast(UI.imageInvalid)
       return
     }
-
-    wx.showLoading({ title: UI.imageUploading })
-
-    let compressTarget = ext === 'webp' ? filePath : await this.compressImage(filePath)
-    let fileInfo = await this.getFileInfo(compressTarget)
-    let finalSize = fileInfo.size || originalSize || 0
-    if (finalSize > MAX_IMAGE_SIZE && ext !== 'webp') {
-      compressTarget = await this.compressImage(filePath, 45)
-      fileInfo = await this.getFileInfo(compressTarget)
-      finalSize = fileInfo.size || originalSize || 0
-    }
-
-    if (finalSize > MAX_IMAGE_SIZE) {
+    this.dishImageUploading = true
+    wx.showLoading({ title: '处理并上传中', mask: true })
+    try {
+      const target = await this.compressImage(filePath)
+      const info = await this.getFileInfo(target)
+      if (!Number.isFinite(info.size) || info.size <= 0) throw new Error('无法验证图片大小，请重新选择')
+      if (info.size >= MAX_IMAGE_SIZE) throw new Error(UI.imageTooLarge)
+      const currentDish = this.data.currentDish || {}
+      const data = await this.uploadDishImageFile(target, currentDish)
+      const fileID = data.fileID || ''
+      if (!fileID) throw new Error('上传未返回图片标识，请重新上传')
+      this.setData({
+        'currentDish.image': fileID,
+        'currentDish.imageFileID': fileID,
+        'currentDish.imagePreview': data.image || target
+      })
       wx.hideLoading()
-      showToast(UI.imageTooLarge)
-      return
-    }
-
-    const currentDish = this.data.currentDish || {}
-    const data = await this.uploadDishImageFile(compressTarget, currentDish)
-    const fileID = data.fileID || ''
-
-    wx.hideLoading()
-    this.setData({
-      'currentDish.image': fileID,
-      'currentDish.imageFileID': fileID,
-      'currentDish.imagePreview': data.image || compressTarget
-    })
-    showToast(UI.imageUploaded, 'success')
-
-    if (currentDish._id && !this.data.showDishModal) {
-      await this.loadDishes()
+      showToast(UI.imageUploaded, 'success')
+      if (currentDish._id && !this.data.showDishModal) await this.loadDishes()
+    } finally {
+      this.dishImageUploading = false
+      wx.hideLoading()
     }
   },
 

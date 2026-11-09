@@ -5,7 +5,9 @@ const https = require('https')
 const path = require('path')
 const { createPrintService } = require('./printService')
 const { createSalesQueryService } = require('./salesQueryService')
+const { createRevenueQueryService } = require('./revenueQueryService')
 const { createBusinessStatsReader } = require('./businessStatsReader')
+const { createTableArrivalReader } = require('./tableArrivalReader')
 const { isRefundedVisitRoot, hasLiveVisitAddOns } = require('./tableVisitOrders')
 const customerReceiptState = require('./customerReceiptState')
 const { getTableSettlementSummary } = require('./tableSettlementSummary')
@@ -88,6 +90,7 @@ const printService = createPrintService({
 
 const salesQueryService = createSalesQueryService({ db, _, getTenantId })
 const readBusinessStatsRecords = createBusinessStatsReader({ db, _ })
+const tableArrivalReader = createTableArrivalReader({ db, _ })
 
 let ensureSessionCollectionPromise = null
 const AUTH_SESSION_CACHE_TTL_MS = 60 * 1000
@@ -2982,53 +2985,14 @@ function buildTableArrivalSnapshot(orders = [], tableSessions = [], range = 'tod
 
 async function listDineInArrivalOrders(range = 'today', now = new Date(), customDate = '') {
   const startAt = getBusinessStatsRangeStart(range, now, customDate)
-  const endAt = getBusinessStatsRangeEnd(range, now, customDate)
-  try {
-    const res = await db.collection('order')
-      .where({ type: 'order', createTime: _.gte(startAt) })
-      .orderBy('createTime', 'asc')
-      .limit(500)
-      .get()
-    return (res.data || []).filter(order => {
-      const arrivedAt = getTimeValue(order.createTime)
-      return arrivedAt >= startAt.getTime() && (!endAt || arrivedAt < endAt)
-    })
-  } catch (err) {
-    // Keep the merchant board available in environments without this compound index.
-    console.warn('list dine-in arrival orders fallback', err)
-    try {
-      const res = await db.collection('order')
-        .where({ type: 'order' })
-        .orderBy('createTime', 'desc')
-        .limit(500)
-        .get()
-      return (res.data || []).filter(order => {
-        const arrivedAt = getTimeValue(order.createTime)
-        return arrivedAt >= startAt.getTime() && (!endAt || arrivedAt < endAt)
-      })
-    } catch (fallbackErr) {
-      console.warn('list dine-in arrival orders failed', fallbackErr)
-      return []
-    }
-  }
+  const endAt = getBusinessStatsRangeEnd(range, now, customDate) || now.getTime() + 1
+  return tableArrivalReader.orders(startAt.getTime(), endAt)
 }
 
 async function listConfirmedTableSessions(range = 'today', now = new Date(), customDate = '') {
   const startAt = getBusinessStatsRangeStart(range, now, customDate).getTime()
-  const endAt = getBusinessStatsRangeEnd(range, now, customDate)
-  try {
-    const res = await db.collection('tableOrderSession')
-      .where({ peopleConfirmed: true })
-      .limit(200)
-      .get()
-    return (res.data || []).filter(session => {
-      const arrivedAt = getTimeValue(session.peopleConfirmedAt || session.createTime || session.updateTime)
-      return arrivedAt >= startAt && (!endAt || arrivedAt < endAt)
-    })
-  } catch (err) {
-    console.warn('list confirmed table sessions failed', err)
-    return []
-  }
+  const endAt = getBusinessStatsRangeEnd(range, now, customDate) || now.getTime() + 1
+  return tableArrivalReader.sessions(startAt, endAt)
 }
 
 async function getTableArrivalSnapshot(range = 'today', now = new Date(), customDate = '') {
@@ -3288,9 +3252,9 @@ function getSettlementStoredMixedPayment(orders = []) {
   }
 }
 
-function buildBusinessStatsSnapshot(orders = [], range, jointCheckoutPayments = [], customDate = '') {
-  const startAt = getBusinessStatsRangeStart(range, new Date(), customDate).getTime()
-  const endAt = getBusinessStatsRangeEnd(range, new Date(), customDate)
+function buildBusinessStatsSnapshot(orders = [], range, jointCheckoutPayments = [], customDate = '', interval = null) {
+  const startAt = interval ? interval.startAt : getBusinessStatsRangeStart(range, new Date(), customDate).getTime()
+  const endAt = interval ? interval.endAt : getBusinessStatsRangeEnd(range, new Date(), customDate)
   const groupMap = {}
 
   const combinedSettlementEvents = {}
@@ -3424,6 +3388,18 @@ function buildBusinessStatsSnapshot(orders = [], range, jointCheckoutPayments = 
 
 async function listJointCheckoutPayments(tenantId, intervals) {
   return readBusinessStatsRecords({ collection: 'checkoutPayment', type: 'joint_checkout', tenantId, intervals })
+}
+
+async function adminQueryRevenue(payload) {
+  const revenueQueryService = createRevenueQueryService({ db, _, getTenantId })
+  try {
+    return { success: true, data: await revenueQueryService.query(payload) }
+  } catch (err) {
+    if (String(err.code || '').startsWith('SALES_DATE') || String(err.code || '').startsWith('REVENUE_')) {
+      return { success: false, code: err.code, message: err.message }
+    }
+    throw err
+  }
 }
 
 async function adminGetBusinessStats(payload) {
@@ -6391,12 +6367,6 @@ async function adminClearTable(payload) {
         ['queued', 'printing', 'printed', 'partial_failed'].includes(String(order.kitchenPrintStatus || '')))
     }
     if (payload.preview === true) return { success: true, data: summary }
-    if (payload.confirm !== true || !payload.confirmationToken) {
-      return { success: false, code: 'TABLE_CLEAR_CONFIRM_REQUIRED', message: '请更新小程序并确认清台范围后重试' }
-    }
-    if (payload.confirmationToken !== context.token) {
-      return { success: false, code: 'TABLE_CLEAR_STATE_CHANGED', message: '桌台用餐或订单已变化，请刷新后重新确认清台' }
-    }
     const clearedAt = new Date()
     const audit = {
       tableClearRequestId: context.token,
@@ -12026,6 +11996,7 @@ async function handleAction(action, payload) {
   if (action === 'admin.table.refundDishes') return completeAdminTableMutation(adminRefundDishes(payload))
   if (action === 'admin.table.giftDishes') return completeAdminTableMutation(adminGiftDishes(payload))
   if (action === 'admin.table.updateDish') return completeAdminTableMutation(adminUpdateTableDish(payload))
+  if (action === 'admin.business.revenueQuery') return adminQueryRevenue(payload)
   if (action === 'admin.business.stats') return adminGetBusinessStats(payload)
   if (action === 'admin.business.salesOptions') return salesQueryService.options(payload)
   if (action === 'admin.business.salesQuery') return salesQueryService.query(payload)

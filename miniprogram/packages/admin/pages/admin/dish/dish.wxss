@@ -1622,3 +1622,13 @@ page {
   background: #F1C46B;
   border-color: #F1C46B;
 }
+
+
+.dish-image-canvas {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}

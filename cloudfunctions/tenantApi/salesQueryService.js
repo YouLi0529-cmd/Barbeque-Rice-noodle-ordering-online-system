@@ -36,15 +36,20 @@ function dateStart(value) {
   return utc.getTime() - 8 * 60 * 60 * 1000
 }
 
-function validateFilters(payload) {
+function validateDateRange(payload) {
   const startAt = dateStart(payload.startDate)
   const endStart = dateStart(payload.endDate)
   if (endStart < startAt) fail('SALES_DATE_ORDER', '结束日期不能早于开始日期')
+  return { startAt, endAt: endStart + 24 * 60 * 60 * 1000 }
+}
+
+function validateFilters(payload) {
+  const { startAt, endAt } = validateDateRange(payload)
   const categoryKey = String(payload.categoryKey || '').trim()
   if (!categoryKey || !(categoryKey === GROUP_BUY_KEY || /^(category|legacy):.+/.test(categoryKey)) || categoryKey.length > 300) {
     fail('SALES_CATEGORY_REQUIRED', '请选择查询品类')
   }
-  return { startAt, endAt: endStart + 24 * 60 * 60 * 1000, categoryKey }
+  return { startAt, endAt, categoryKey }
 }
 
 function timeValue(value) {
@@ -381,4 +386,4 @@ function createSalesQueryService({ db, _, getTenantId }) {
   return { options: payload => run('options', payload), query: payload => run('query', payload) }
 }
 
-module.exports = { createSalesQueryService, validateFilters, aggregateOrders, historicalCategory, menuPriceCents, GROUP_BUY_KEY }
+module.exports = { createSalesQueryService, validateDateRange, validateFilters, aggregateOrders, historicalCategory, menuPriceCents, GROUP_BUY_KEY }

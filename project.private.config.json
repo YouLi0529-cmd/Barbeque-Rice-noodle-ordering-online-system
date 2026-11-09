@@ -25,7 +25,7 @@
         {
           "name": "packages/order/pages/index/index",
           "pathName": "packages/order/pages/index/index",
-          "query": "scene=T08",
+          "query": "scene=T11",
           "scene": null,
           "launchMode": "default"
         },

@@ -1,6 +1,7 @@
 const apiClient = require('../../../../../utils/apiClient')
 const adminSound = require('../../../utils/adminSound')
 const salesQuery = require('../../../../../utils/salesQuery')
+const { summarizeRevenue } = require('../../../../../utils/revenueSummary')
 
 const UI = {
   title: '\u8425\u4e1a\u7edf\u8ba1',
@@ -131,6 +132,11 @@ Page({
     allDishes: [],
     dishList: [],
     isTruncated: false,
+    queryMode: 'sales',
+    revenueResultDates: '',
+    revenueResultTotal: '0.00',
+    revenueResultCash: '0.00',
+    revenueResultOnline: '0.00',
     salesView: '',
     salesSelection: '',
     salesCalendarMonth: '',
@@ -170,12 +176,71 @@ Page({
     this.salesOptionsToken = null
   },
 
+  openRevenueQuery() {
+    this.salesOptionsToken = null
+    this.salesRequestToken = null
+    this.setData({ queryMode: 'revenue', salesView: 'filter', salesSelection: '',
+      salesOptionsLoading: false, salesOptionsError: '', salesError: '', salesQuerying: false,
+      salesProgress: '', salesTodayDate: salesQuery.todayBeijing() })
+  },
+
+  async submitRevenueQuery() {
+    if (this.data.salesQuerying) return
+    const message = salesQuery.validateDateRange(this.data.salesStartDate, this.data.salesEndDate)
+    if (message) { wx.showToast({ title: message, icon: 'none' }); return }
+    const filters = { startDate: this.data.salesStartDate, endDate: this.data.salesEndDate }
+    const token = {}
+    this.salesRequestToken = token
+    this.setData({ salesQuerying: true, salesError: '', salesSelection: '', salesProgress: '正在汇总结算收款，请稍候…' })
+    try {
+      let cursor = ''
+      let result
+      const orders = []
+      const payments = []
+      do {
+        const res = await apiClient.call('admin.business.revenueQuery', { ...filters, cursor, protocol: 2 })
+        if (this.salesRequestToken !== token) return
+        result = res.data || {}
+        if (result.protocol === 2) {
+          if (!Array.isArray(result.orders) || !Array.isArray(result.payments) || typeof result.done !== 'boolean') {
+            throw new Error('收款查询返回数据不完整，请重新查询')
+          }
+          orders.push(...result.orders)
+          payments.push(...result.payments)
+        }
+        // A missing done flag supports the previous one-response backend during deployment.
+        if (result.done !== false) break
+        if (!result.cursor || result.cursor === cursor) throw new Error('查询尚未完成，请重新查询')
+        cursor = result.cursor
+        this.setData({ salesProgress: result.phase === 'verify'
+          ? '正在核对结算记录，请稍候…' : `正在汇总，已读取 ${Number(result.scannedOrders || 0)} 条结算记录…` })
+      } while (true)
+      if (result.protocol === 2) {
+        const startAt = Date.parse(`${filters.startDate}T00:00:00+08:00`)
+        const endAt = Date.parse(`${filters.endDate}T00:00:00+08:00`) + 86400000
+        result = summarizeRevenue(orders, payments, { startAt, endAt })
+      }
+      const amounts = [result.totalRevenue, result.cashRevenue, result.onlineRevenue]
+      if (amounts.some(value => typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
+        throw new Error('收款查询返回数据不完整，请重新查询')
+      }
+      this.setData({ salesView: 'result', revenueResultDates: `${filters.startDate} 至 ${filters.endDate}`,
+        revenueResultTotal: amounts[0].toFixed(2), revenueResultCash: amounts[1].toFixed(2),
+        revenueResultOnline: amounts[2].toFixed(2) })
+    } catch (err) {
+      if (this.salesRequestToken !== token) return
+      this.setData({ salesError: err.message || err.errMsg || '营业额查询失败，请重试' })
+    } finally {
+      if (this.salesRequestToken === token) this.setData({ salesQuerying: false, salesProgress: '' })
+    }
+  },
+
   async openSalesQuery() {
     this.salesRequestToken = null
     const token = {}
     this.salesOptionsToken = token
     let categories = salesQuery.mergeCategories([], [])
-    this.setData({ salesView: 'filter', salesSelection: '', salesCategories: categories, salesOptionsLoading: true,
+    this.setData({ queryMode: 'sales', salesView: 'filter', salesSelection: '', salesCategories: categories, salesOptionsLoading: true,
       salesOptionsError: '', salesOptionsScanned: 0, salesError: '', salesQuerying: false, salesProgress: '', salesCategoryIndex: -1, salesTodayDate: salesQuery.todayBeijing() })
     try {
       let cursor = ''
@@ -265,6 +330,7 @@ Page({
   },
 
   async submitSalesQuery() {
+    if (this.data.queryMode === 'revenue') return this.submitRevenueQuery()
     if (this.data.salesQuerying) return
     const message = salesQuery.validateSalesFilters(this.data.salesStartDate, this.data.salesEndDate, this.data.salesCategoryKey)
     if (message) { wx.showToast({ title: message, icon: 'none' }); return }
