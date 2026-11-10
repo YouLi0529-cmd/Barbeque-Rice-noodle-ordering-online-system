@@ -331,6 +331,25 @@ page {
   display: none;
 }
 
+.menu-item.menu-new-arrivals {
+  background: #b85c45;
+}
+
+.menu-item.menu-new-arrivals .menu-name {
+  color: #fff;
+  font-weight: bold;
+}
+
+.menu-item.menu-new-arrivals.active .menu-indicator {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6rpx;
+  background: #e7c587;
+}
+
 /* 右侧菜品列表 */
 .goods-list {
   flex: 1;

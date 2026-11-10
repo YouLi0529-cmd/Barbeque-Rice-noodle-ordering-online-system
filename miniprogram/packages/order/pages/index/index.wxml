@@ -64,7 +64,7 @@
     <!-- 左侧分类菜单 -->
     <scroll-view class="menu-sidebar" scroll-y enable-flex="{{true}}">
       <view 
-        class="menu-item {{currentMenuId === item._id ? 'active' : ''}}" 
+        class="menu-item {{currentMenuId === item._id ? 'active' : ''}} {{item.name === '上新啦' ? 'menu-new-arrivals' : ''}}"
         wx:for="{{menuList}}" 
         wx:key="_id"
         bindtap="switchMenu"
